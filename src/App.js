@@ -348,7 +348,7 @@ function QuizPage({ setPage }) {
   return (
     <div style={{ padding: "1.5rem", maxWidth: 780, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-        <Btn size="sm" variant="ghost" onClick={() => setPage("首页")}>← 返回</Btn>
+        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
         <Card style={{ flex: 1, padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)" }}>第 {current + 1} 题 / 共 {questions.length} 题</div>
@@ -454,7 +454,7 @@ function ReportPage({ setPage }) {
   return (
     <div style={{ padding: "1.5rem", maxWidth: 900, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-        <Btn size="sm" variant="ghost" onClick={() => setPage("首页")}>← 返回</Btn>
+        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
         <div style={{ fontSize: 17, fontWeight: 500, color: "var(--color-text-primary)" }}>学习报告</div>
       </div>
 
@@ -540,7 +540,7 @@ function WrongPage({ setPage }) {
   return (
     <div style={{ padding: "1.5rem", maxWidth: 780, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-        <Btn size="sm" variant="ghost" onClick={() => setPage("首页")}>← 返回</Btn>
+        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
         <div style={{ fontSize: 17, fontWeight: 500, color: "var(--color-text-primary)" }}>错题本</div>
         <Badge color="red">{wrongs.length} 题</Badge>
       </div>
@@ -632,7 +632,7 @@ function TeacherPage({ setPage }) {
   return (
     <div style={{ padding: "1.5rem", maxWidth: 980, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-        <Btn size="sm" variant="ghost" onClick={() => setPage("首页")}>← 返回</Btn>
+        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
         <div style={{ fontSize: 17, fontWeight: 500, color: "var(--color-text-primary)" }}>教师管理</div>
       </div>
 
