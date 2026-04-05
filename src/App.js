@@ -46,6 +46,20 @@ const Alert = ({ msg, type = "error" }) => msg ? (
   <div style={{ padding: "10px 12px", borderRadius: 8, fontSize: 13, marginBottom: 12, background: type === "error" ? G.redLight : G.tealLight, color: type === "error" ? G.red : G.tealDark }}>{msg}</div>
 ) : null;
 
+// ── Sample questions shown before DB has data ─────────────────────────────────
+const SAMPLE_QUESTIONS = [
+  { id: "s1", chapter: "Ch.1", type: "单选题", question: "二分法每迭代一次，有根区间的长度变为原来的：", options: ["1/3", "1/2", "1/4", "不确定"], answer: "B", explanation: "二分法每次将区间对半分，因此区间长度精确缩小为 1/2，这也是它线性收敛的原因。" },
+  { id: "s2", chapter: "Ch.1", type: "单选题", question: "Newton 法的收敛阶为：", options: ["线性收敛 (p=1)", "超线性收敛", "二阶收敛 (p=2)", "不收敛"], answer: "C", explanation: "Newton 法在单根附近具有二阶（平方）收敛性，收敛速度远快于二分法。" },
+  { id: "s3", chapter: "Ch.2", type: "单选题", question: "高斯消去法（Naive Gaussian elimination）的计算复杂度为：", options: ["O(n)", "O(n²)", "O(n³)", "O(2ⁿ)"], answer: "C", explanation: "高斯消去的主要计算量在消元步骤，共约 n³/3 次浮点运算，因此复杂度为 O(n³)。" },
+  { id: "s4", chapter: "Ch.2", type: "判断题", question: "对任意矩阵 A，LU 分解一定存在。", options: null, answer: "错误", explanation: "LU 分解不一定存在。若主元为零（即主元素为0），则需要进行行交换（部分主元法），即 PA=LU 分解。" },
+  { id: "s5", chapter: "Ch.3", type: "单选题", question: "n+1 个节点的 Lagrange 插值多项式的次数最高为：", options: ["n-1", "n", "n+1", "2n"], answer: "B", explanation: "n+1 个节点确定唯一次数不超过 n 的插值多项式，即最高次数为 n。" },
+  { id: "s6", chapter: "Ch.4", type: "单选题", question: "线性最小二乘问题 min‖Ax-b‖₂ 的法方程为：", options: ["Ax = b", "AᵀAx = Aᵀb", "AAᵀx = b", "A²x = b²"], answer: "B", explanation: "对残差的 2-范数平方求导并令其为零，得到法方程 AᵀAx = Aᵀb。" },
+  { id: "s7", chapter: "Ch.5", type: "单选题", question: "Simpson 法则的截断误差阶为：", options: ["O(h²)", "O(h³)", "O(h⁴)", "O(h⁵)"], answer: "C", explanation: "Simpson 法则对次数不超过3的多项式精确，其截断误差为 O(h⁴)，比梯形法（O(h²)）高两阶。" },
+  { id: "s8", chapter: "Ch.6", type: "单选题", question: "Euler 法求解常微分方程的局部截断误差为：", options: ["O(h)", "O(h²)", "O(h³)", "O(h⁴)"], answer: "B", explanation: "Euler 法是一阶方法，局部截断误差为 O(h²)，全局误差为 O(h)。" },
+  { id: "s9", chapter: "最优化 Ch.1", type: "单选题", question: "线性最小二乘模型的特征是：", options: ["目标函数是线性的", "所有参数线性出现在模型函数中", "约束条件是线性的", "残差是线性的"], answer: "B", explanation: "线性最小二乘是指所有待求参数 x₁,x₂,...,xₖ 在模型函数中线性出现，即使 t 的函数是非线性的。" },
+  { id: "s10", chapter: "最优化 Ch.1", type: "单选题", question: "Markowitz 投资组合模型中，σ²_P = xᵀVx 表示：", options: ["期望收益", "投资预算", "投资组合风险（方差）", "证券数量"], answer: "C", explanation: "σ²_P = xᵀVx 是投资组合收益率的方差，用于衡量投资风险水平，V 为协方差矩阵。" },
+];
+
 function AuthPage() {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
@@ -161,7 +175,7 @@ function HomePage({ setPage, profile }) {
         </div>
       </Card>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 12 }}>
-        {[["2", "门课程"], ["19", "章节"], ["340+", "题目"]].map(([n, l]) => (
+        {[["2", "门课程"], ["19", "章节"], [String(SAMPLE_QUESTIONS.length) + "+", "题目"]].map(([n, l]) => (
           <div key={l} style={{ background: "var(--color-background-secondary)", borderRadius: 8, padding: "1rem" }}>
             <div style={{ fontSize: 24, fontWeight: 500, color: "var(--color-text-primary)" }}>{n}</div>
             <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginTop: 2 }}>{l}</div>
@@ -242,55 +256,126 @@ function KnowledgePage({ setPage }) {
   );
 }
 
-function QuizPage() {
+function QuizPage({ setPage }) {
   const [questions, setQuestions] = useState([]);
   const [current, setCurrent] = useState(0);
   const [selected, setSelected] = useState(null);
   const [answered, setAnswered] = useState(false);
   const [showHint, setShowHint] = useState(false);
   const [loading, setLoading] = useState(true);
-  const SAMPLE = { chapter: "Ch.1", type: "单选题", question: "在使用二分法求方程 f(x) = 0 的根时，每迭代一次，有根区间的长度变为原来的：", options: ["1/3", "1/2", "1/4", "不确定，取决于 f(x)"], answer: "B", explanation: "二分法每次将区间从 [a,b] 分成两半，取包含根的那半，因此区间长度每次精确地缩小为 1/2。" };
+  const [score, setScore] = useState(0);
+  const [finished, setFinished] = useState(false);
+
   useEffect(() => {
-    supabase.from("questions").select("*").limit(10).then(({ data }) => {
-      setQuestions(data?.length ? data : [SAMPLE]);
+    supabase.from("questions").select("*").limit(20).then(({ data }) => {
+      setQuestions(data?.length ? data : SAMPLE_QUESTIONS);
       setLoading(false);
     });
   }, []);
-  const q = questions[current] || SAMPLE;
-  const opts = q.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : SAMPLE.options;
+
+  const q = questions[current];
+  const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
   const optLetters = ["A", "B", "C", "D"];
+
+  const handleSubmit = () => {
+    if (selected === null) return;
+    setAnswered(true);
+    if (opts && optLetters[selected] === q.answer) setScore(s => s + 1);
+    if (!opts && selected === 0) setScore(s => s + 1);
+  };
+
+  const handleNext = () => {
+    if (current >= questions.length - 1) { setFinished(true); return; }
+    setCurrent(c => c + 1); setSelected(null); setAnswered(false); setShowHint(false);
+  };
+
   if (loading) return <div style={{ padding: "3rem", textAlign: "center", color: "var(--color-text-secondary)" }}>加载题目中…</div>;
+
+  if (finished) return (
+    <div style={{ padding: "1.5rem", maxWidth: 600, margin: "0 auto" }}>
+      <Card style={{ textAlign: "center", padding: "3rem 2rem" }}>
+        <div style={{ fontSize: 40, marginBottom: 12 }}>🎉</div>
+        <div style={{ fontSize: 20, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 8 }}>练习完成！</div>
+        <div style={{ fontSize: 15, color: "var(--color-text-secondary)", marginBottom: 20 }}>
+          答对 <span style={{ color: G.teal, fontWeight: 500 }}>{score}</span> / {questions.length} 题
+          （正确率 {Math.round(score / questions.length * 100)}%）
+        </div>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <Btn onClick={() => { setCurrent(0); setSelected(null); setAnswered(false); setFinished(false); setScore(0); }}>再练一次</Btn>
+          <Btn variant="primary" onClick={() => setPage("首页")}>返回首页</Btn>
+        </div>
+      </Card>
+    </div>
+  );
+
+  if (!q) return null;
+
   return (
     <div style={{ padding: "1.5rem", maxWidth: 780, margin: "0 auto" }}>
-      <Card style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)" }}>第 {current + 1} 题 / 共 {questions.length} 题</div>
-          <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginTop: 2 }}>{q.chapter} · {q.type}</div>
-          <div style={{ height: 4, background: "var(--color-background-secondary)", borderRadius: 2, marginTop: 8, width: 200 }}>
-            <div style={{ height: 4, background: G.teal, borderRadius: 2, width: `${((current + 1) / questions.length) * 100}%` }} />
+      {/* Header with back button */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
+        <Card style={{ flex: 1, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)" }}>第 {current + 1} 题 / 共 {questions.length} 题</div>
+            <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginTop: 2 }}>{q.chapter} · {q.type}</div>
           </div>
-        </div>
-        <Btn size="sm">🔖 收藏</Btn>
-      </Card>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>得分 {score}/{current}</span>
+            <div style={{ width: 120, height: 4, background: "var(--color-background-secondary)", borderRadius: 2 }}>
+              <div style={{ height: 4, background: G.teal, borderRadius: 2, width: `${((current + 1) / questions.length) * 100}%` }} />
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Question */}
       <Card style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11, color: "var(--color-text-tertiary)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>第 {current + 1} 题 · {q.type}</div>
         <div style={{ fontSize: 15, color: "var(--color-text-primary)", lineHeight: 1.7, marginBottom: 20 }}>{q.question}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {opts.map((opt, i) => {
-            let border = "0.5px solid var(--color-border-tertiary)", bg = "transparent";
-            if (answered) {
-              if (optLetters[i] === q.answer) { bg = G.tealLight; border = `1.5px solid ${G.teal}`; }
-              else if (i === selected && optLetters[i] !== q.answer) { bg = G.redLight; border = `1.5px solid ${G.red}`; }
-            } else if (selected === i) { bg = G.tealLight; border = `1.5px solid ${G.teal}`; }
-            return (
-              <div key={i} onClick={() => !answered && setSelected(i)} style={{ padding: "12px 16px", border, borderRadius: 8, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 12, alignItems: "center" }}>
-                <div style={{ width: 24, height: 24, borderRadius: "50%", border: "0.5px solid var(--color-border-secondary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 500, flexShrink: 0, background: selected === i ? G.teal : "transparent", color: selected === i ? "#fff" : "var(--color-text-secondary)" }}>{optLetters[i]}</div>
-                <span style={{ fontSize: 14, color: "var(--color-text-primary)" }}>{opt}</span>
-              </div>
-            );
-          })}
-        </div>
+
+        {/* Multiple choice */}
+        {opts && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {opts.map((opt, i) => {
+              let border = "0.5px solid var(--color-border-tertiary)", bg = "transparent";
+              if (answered) {
+                if (optLetters[i] === q.answer) { bg = G.tealLight; border = `1.5px solid ${G.teal}`; }
+                else if (i === selected && optLetters[i] !== q.answer) { bg = G.redLight; border = `1.5px solid ${G.red}`; }
+              } else if (selected === i) { bg = G.tealLight; border = `1.5px solid ${G.teal}`; }
+              return (
+                <div key={i} onClick={() => !answered && setSelected(i)} style={{ padding: "12px 16px", border, borderRadius: 8, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 12, alignItems: "center" }}>
+                  <div style={{ width: 24, height: 24, borderRadius: "50%", border: "0.5px solid var(--color-border-secondary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 500, flexShrink: 0, background: selected === i ? G.teal : "transparent", color: selected === i ? "#fff" : "var(--color-text-secondary)" }}>{optLetters[i]}</div>
+                  <span style={{ fontSize: 14, color: "var(--color-text-primary)" }}>{opt}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* True/False */}
+        {!opts && q.type === "判断题" && (
+          <div style={{ display: "flex", gap: 10 }}>
+            {["正确", "错误"].map((opt, i) => {
+              let border = "0.5px solid var(--color-border-tertiary)", bg = "transparent";
+              if (answered) {
+                if (opt === q.answer) { bg = G.tealLight; border = `1.5px solid ${G.teal}`; }
+                else if (i === selected && opt !== q.answer) { bg = G.redLight; border = `1.5px solid ${G.red}`; }
+              } else if (selected === i) { bg = G.tealLight; border = `1.5px solid ${G.teal}`; }
+              return (
+                <div key={i} onClick={() => !answered && setSelected(i)} style={{ flex: 1, padding: "12px 16px", border, borderRadius: 8, cursor: answered ? "default" : "pointer", background: bg, textAlign: "center", fontSize: 14, color: "var(--color-text-primary)", fontWeight: 500 }}>{opt}</div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Fill in blank */}
+        {!opts && q.type === "填空题" && !answered && (
+          <input placeholder="输入你的答案…" style={{ width: "100%", fontSize: 14, padding: "10px 12px", border: "0.5px solid var(--color-border-tertiary)", borderRadius: 8, background: "var(--color-background-primary)", color: "var(--color-text-primary)", fontFamily: "var(--font-sans)", boxSizing: "border-box" }} onChange={e => setSelected(e.target.value ? 0 : null)} />
+        )}
       </Card>
+
+      {/* Hint / Explanation */}
       {(showHint || answered) && (
         <Card style={{ marginBottom: 12, background: "var(--color-background-secondary)", border: "none" }}>
           <div style={{ display: "flex", gap: 10 }}>
@@ -298,27 +383,34 @@ function QuizPage() {
               <span style={{ color: "#fff", fontSize: 10, fontWeight: 700 }}>AI</span>
             </div>
             <div>
-              <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 4 }}>解题提示</div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 4 }}>{answered ? `答案：${q.answer}` : "解题提示"}</div>
               <div style={{ fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>{q.explanation}</div>
             </div>
           </div>
         </Card>
       )}
+
+      {/* Actions */}
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <Btn onClick={() => { setCurrent(c => Math.max(0, c - 1)); setSelected(null); setAnswered(false); setShowHint(false); }}>← 上一题</Btn>
+        <Btn onClick={() => { if (current > 0) { setCurrent(c => c - 1); setSelected(null); setAnswered(false); setShowHint(false); } }}>← 上一题</Btn>
         <div style={{ display: "flex", gap: 8 }}>
           {!answered && <Btn size="sm" onClick={() => setShowHint(v => !v)}>💡 提示</Btn>}
-          {!answered ? <Btn variant="primary" onClick={() => selected !== null && setAnswered(true)}>提交答案</Btn>
-            : <Btn variant="primary" onClick={() => { setCurrent(c => Math.min(questions.length - 1, c + 1)); setSelected(null); setAnswered(false); setShowHint(false); }}>下一题 →</Btn>}
+          {!answered
+            ? <Btn variant="primary" onClick={handleSubmit} disabled={selected === null}>提交答案</Btn>
+            : <Btn variant="primary" onClick={handleNext}>{current >= questions.length - 1 ? "查看结果 →" : "下一题 →"}</Btn>
+          }
         </div>
       </div>
     </div>
   );
 }
 
-function WrongPage() {
+function WrongPage({ setPage }) {
   return (
     <div style={{ padding: "1.5rem", maxWidth: 780, margin: "0 auto" }}>
+      <div style={{ marginBottom: 12 }}>
+        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
+      </div>
       <Card>
         <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 12, color: "var(--color-text-primary)" }}>错题本</div>
         {["Newton法收敛条件", "Lagrange插值误差估计", "LU分解适用条件"].map((q, i) => (
@@ -332,7 +424,7 @@ function WrongPage() {
   );
 }
 
-function TeacherPage() {
+function TeacherPage({ setPage }) {
   const [tab, setTab] = useState("上传教材");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiQuestions, setAiQuestions] = useState([]);
@@ -396,6 +488,9 @@ function TeacherPage() {
 
   return (
     <div style={{ padding: "1.5rem", maxWidth: 960, margin: "0 auto" }}>
+      <div style={{ marginBottom: 12 }}>
+        <Btn size="sm" onClick={() => setPage("首页")}>← 返回首页</Btn>
+      </div>
       <div style={{ display: "flex", borderBottom: "0.5px solid var(--color-border-tertiary)", marginBottom: 16 }}>
         {["上传教材", "AI 出题", "题库管理", "学生进度"].map(t => (
           <button key={t} onClick={() => setTab(t)} style={{ padding: "10px 18px", fontSize: 13, fontFamily: "var(--font-sans)", border: "none", borderBottom: tab === t ? `2px solid ${G.teal}` : "2px solid transparent", background: "none", cursor: "pointer", color: tab === t ? G.teal : "var(--color-text-secondary)", fontWeight: tab === t ? 500 : 400, marginBottom: -0.5 }}>{t}</button>
@@ -404,7 +499,7 @@ function TeacherPage() {
 
       {tab === "上传教材" && (
         <Card>
-          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4, color: "var(--color-text-primary)" }}>上传教材 PDF</div>
+          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>上传教材 PDF</div>
           <div style={{ fontSize: 13, color: "var(--color-text-secondary)", marginBottom: 16 }}>上传教材后，AI 将自动提取知识点并用于生成题目</div>
           <div onDrop={handlePdfDrop} onDragOver={e => e.preventDefault()} onClick={() => pdfRef.current?.click()} style={{ border: "1.5px dashed var(--color-border-secondary)", borderRadius: 12, padding: "2.5rem", textAlign: "center", cursor: "pointer", marginBottom: 16 }}>
             <input ref={pdfRef} type="file" accept=".pdf" multiple style={{ display: "none" }} onChange={handlePdfDrop} />
@@ -415,7 +510,7 @@ function TeacherPage() {
           {uploadedFiles.map((f, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "0.5px solid var(--color-border-tertiary)" }}>
               <span>📄</span>
-              <div style={{ flex: 1 }}><div style={{ fontSize: 13, color: "var(--color-text-primary)" }}>{f.name}</div><div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>{f.size} · {f.date}</div></div>
+              <div style={{ flex: 1 }}><div style={{ fontSize: 13 }}>{f.name}</div><div style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>{f.size} · {f.date}</div></div>
               <Badge color="teal">已上传</Badge>
             </div>
           ))}
@@ -425,7 +520,7 @@ function TeacherPage() {
 
       {tab === "AI 出题" && (
         <Card>
-          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4, color: "var(--color-text-primary)" }}>AI 智能出题</div>
+          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 4 }}>AI 智能出题</div>
           <div style={{ fontSize: 13, color: "var(--color-text-secondary)", marginBottom: 16 }}>基于教材内容，自动生成题目并保存到数据库</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px auto", gap: 8, marginBottom: 16, alignItems: "end" }}>
             <div>
@@ -456,7 +551,7 @@ function TeacherPage() {
                 <Badge color="blue">{aiType}</Badge>
                 <Btn size="sm" variant="primary" onClick={() => saveToDb(q)} disabled={saving}>保存到题库</Btn>
               </div>
-              <div style={{ fontSize: 14, color: "var(--color-text-primary)", marginBottom: 10, lineHeight: 1.6 }}>{q.question}</div>
+              <div style={{ fontSize: 14, marginBottom: 10, lineHeight: 1.6 }}>{q.question}</div>
               {q.options && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 8 }}>
                   {q.options.map((opt, j) => (
@@ -475,13 +570,13 @@ function TeacherPage() {
       {tab === "题库管理" && (
         <Card>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <div style={{ fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)" }}>题库管理 <span style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>共 {dbQuestions.length} 题</span></div>
+            <div style={{ fontSize: 15, fontWeight: 500 }}>题库管理 <span style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>共 {dbQuestions.length} 题</span></div>
           </div>
           {dbQuestions.length === 0 && <div style={{ textAlign: "center", padding: "2rem", color: "var(--color-text-tertiary)", fontSize: 13 }}>暂无题目，请先用 AI 出题</div>}
           {dbQuestions.map((q, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "0.5px solid var(--color-border-tertiary)" }}>
               <Badge color="amber">{q.chapter}</Badge>
-              <div style={{ flex: 1, fontSize: 13, color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.question}</div>
+              <div style={{ flex: 1, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.question}</div>
               <Badge color="blue">{q.type}</Badge>
               <Btn size="sm" onClick={() => deleteQuestion(q.id)}>删除</Btn>
             </div>
@@ -491,11 +586,11 @@ function TeacherPage() {
 
       {tab === "学生进度" && (
         <Card>
-          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 16, color: "var(--color-text-primary)" }}>学生学习进度</div>
+          <div style={{ fontSize: 15, fontWeight: 500, marginBottom: 16 }}>学生学习进度</div>
           {STUDENTS.map((s, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "0.5px solid var(--color-border-tertiary)" }}>
               <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--color-background-secondary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 500 }}>{s.name[0]}</div>
-              <div style={{ flex: 1, fontSize: 13, color: "var(--color-text-primary)" }}>{s.name}</div>
+              <div style={{ flex: 1, fontSize: 13 }}>{s.name}</div>
               <div style={{ width: 120, height: 4, background: "var(--color-background-secondary)", borderRadius: 2 }}>
                 <div style={{ height: 4, borderRadius: 2, background: s.pct >= 80 ? G.teal : s.pct >= 60 ? G.amber : G.red, width: `${s.pct}%` }} />
               </div>
@@ -547,9 +642,9 @@ export default function App() {
   const renderPage = () => {
     if (page === "首页") return <HomePage setPage={setPage} profile={profile} />;
     if (page === "知识点") return <KnowledgePage setPage={setPage} />;
-    if (page === "题库练习") return <QuizPage />;
-    if (page === "错题本") return <WrongPage />;
-    if (page === "教师管理") return <TeacherPage />;
+    if (page === "题库练习") return <QuizPage setPage={setPage} />;
+    if (page === "错题本") return <WrongPage setPage={setPage} />;
+    if (page === "教师管理") return <TeacherPage setPage={setPage} />;
     return null;
   };
 
