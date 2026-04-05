@@ -1,3 +1,4 @@
+REPLACED
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -431,23 +432,16 @@ function TeacherPage() {
   const generateQuestions = async () => {
     setAiLoading(true); setAiError(""); setAiQuestions([]);
     try {
-      const prompt = `你是数学课程出题专家，请为"${aiChapter}"生成${aiCount}道${aiType}。要求紧贴数值分析/最优化课程。请以JSON数组返回，结构：[{"question":"题目","options":["A.选项1","B.选项2","C.选项3","D.选项4"],"answer":"A","explanation":"解析"}]。判断题和填空题options设为null。仅返回JSON。`;
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/generate", {
         method: "POST",
-        headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.REACT_APP_ANTHROPIC_KEY,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chapter: aiChapter, type: aiType, count: aiCount }),
       });
       const data = await res.json();
-      const text = data.content?.map(b => b.text || "").join("") || "";
-      const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
-      setAiQuestions(parsed);
+      if (data.error) throw new Error(data.error);
+      setAiQuestions(data.questions);
     } catch (err) {
-      setAiError("生成失败，请稍后重试。");
+      setAiError("生成失败：" + err.message);
     }
     setAiLoading(false);
   };
