@@ -711,10 +711,11 @@ function KnowledgePage({ setPage, setChapterFilter, sessionAnswers = {} }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {sel.topics.map((t, i) => {
               const hasContent = !!KNOWLEDGE_CONTENT[t];
-              const status = i < 2 ? "done" : i < 3 ? "doing" : "todo";
+              const accuracy = getTopicAccuracy(t, chapterStats);
+              const status = getTopicStatus(t, chapterStats);
               const statusColor = status === "done" ? G.teal : status === "doing" ? G.amber : "#ddd";
               const statusLabel = status === "done" ? "✓ 已完成" : status === "doing" ? "进行中" : "未开始";
-              const statusBg = status === "done" ? G.tealLight : status === "doing" ? G.amberLight : "#f9f9f9";
+              const statusBg = status === "done" ? G.tealLight : status === "doing" ? G.amberLight + "44" : "#f9f9f9";
               return (
                 <div key={i} onClick={() => setOpenTopic(t)} style={{ border: `1.5px solid ${hasContent ? statusColor + "55" : "#eee"}`, borderRadius: 14, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: statusBg, transition: "all .15s" }}>
                   <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
