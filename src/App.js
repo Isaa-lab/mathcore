@@ -1787,6 +1787,8 @@ function TeacherPage({ setPage, profile }) {
   const [uploadedMaterials, setUploadedMaterials] = useState([]);
   const [reviewBusyId, setReviewBusyId] = useState(null);
   const [reviewMsg, setReviewMsg] = useState("");
+  const [seeding, setSeeding] = useState(false);
+  const [seedMsg, setSeedMsg] = useState("");
 
   const refreshMaterials = async () => {
     const { data } = await supabase.from("materials").select("*").order("created_at", { ascending: false });
@@ -1926,6 +1928,39 @@ function TeacherPage({ setPage, profile }) {
   const deleteQuestion = async (id) => {
     await supabase.from("questions").delete().eq("id", id);
     setDbQuestions(prev => prev.filter(q => q.id !== id));
+  };
+  const seedQuestionBank = async () => {
+    setSeeding(true);
+    setSeedMsg("");
+    try {
+      const { data: existing } = await supabase.from("questions").select("question");
+      const exists = new Set((existing || []).map(q => q.question));
+      const rows = ALL_QUESTIONS
+        .filter(q => !exists.has(q.question))
+        .map((q) => ({
+          chapter: q.chapter,
+          course: q.chapter?.startsWith("最优化") ? "最优化" : "数值分析",
+          type: q.type,
+          question: q.question,
+          options: q.options,
+          answer: q.answer,
+          explanation: q.explanation,
+          difficulty: "基础",
+          created_by: profile?.id || null,
+        }));
+      if (rows.length === 0) {
+        setSeedMsg("当前数据库已包含基础题库，无需重复导入。");
+      } else {
+        const { error } = await supabase.from("questions").insert(rows);
+        if (error) throw error;
+        setSeedMsg(`导入完成：新增 ${rows.length} 道基础题目。`);
+      }
+      const { data } = await supabase.from("questions").select("*").order("created_at", { ascending: false });
+      if (data) setDbQuestions(data);
+    } catch (err) {
+      setSeedMsg("导入失败：" + (err?.message || "未知错误"));
+    }
+    setSeeding(false);
   };
 
   const STUDENTS = [
@@ -2088,8 +2123,12 @@ function TeacherPage({ setPage, profile }) {
         <div style={{ ...s.card }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18, paddingBottom: 14, borderBottom: "1px solid #f0f0f0" }}>
             <div style={{ fontSize: 18, fontWeight: 700 }}>题库管理</div>
-            <Badge color="blue">共 {dbQuestions.length} 题</Badge>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <Badge color="blue">共 {dbQuestions.length} 题</Badge>
+              <Btn size="sm" variant="primary" onClick={seedQuestionBank} disabled={seeding}>{seeding ? "导入中…" : "一键导入基础题库"}</Btn>
+            </div>
           </div>
+          {seedMsg && <div style={{ padding: "10px 12px", borderRadius: 10, background: G.tealLight, color: G.tealDark, marginBottom: 12, fontSize: 14 }}>{seedMsg}</div>}
           {dbQuestions.length === 0 && <div style={{ textAlign: "center", padding: "3rem", color: "#aaa", fontSize: 16 }}>📝 暂无题目，请先用 AI 出题</div>}
           {dbQuestions.map((q, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 0", borderBottom: "1px solid #f5f5f5" }}>
