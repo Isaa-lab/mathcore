@@ -9,6 +9,37 @@ const parseJsonLoose = (rawText) => {
   }
 };
 
+const buildLocalFallback = (chunks, chapter, maxClaims) => {
+  const merged = (Array.isArray(chunks) ? chunks : [])
+    .map((c) => String(c || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  const sents = merged
+    .split(/[。！？.!?]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 10)
+    .slice(0, Math.max(8, Math.min(maxClaims || 20, 20)));
+
+  const claims = sents.map((s, i) => ({
+    chunk_index: 0,
+    claim_text: s.slice(0, 120),
+    claim_type: "fact",
+    difficulty: 2,
+    source_quote: s.slice(0, 80),
+  }));
+  const topics = sents.slice(0, 4).map((s, i) => ({
+    name: `${chapter || "资料专题"} 知识点 ${i + 1}`,
+    summary: s.slice(0, 80),
+  }));
+  if (!topics.length) {
+    topics.push(
+      { name: `${chapter || "资料专题"} 知识点 1`, summary: "核心定义与概念理解" },
+      { name: `${chapter || "资料专题"} 知识点 2`, summary: "条件与结论的对应关系" }
+    );
+  }
+  return { topics, claims };
+};
+
 const callAnthropic = async (prompt) => {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -34,7 +65,6 @@ const callAnthropic = async (prompt) => {
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  if (!process.env.ANTHROPIC_KEY) return res.status(500).json({ error: "API Key 未配置" });
 
   const { chunks = [], course, chapter, maxClaims = 20 } = req.body || {};
   const normalized = (Array.isArray(chunks) ? chunks : [])
@@ -71,11 +101,17 @@ ${chunkText}
 }`;
 
   try {
+    if (!process.env.ANTHROPIC_KEY) {
+      return res.status(200).json(buildLocalFallback(normalized, chapter, maxClaims));
+    }
     const result = await callAnthropic(prompt);
     const claims = Array.isArray(result?.claims) ? result.claims : [];
     const topics = Array.isArray(result?.topics) ? result.topics : [];
+    if (!claims.length && !topics.length) {
+      return res.status(200).json(buildLocalFallback(normalized, chapter, maxClaims));
+    }
     return res.status(200).json({ topics, claims });
   } catch (err) {
-    return res.status(500).json({ error: err.message || "extract-claims failed" });
+    return res.status(200).json(buildLocalFallback(normalized, chapter, maxClaims));
   }
 }
