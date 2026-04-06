@@ -1122,7 +1122,39 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [finished, setFinished] = useState(false);
   const [timer, setTimer] = useState(0);
   const [materialFilterFallback, setMaterialFilterFallback] = useState(false);
+  const [materialGenerating, setMaterialGenerating] = useState(false);
+  const [materialGenerateMsg, setMaterialGenerateMsg] = useState("");
+  const autoGenTriedRef = useRef(false);
   const timerRef = useRef(null);
+
+  const tryGenerateQuestionsForMaterial = async (mid) => {
+    if (!mid) return { ok: false, inserted: 0 };
+    setMaterialGenerating(true);
+    setMaterialGenerateMsg("正在为该资料生成题目…");
+    try {
+      const { data: material, error: matErr } = await supabase
+        .from("materials")
+        .select("id,title,course,chapter,description,file_name,file_data")
+        .eq("id", mid)
+        .single();
+      if (matErr || !material) throw new Error(matErr?.message || "未找到资料");
+      const result = await processMaterialWithAI({
+        material,
+        file: null,
+        fallbackText: `${material.title || ""} ${material.description || ""}`,
+        genCount: 8,
+        actorName: "系统自动补题",
+      });
+      const inserted = result?.insertedCount ?? result?.questions?.length ?? 0;
+      setMaterialGenerateMsg(inserted > 0 ? `已为该资料补充 ${inserted} 道题。` : "补题完成，但未新增题目。");
+      return { ok: inserted > 0, inserted };
+    } catch (e) {
+      setMaterialGenerateMsg("补题失败：" + (e?.message || "未知错误"));
+      return { ok: false, inserted: 0 };
+    } finally {
+      setMaterialGenerating(false);
+    }
+  };
 
   useEffect(() => {
     const loadQuestions = async () => {
@@ -1152,6 +1184,19 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       if (initialQuestion && !materialId) {
         const rest = pool.filter(q => q.id !== initialQuestion.id).sort(() => Math.random() - 0.5);
         pool = [initialQuestion, ...rest];
+      }
+      if (materialId && pool.length === 0 && !autoGenTriedRef.current) {
+        autoGenTriedRef.current = true;
+        const regen = await tryGenerateQuestionsForMaterial(materialId);
+        if (regen.ok) {
+          // Re-query once after generation
+          const retry = await supabase.from("questions").select("*").eq("material_id", materialId);
+          pool = retry.data || [];
+          if (pool.length === 0 && materialFilterFallback) {
+            const fallbackRetry = await supabase.from("questions").select("*").order("created_at", { ascending: false }).limit(80);
+            pool = fallbackRetry.data || [];
+          }
+        }
       }
       setAllQuestions(pool.sort(() => Math.random() - 0.5));
       setLoading(false);
@@ -1254,6 +1299,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             检测到数据库缺少 `questions.material_id`，当前使用“全题库回退模式”。执行 SQL 补齐后可按资料精准出题。
           </div>
         )}
+        {materialId && materialGenerateMsg && (
+          <div style={{ marginBottom: 14, padding: "10px 12px", borderRadius: 10, background: G.blueLight, color: G.blue, fontSize: 13 }}>
+            {materialGenerateMsg}
+          </div>
+        )}
 
         {/* Quick start */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 24 }}>
@@ -1315,7 +1365,22 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             <div style={{ fontSize: 32, marginBottom: 10 }}>📭</div>
             <div style={{ fontSize: 16, fontWeight: 600, color: G.amber, marginBottom: 6 }}>该资料暂无关联题目</div>
             <div style={{ fontSize: 14, color: "#888", marginBottom: 16 }}>此资料上传时未自动生成题目，或题目数量为 0</div>
-            <button onClick={() => setPage("上传资料")} style={{ padding: "10px 22px", background: G.amber, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>重新上传并出题 →</button>
+            <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
+              <button
+                onClick={async () => {
+                  const regen = await tryGenerateQuestionsForMaterial(materialId);
+                  if (regen.ok) {
+                    const retry = await supabase.from("questions").select("*").eq("material_id", materialId);
+                    setAllQuestions((retry.data || []).sort(() => Math.random() - 0.5));
+                  }
+                }}
+                disabled={materialGenerating}
+                style={{ padding: "10px 22px", background: G.teal, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}
+              >
+                {materialGenerating ? "正在补题…" : "一键补题"}
+              </button>
+              <button onClick={() => setPage("上传资料")} style={{ padding: "10px 22px", background: G.amber, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>重新上传并出题 →</button>
+            </div>
           </div>
         ) : (
           <button disabled={previewPool.length === 0} onClick={() => startQuiz(selectedChapters, selectedTypes, quizCount)} style={{ width: "100%", padding: "14px 0", fontSize: 16, fontWeight: 700, fontFamily: "inherit", background: previewPool.length === 0 ? "#ccc" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: previewPool.length === 0 ? "not-allowed" : "pointer" }}>
