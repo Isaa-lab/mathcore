@@ -101,19 +101,7 @@ const buildFallbackQuestions = (text, chapter, count = 6) => {
       });
     }
   }
-  // Ensure at least count questions, even when extracted text is too short.
-  while (qs.length < count) {
-    const idx = qs.length + 1;
-    qs.push({
-      question: `关于本资料内容的第 ${idx} 个理解点，以下判断是否正确？`,
-      options: null,
-      answer: "正确",
-      explanation: "请结合资料原文和课堂笔记复核该结论，并关注定义、条件与适用范围。",
-      type: "判断题",
-      chapter: chapter || "资料专题",
-    });
-  }
-  return qs;
+  return qs.slice(0, count);
 };
 
 const buildFallbackTopics = (text, chapter, count = 4) => {
@@ -164,6 +152,52 @@ const extractMaterialText = async (file) => {
     return (t || "").slice(0, 12000);
   } catch (e) {
     return "";
+  }
+};
+
+const isLowQualityQuestion = (q) => {
+  const text = String(q?.question || "");
+  const exp = String(q?.explanation || "");
+  if (!text || text.length < 10) return true;
+  if (/第\s*\d+\s*个理解点/.test(text)) return true;
+  if (/请结合资料原文和课堂笔记/.test(exp)) return true;
+  return false;
+};
+
+const fetchChapterSupplementQuestions = async (chapter, count) => {
+  if (!count || count <= 0) return [];
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chapter: chapter || "资料专题", type: "单选题", count }),
+    });
+    const data = await res.json();
+    if (data?.error) return [];
+    return Array.isArray(data?.questions) ? data.questions : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+const fetchFileAsBrowserFile = async (url, fallbackName = "material.pdf") => {
+  if (!url) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    const ext = getFileExt(fallbackName) || ".pdf";
+    const mimeByExt = {
+      ".pdf": "application/pdf",
+      ".doc": "application/msword",
+      ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ".ppt": "application/vnd.ms-powerpoint",
+      ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    };
+    const file = new File([blob], fallbackName, { type: mimeByExt[ext] || blob.type || "application/octet-stream" });
+    return file;
+  } catch (e) {
+    return null;
   }
 };
 
@@ -239,8 +273,20 @@ const processMaterialWithAI = async ({
     if (result?.error) throw new Error(result.error);
     let topics = Array.isArray(result?.topics) ? result.topics : [];
     let questions = Array.isArray(result?.questions) ? result.questions : [];
+    questions = questions.filter((q) => !isLowQualityQuestion(q));
     if (topics.length === 0) topics = buildFallbackTopics(text, material?.chapter, 4);
     if (questions.length === 0) questions = buildFallbackQuestions(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter || material?.course, genCount);
+    if (questions.length < Math.min(genCount, 5)) {
+      const supplement = await fetchChapterSupplementQuestions(material?.chapter || material?.course, Math.min(genCount - questions.length, 5));
+      const merged = [...questions, ...supplement];
+      const seen = new Set();
+      questions = merged.filter((q) => {
+        const key = String(q?.question || "").trim();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return !isLowQualityQuestion(q);
+      }).slice(0, genCount);
+    }
 
     if (chunks.length > 0) {
       try {
@@ -281,7 +327,11 @@ const processMaterialWithAI = async ({
   } catch (err) {
     // Hard fallback: AI failure still guarantees question availability.
     const topics = buildFallbackTopics(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter, 4);
-    const questions = buildFallbackQuestions(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter || material?.course, genCount);
+    let questions = buildFallbackQuestions(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter || material?.course, genCount);
+    if (questions.length < Math.min(genCount, 5)) {
+      const supplement = await fetchChapterSupplementQuestions(material?.chapter || material?.course, Math.min(genCount - questions.length, 5));
+      questions = [...questions, ...supplement].filter((q) => !isLowQualityQuestion(q)).slice(0, genCount);
+    }
     try {
       if (chunks.length > 0) {
         await supabase.from("material_chunks").delete().eq("material_id", materialId);
@@ -1138,9 +1188,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         .eq("id", mid)
         .single();
       if (matErr || !material) throw new Error(matErr?.message || "未找到资料");
+      const fetchedFile = material?.file_data ? await fetchFileAsBrowserFile(material.file_data, material.file_name || "material.pdf") : null;
       const result = await processMaterialWithAI({
         material,
-        file: null,
+        file: fetchedFile,
         fallbackText: `${material.title || ""} ${material.description || ""}`,
         genCount: 8,
         actorName: "系统自动补题",
