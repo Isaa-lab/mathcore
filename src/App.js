@@ -259,6 +259,33 @@ const buildTopicsFromClaims = (claims = [], chapter = null) => {
   }));
 };
 
+const normalizeOutline = (outlineRaw = [], defaultSection = "资料大纲") => {
+  const sections = (Array.isArray(outlineRaw) ? outlineRaw : [])
+    .map((s) => ({
+      title: String(s?.title || "").trim() || defaultSection,
+      summary: String(s?.summary || "").trim(),
+      topics: (Array.isArray(s?.topics) ? s.topics : [])
+        .map((t) => String(t || "").trim())
+        .filter((t) => t.length >= 2)
+        .slice(0, 8),
+    }))
+    .filter((s) => s.topics.length > 0)
+    .slice(0, 6);
+  return sections;
+};
+
+const flattenOutlineTopics = (sections = []) => {
+  const out = [];
+  sections.forEach((s) => {
+    (s.topics || []).forEach((t) => out.push({
+      name: t,
+      chapter: s.title,
+      summary: s.summary || "",
+    }));
+  });
+  return out.slice(0, 24);
+};
+
 const ensurePdfJs = async () => {
   if (window.pdfjsLib) return;
   await new Promise((res, rej) => {
@@ -442,7 +469,24 @@ const processMaterialWithAI = async ({
   };
   try {
     let topics = [];
+    let outlineSections = [];
     let claims = [];
+    if (fallbackChunks.length > 0) {
+      try {
+        const outlineRes = await withTimeout(fetch("/api/extract-outline", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chunks: fallbackChunks,
+            course: material?.course || "数学",
+            chapter: material?.chapter || "未知章节",
+          }),
+        }), 10000);
+        const outlineData = await outlineRes.json();
+        outlineSections = normalizeOutline(outlineData?.outline || [], material?.chapter || "资料大纲");
+        if (outlineSections.length > 0) topics = flattenOutlineTopics(outlineSections);
+      } catch (e) {}
+    }
     if (fallbackChunks.length > 0) {
       const claimRes = await withTimeout(fetch("/api/extract-claims", {
         method: "POST",
@@ -456,7 +500,7 @@ const processMaterialWithAI = async ({
       }), 12000);
       const claimResult = await claimRes.json();
       if (!claimResult?.error) {
-        topics = Array.isArray(claimResult?.topics) ? claimResult.topics : [];
+        if (topics.length === 0) topics = Array.isArray(claimResult?.topics) ? claimResult.topics : [];
         claims = Array.isArray(claimResult?.claims) ? claimResult.claims : [];
       }
     }
@@ -473,18 +517,46 @@ const processMaterialWithAI = async ({
 
     let questions = [];
     if (claims.length > 0) {
-      const genRes = await withTimeout(fetch("/api/generate-from-claims", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          claims,
-          course: material?.course || "数学",
-          chapter: material?.chapter || "未知章节",
-          count: genCount,
-        }),
-      }), 12000);
-      const genResult = await genRes.json();
-      if (!genResult?.error) questions = Array.isArray(genResult?.questions) ? genResult.questions : [];
+      if (topics.length > 0) {
+        const perTopic = Math.max(1, Math.floor(genCount / Math.min(topics.length, 6)));
+        const selectedTopics = topics.slice(0, Math.min(topics.length, 6));
+        for (const t of selectedTopics) {
+          const topicClaims = claims.filter((c) => {
+            const claimText = String(c?.claim_text || "");
+            return claimText.includes(t.name) || t.name.includes(claimText.slice(0, 8));
+          });
+          const claimsForGen = topicClaims.length > 0 ? topicClaims : claims.slice(0, 10);
+          const genRes = await withTimeout(fetch("/api/generate-from-claims", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              claims: claimsForGen,
+              course: material?.course || "数学",
+              chapter: t.name,
+              count: perTopic,
+            }),
+          }), 10000);
+          const genResult = await genRes.json();
+          if (!genResult?.error && Array.isArray(genResult?.questions)) {
+            const tagged = genResult.questions.map((q) => ({ ...q, chapter: t.name }));
+            questions = [...questions, ...tagged];
+          }
+          if (questions.length >= genCount) break;
+        }
+      } else {
+        const genRes = await withTimeout(fetch("/api/generate-from-claims", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            claims,
+            course: material?.course || "数学",
+            chapter: material?.chapter || "未知章节",
+            count: genCount,
+          }),
+        }), 12000);
+        const genResult = await genRes.json();
+        if (!genResult?.error) questions = Array.isArray(genResult?.questions) ? genResult.questions : [];
+      }
     }
     questions = questions.filter((q) => !isLowQualityQuestion(q));
     if (questions.length < Math.min(genCount, 4) && text.length > 30) {
@@ -521,6 +593,7 @@ const processMaterialWithAI = async ({
       return true;
     }).slice(0, genCount);
     if (questions.length === 0) questions = buildMinimalChapterQuestions(chapterKey, Math.min(genCount, 4));
+    questions = questions.slice(0, genCount);
 
     if (chunks.length > 0) {
       try {
@@ -544,7 +617,7 @@ const processMaterialWithAI = async ({
             material_id: materialId,
             name: topicName,
             summary: t?.summary || "",
-            chapter: material?.chapter || null,
+            chapter: t?.chapter || material?.chapter || null,
             viz_key: vizKey,
             example_question: null,
             solution_hint: null,
@@ -1349,11 +1422,15 @@ function KnowledgePage({ setPage, setChapterFilter, sessionAnswers = {} }) {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {aiTopics.filter(t => (t.chapter || "").startsWith(sel.num) || (t.chapter || "") === sel.name).slice(0, 6).map((t) => (
+            {(aiTopics.filter(t => (t.chapter || "").startsWith(sel.num) || (t.chapter || "") === sel.name).length > 0
+              ? aiTopics.filter(t => (t.chapter || "").startsWith(sel.num) || (t.chapter || "") === sel.name)
+              : aiTopics.slice(0, 6)
+            ).slice(0, 6).map((t) => (
               <div key={t.id} style={{ border: "1.5px solid " + G.purple + "33", borderRadius: 14, padding: "14px 16px", background: "#fcfbff" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
                   <div>
                     <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>{t.name}</div>
+                    {t.chapter ? <div style={{ fontSize: 12, color: "#999", marginTop: 2 }}>大纲：{t.chapter}</div> : null}
                     <div style={{ fontSize: 13, color: "#666", marginTop: 4, lineHeight: 1.6 }}>{t.summary || "暂无简介"}</div>
                   </div>
                   <Badge color="purple">AI提取</Badge>
