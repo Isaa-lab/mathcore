@@ -16,6 +16,183 @@ const G = {
   purple: "#534AB7", purpleLight: "#EEEDFE",
 };
 
+const MATERIAL_ALLOWED_EXTS = [".pdf", ".ppt", ".pptx", ".doc", ".docx"];
+
+const getFileExt = (name = "") => {
+  const idx = name.lastIndexOf(".");
+  return idx >= 0 ? name.slice(idx).toLowerCase() : "";
+};
+
+const splitTextIntoChunks = (text, maxLen = 700) => {
+  const raw = String(text || "").replace(/\s+/g, " ").trim();
+  if (!raw) return [];
+  const sents = raw.split(/[。！？.!?]/).map(s => s.trim()).filter(Boolean);
+  const out = [];
+  let cur = "";
+  sents.forEach((s) => {
+    if (!cur) {
+      cur = s;
+      return;
+    }
+    if ((cur.length + s.length + 1) <= maxLen) cur += " " + s;
+    else {
+      out.push(cur);
+      cur = s;
+    }
+  });
+  if (cur) out.push(cur);
+  return out.slice(0, 30);
+};
+
+const ensurePdfJs = async () => {
+  if (window.pdfjsLib) return;
+  await new Promise((res, rej) => {
+    const sc = document.createElement("script");
+    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    sc.onload = res;
+    sc.onerror = rej;
+    document.head.appendChild(sc);
+  });
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+};
+
+const extractMaterialText = async (file) => {
+  if (!file) return "";
+  const ext = getFileExt(file.name);
+  if (ext === ".pdf") {
+    try {
+      await ensurePdfJs();
+      const buf = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+      let text = "";
+      for (let i = 1; i <= Math.min(pdf.numPages, 20); i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        text += content.items.map(item => item.str).join(" ") + " ";
+      }
+      return text.trim();
+    } catch (e) {
+      return "";
+    }
+  }
+  try {
+    // DOCX/PPTX fallback extraction (best effort for MVP)
+    const t = await file.text();
+    return (t || "").slice(0, 12000);
+  } catch (e) {
+    return "";
+  }
+};
+
+const processMaterialWithAI = async ({
+  material,
+  file,
+  fallbackText = "",
+  genCount = 6,
+  actorName = "用户",
+}) => {
+  const materialId = material?.id;
+  if (!materialId) return { topics: [], questions: [], chunks: [] };
+  const ext = getFileExt(material?.file_name || file?.name || "");
+  const fromFile = file ? await extractMaterialText(file) : "";
+  const text = (fromFile || fallbackText || `${material?.title || ""} ${material?.description || ""}`).slice(0, 30000);
+  const chunks = splitTextIntoChunks(text, 650);
+
+  const startJob = async () => {
+    try {
+      await supabase.from("material_parse_jobs").insert({
+        material_id: materialId,
+        status: "processing",
+        source_type: "auto",
+        started_at: new Date().toISOString(),
+      });
+    } catch (e) {}
+  };
+  const finishJob = async (ok, errText = "") => {
+    try {
+      await supabase.from("material_parse_jobs").insert({
+        material_id: materialId,
+        status: ok ? "success" : "failed",
+        source_type: "auto",
+        finished_at: new Date().toISOString(),
+        error_message: errText || null,
+      });
+    } catch (e) {}
+  };
+
+  await startJob();
+  try {
+    const res = await fetch("/api/extract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: text || `${material?.title || ""} ${material?.description || ""}`,
+        course: material?.course || "数学",
+        chapter: material?.chapter || "未知章节",
+        count: genCount,
+      }),
+    });
+    const result = await res.json();
+    if (result?.error) throw new Error(result.error);
+    const topics = Array.isArray(result?.topics) ? result.topics : [];
+    const questions = Array.isArray(result?.questions) ? result.questions : [];
+
+    if (chunks.length > 0) {
+      try {
+        await supabase.from("material_chunks").delete().eq("material_id", materialId);
+        await supabase.from("material_chunks").insert(chunks.map((c, idx) => ({
+          material_id: materialId,
+          chunk_index: idx,
+          chunk_text: c,
+          token_estimate: Math.round(c.length / 2),
+        })));
+      } catch (e) {}
+    }
+
+    if (topics.length > 0) {
+      try {
+        await supabase.from("material_topics").delete().eq("material_id", materialId);
+        const topicRows = topics.map((t) => {
+          const topicName = t?.name || "未命名知识点";
+          const vizKey = Object.keys(VIZ_MAP).find(k => topicName.includes(k) || k.includes(topicName)) || null;
+          return {
+            material_id: materialId,
+            name: topicName,
+            summary: t?.summary || "",
+            chapter: material?.chapter || null,
+            viz_key: vizKey,
+            example_question: null,
+            solution_hint: null,
+          };
+        });
+        await supabase.from("material_topics").insert(topicRows);
+      } catch (e) {}
+    }
+
+    if (questions.length > 0) {
+      try {
+        const qs = questions.map((q) => ({
+          chapter: material?.chapter || material?.course || "资料专题",
+          course: material?.course || "数学",
+          type: "单选题",
+          question: q.question,
+          options: q.options || null,
+          answer: q.answer || "A",
+          explanation: q.explanation || "",
+          material_id: materialId,
+        }));
+        await supabase.from("questions").insert(qs);
+      } catch (e) {}
+    }
+
+    await finishJob(true);
+    return { topics, questions, chunks, ext, actorName };
+  } catch (err) {
+    await finishJob(false, err?.message || "unknown");
+    throw err;
+  }
+};
+
 // ── KaTeX ─────────────────────────────────────────────────────────────────────
 const M = ({ tex, block = false }) => {
   const ref = useRef();
@@ -585,8 +762,8 @@ function AuthPage() {
 // ── Nav ───────────────────────────────────────────────────────────────────────
 function TopNav({ page, setPage, profile, onLogout }) {
   const links = profile?.role === "teacher"
-    ? ["首页", "资料库", "上传资料", "知识点", "题库练习", "记忆卡片", "学习报告", "错题本", "教师管理"]
-    : ["首页", "资料库", "上传资料", "知识点", "题库练习", "记忆卡片", "学习报告", "错题本"];
+    ? ["首页", "资料库", "上传资料", "资料对话", "知识点", "题库练习", "记忆卡片", "学习报告", "错题本", "教师管理"]
+    : ["首页", "资料库", "上传资料", "资料对话", "知识点", "题库练习", "记忆卡片", "学习报告", "错题本"];
   return (
     <div style={{ background: "#fff", borderBottom: "1px solid #f0f0f0", padding: "0 2rem", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 12px rgba(0,0,0,0.04)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -668,8 +845,38 @@ function KnowledgePage({ setPage, setChapterFilter, sessionAnswers = {} }) {
   const [sel, setSel] = useState(CHAPTERS[0]);
   const [filter, setFilter] = useState("全部");
   const [openTopic, setOpenTopic] = useState(null);
+  const [aiTopics, setAiTopics] = useState([]);
+  const [topicMastery, setTopicMastery] = useState({});
   const chapterStats = getChapterStats(sessionAnswers);
   const filtered = filter === "全部" ? CHAPTERS : CHAPTERS.filter(c => c.course === filter);
+
+  useEffect(() => {
+    supabase.from("material_topics").select("*").order("created_at", { ascending: false }).limit(80).then(({ data }) => {
+      setAiTopics(data || []);
+    });
+    supabase.auth.getUser().then(async ({ data }) => {
+      const uid = data?.user?.id;
+      if (!uid) return;
+      try {
+        const { data: mdata } = await supabase.from("topic_mastery").select("topic_id,status,correct_count,wrong_count").eq("user_id", uid);
+        const map = {};
+        (mdata || []).forEach(r => { map[r.topic_id] = r; });
+        setTopicMastery(map);
+      } catch (e) {}
+    });
+  }, []);
+
+  const markTopicMastery = async (topic, status) => {
+    const uid = (await supabase.auth.getUser())?.data?.user?.id;
+    if (!uid || !topic?.id) return;
+    await supabase.from("topic_mastery").upsert({
+      user_id: uid,
+      topic_id: topic.id,
+      status,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id,topic_id" });
+    setTopicMastery(prev => ({ ...prev, [topic.id]: { ...(prev[topic.id] || {}), status } }));
+  };
   return (
     <>
       {openTopic && <TopicModal topic={openTopic} onClose={() => setOpenTopic(null)} setPage={setPage} setChapterFilter={setChapterFilter} />}
@@ -719,6 +926,25 @@ function KnowledgePage({ setPage, setChapterFilter, sessionAnswers = {} }) {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {aiTopics.filter(t => (t.chapter || "").startsWith(sel.num) || (t.chapter || "") === sel.name).slice(0, 6).map((t) => (
+              <div key={t.id} style={{ border: "1.5px solid " + G.purple + "33", borderRadius: 14, padding: "14px 16px", background: "#fcfbff" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>{t.name}</div>
+                    <div style={{ fontSize: 13, color: "#666", marginTop: 4, lineHeight: 1.6 }}>{t.summary || "暂无简介"}</div>
+                  </div>
+                  <Badge color="purple">AI提取</Badge>
+                </div>
+                {t.viz_key && VIZ_MAP[t.viz_key] && <div style={{ margin: "8px 0 12px" }}>{VIZ_MAP[t.viz_key]}</div>}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Btn size="sm" onClick={() => markTopicMastery(t, "doing")}>学习中</Btn>
+                  <Btn size="sm" variant="primary" onClick={() => markTopicMastery(t, "done")}>标记已掌握</Btn>
+                  <Badge color={(topicMastery[t.id]?.status || "todo") === "done" ? "teal" : (topicMastery[t.id]?.status || "todo") === "doing" ? "amber" : "red"}>
+                    {(topicMastery[t.id]?.status || "todo") === "done" ? "已掌握" : (topicMastery[t.id]?.status || "todo") === "doing" ? "学习中" : "未开始"}
+                  </Badge>
+                </div>
+              </div>
+            ))}
             {sel.topics.map((t, i) => {
               const hasContent = !!KNOWLEDGE_CONTENT[t];
               const accuracy = getTopicAccuracy(t, chapterStats);
@@ -850,7 +1076,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       : (selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误");
     if (correct) setScore(s => s + 1);
     else setWrongList(w => [...w, q]);
-    if (onAnswer && q) onAnswer(q.id || q.question, correct, q.chapter || "Unknown");
+    if (onAnswer && q) onAnswer(q.id || q.question, correct, q.chapter || "Unknown", q);
   };
 
   const handleNext = () => {
@@ -1244,7 +1470,6 @@ function ReportPage({ setPage }) {
 // ── Upload Page ─────────────────────────────────────────────────────────────
 function UploadPage({ setPage, profile }) {
   const DEFAULT_UPLOAD_COURSES = ["数值分析", "最优化方法", "高等数学", "线性代数"];
-  const ALLOWED_EXTS = [".pdf", ".ppt", ".pptx", ".doc", ".docx"];
   const [title, setTitle] = useState("");
   const [course, setCourse] = useState("数值分析");
   const [customCourse, setCustomCourse] = useState("");
@@ -1279,7 +1504,7 @@ function UploadPage({ setPage, profile }) {
     if (!title.trim()) { setError("请填写资料名称"); return; }
     if (!file) { setError("请选择 PDF / PPT / DOC 文件"); return; }
     const ext = getExt(file.name);
-    if (!ALLOWED_EXTS.includes(ext)) {
+    if (!MATERIAL_ALLOWED_EXTS.includes(ext)) {
       setError("仅支持 PDF / PPT / DOC 文件（.pdf .ppt .pptx .doc .docx）");
       return;
     }
@@ -1313,18 +1538,34 @@ function UploadPage({ setPage, profile }) {
         uploaded_by: profile?.id || null,
       };
       const statusValue = profile?.role === "teacher" ? "approved" : "pending";
-      let { error: dbErr } = await supabase.from("materials").insert({
+      let { data: insertedMaterial, error: dbErr } = await supabase.from("materials").insert({
         ...basePayload,
         status: statusValue,
-      });
+      }).select().single();
       // Backward compatible: older schema may not have status column yet.
       if (dbErr && /column .*status.* does not exist/i.test(dbErr.message || "")) {
-        const retry = await supabase.from("materials").insert(basePayload);
+        const retry = await supabase.from("materials").insert(basePayload).select().single();
         dbErr = retry.error;
+        insertedMaterial = retry.data || null;
       }
       if (dbErr) throw new Error(dbErr.message + (dbErr.code ? ` (code: ${dbErr.code})` : ""));
-
-      setSuccess(profile?.role === "teacher" ? "上传成功！资料已发布到资料库。" : "上传成功！资料已提交，等待教师审核后发布。");
+      if (insertedMaterial && statusValue === "approved") {
+        setStep("解析资料并生成知识点与题目…");
+        try {
+          const result = await processMaterialWithAI({
+            material: insertedMaterial,
+            file,
+            fallbackText: `${title} ${desc}`,
+            genCount: 6,
+            actorName: profile?.name || "用户",
+          });
+          setSuccess(`上传成功！已提取 ${result.topics.length} 个知识点，并生成 ${result.questions.length} 道题目。`);
+        } catch (e) {
+          setSuccess("上传成功！资料已发布，AI 解析稍后可在教师端重试。");
+        }
+      } else {
+        setSuccess(profile?.role === "teacher" ? "上传成功！资料已发布到资料库。" : "上传成功！资料已提交，等待教师审核后发布。");
+      }
       setTitle(""); setDesc(""); setFile(null); setChapter("全部");
     } catch (e) {
       setError("上传失败：" + buildUploadError(e));
@@ -1505,7 +1746,53 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
   const [drillMode, setDrillMode] = useState(false);
   const [drillStart, setDrillStart] = useState(0);
   const [mastered, setMastered] = useState(new Set());
-  const remaining = WRONG_QS.filter(q => !mastered.has(q.id || q.question));
+  const [aiWrongQs, setAiWrongQs] = useState([]);
+  const [regenLoading, setRegenLoading] = useState(false);
+  const [regenMsg, setRegenMsg] = useState("");
+  const mergedWrong = [...WRONG_QS, ...aiWrongQs];
+  const remaining = mergedWrong.filter(q => !mastered.has(q.id || q.question));
+
+  const regenerateWrongQuestions = async () => {
+    setRegenLoading(true);
+    setRegenMsg("");
+    try {
+      const chapter = weakChapters[0]?.[0] || "综合";
+      const res = await fetch("/api/regenerate-wrong", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wrongQuestions: remaining.slice(0, 8), chapter, count: 5 }),
+      });
+      const data = await res.json();
+      if (data?.error) throw new Error(data.error);
+      const rows = (data.questions || []).map((q, idx) => ({
+        id: "ai_wrong_" + Date.now() + "_" + idx,
+        chapter,
+        type: "单选题",
+        question: q.question,
+        options: q.options || null,
+        answer: q.answer,
+        explanation: q.explanation || "",
+      }));
+      setAiWrongQs(rows);
+      setRegenMsg(`已生成 ${rows.length} 道变式题，可立即重练。`);
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        const uid = userData?.user?.id;
+        if (uid) {
+          await supabase.from("wrong_drill_logs").insert(rows.map((q) => ({
+            user_id: uid,
+            chapter: q.chapter,
+            question: q.question,
+            correct_answer: q.answer,
+            explanation: q.explanation,
+          })));
+        }
+      } catch (e) {}
+    } catch (err) {
+      setRegenMsg("生成失败：" + (err?.message || "未知错误"));
+    }
+    setRegenLoading(false);
+  };
 
   if (drillMode) return (
     <div style={{ padding: "2rem", maxWidth: 780, margin: "0 auto" }}>
@@ -1547,10 +1834,18 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
       <div style={{ ...s.card }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 14, borderBottom: "1px solid #f0f0f0" }}>
           <div style={{ fontSize: 16, fontWeight: 700 }}>收录错题 <span style={{ fontSize: 14, color: "#aaa", fontWeight: 400 }}>({remaining.length}题)</span></div>
-          {remaining.length > 0 && (
-            <button onClick={() => { setDrillStart(0); setDrillMode(true); }} style={{ padding: "10px 22px", background: G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 14, fontWeight: 700, fontFamily: "inherit" }}>🔄 全部复习</button>
-          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            {remaining.length > 0 && (
+              <button onClick={regenerateWrongQuestions} disabled={regenLoading} style={{ padding: "10px 14px", background: G.blue, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
+                {regenLoading ? "AI生成中…" : "AI变式出题"}
+              </button>
+            )}
+            {remaining.length > 0 && (
+              <button onClick={() => { setDrillStart(0); setDrillMode(true); }} style={{ padding: "10px 22px", background: G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 14, fontWeight: 700, fontFamily: "inherit" }}>🔄 全部复习</button>
+            )}
+          </div>
         </div>
+        {regenMsg && <div style={{ padding: "10px 12px", borderRadius: 10, background: G.blueLight, color: G.blue, marginBottom: 12, fontSize: 14 }}>{regenMsg}</div>}
         {remaining.length === 0 && <div style={{ textAlign: "center", padding: "3rem", color: "#888" }}><div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div><div style={{ fontSize: 18, fontWeight: 600 }}>所有错题已掌握！</div></div>}
         {remaining.map((q, i) => (
           <div key={i} style={{ padding: "16px 0", borderBottom: i < remaining.length-1 ? "1px solid #f5f5f5" : "none", display: "flex", alignItems: "flex-start", gap: 14 }}>
@@ -1758,6 +2053,86 @@ function MaterialsPage({ setPage, profile }) {
   );
 }
 
+function MaterialChatPage({ setPage, profile }) {
+  const [materials, setMaterials] = useState([]);
+  const [materialId, setMaterialId] = useState("");
+  const [question, setQuestion] = useState("");
+  const [chatting, setChatting] = useState(false);
+  const [history, setHistory] = useState([]);
+
+  useEffect(() => {
+    supabase.from("materials").select("id,title,course,status,uploaded_by").order("created_at", { ascending: false }).then(({ data }) => {
+      const rows = data || [];
+      const visible = profile?.role === "teacher" ? rows : rows.filter(m => (m.status || "approved") === "approved" || m.uploaded_by === profile?.id);
+      setMaterials(visible);
+      if (visible[0]?.id) setMaterialId(visible[0].id);
+    });
+  }, [profile?.id, profile?.role]);
+
+  const ask = async () => {
+    if (!materialId || !question.trim()) return;
+    setChatting(true);
+    const selected = materials.find(m => m.id === materialId);
+    const askText = question.trim();
+    setQuestion("");
+    setHistory(prev => [...prev, { role: "user", text: askText }]);
+    try {
+      let chunks = [];
+      try {
+        const { data } = await supabase.from("material_chunks").select("chunk_text,chunk_index").eq("material_id", materialId).order("chunk_index", { ascending: true }).limit(20);
+        chunks = data || [];
+      } catch (e) {}
+      const res = await fetch("/api/material-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: askText,
+          materialTitle: selected?.title || "资料",
+          contextChunks: chunks.map(c => c.chunk_text),
+        }),
+      });
+      const data = await res.json();
+      if (data?.error) throw new Error(data.error);
+      setHistory(prev => [...prev, { role: "assistant", text: data.answer || "暂时无法回答", sources: data.sources || [] }]);
+    } catch (err) {
+      setHistory(prev => [...prev, { role: "assistant", text: "回答失败：" + (err?.message || "未知错误"), sources: [] }]);
+    }
+    setChatting(false);
+  };
+
+  return (
+    <div style={{ padding: "2rem", maxWidth: 980, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+        <Btn size="sm" onClick={() => setPage("资料库")}>← 返回资料库</Btn>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>资料对话学习</div>
+      </div>
+      <div style={{ ...s.card, marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>选择资料</div>
+        <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={s.input}>
+          {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
+        </select>
+      </div>
+      <div style={{ ...s.card, minHeight: 420 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14, maxHeight: 360, overflow: "auto" }}>
+          {history.length === 0 && <div style={{ color: "#888", fontSize: 14 }}>可提问：这份资料的核心知识点是什么？请给我一题例题并说明思路。</div>}
+          {history.map((m, idx) => (
+            <div key={idx} style={{ alignSelf: m.role === "user" ? "flex-end" : "stretch", background: m.role === "user" ? G.tealLight : "#f7f8fa", color: "#333", borderRadius: 10, padding: "10px 12px", fontSize: 14, lineHeight: 1.7 }}>
+              <div>{m.text}</div>
+              {m.role === "assistant" && Array.isArray(m.sources) && m.sources.length > 0 && (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#777" }}>来源片段：{m.sources.join(" | ")}</div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <input value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !chatting) ask(); }} placeholder="输入你的问题…" style={{ ...s.input, marginBottom: 0 }} />
+          <Btn variant="primary" onClick={ask} disabled={chatting || !materialId || !question.trim()}>{chatting ? "思考中…" : "发送"}</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Teacher Page ──────────────────────────────────────────────────────────────
 function TeacherPage({ setPage, profile }) {
   const [tab, setTab] = useState("学生管理");
@@ -1793,6 +2168,7 @@ function TeacherPage({ setPage, profile }) {
   const [importingCsv, setImportingCsv] = useState(false);
   const [importMsg, setImportMsg] = useState("");
   const csvRef = useRef();
+  const [analytics, setAnalytics] = useState({ students: 0, answers: 0, accuracy: 0, weak: [], mastery: [] });
 
   const refreshMaterials = async () => {
     const { data } = await supabase.from("materials").select("*").order("created_at", { ascending: false });
@@ -1802,6 +2178,35 @@ function TeacherPage({ setPage, profile }) {
   useEffect(() => {
     supabase.from("questions").select("*").order("created_at", { ascending: false }).then(({ data }) => { if (data) setDbQuestions(data); });
     refreshMaterials();
+    Promise.all([
+      supabase.from("profiles").select("id").eq("role", "student"),
+      supabase.from("answers").select("is_correct,question_id"),
+      supabase.from("questions").select("id,chapter"),
+      supabase.from("topic_mastery").select("status"),
+    ]).then(([stuRes, ansRes, qRes, masteryRes]) => {
+      const students = (stuRes.data || []).length;
+      const answers = ansRes.data || [];
+      const qmap = {};
+      (qRes.data || []).forEach(q => { qmap[q.id] = q.chapter || "未知章节"; });
+      const chapterStat = {};
+      answers.forEach(a => {
+        const ch = qmap[a.question_id] || "未知章节";
+        if (!chapterStat[ch]) chapterStat[ch] = { total: 0, correct: 0 };
+        chapterStat[ch].total += 1;
+        if (a.is_correct) chapterStat[ch].correct += 1;
+      });
+      const weak = Object.entries(chapterStat)
+        .filter(([, s]) => s.total >= 2)
+        .map(([ch, s]) => ({ chapter: ch, pct: Math.round((s.correct / s.total) * 100), total: s.total }))
+        .sort((a, b) => a.pct - b.pct)
+        .slice(0, 6);
+      const masteryRows = masteryRes.data || [];
+      const done = masteryRows.filter(r => r.status === "done").length;
+      const masteryPct = masteryRows.length ? Math.round((done / masteryRows.length) * 100) : 0;
+      const correctCount = answers.filter(a => a.is_correct).length;
+      const accuracy = answers.length ? Math.round((correctCount / answers.length) * 100) : 0;
+      setAnalytics({ students, answers: answers.length, accuracy, weak, mastery: [{ label: "知识点掌握率", value: masteryPct }] });
+    });
   }, []);
 
   const pendingMaterials = uploadedMaterials.filter(m => (m.status || "approved") === "pending");
@@ -1817,6 +2222,17 @@ function TeacherPage({ setPage, profile }) {
     if (error) {
       setReviewMsg("审核失败：" + error.message);
     } else {
+      if (status === "approved") {
+        try {
+          await processMaterialWithAI({
+            material: { ...material, status: "approved" },
+            file: null,
+            fallbackText: `${material?.title || ""} ${material?.description || ""}`,
+            genCount: 6,
+            actorName: profile?.name || "教师",
+          });
+        } catch (e) {}
+      }
       setReviewMsg(status === "approved" ? "已通过并发布到资料库。" : "已驳回该资料。");
       await refreshMaterials();
     }
@@ -2090,7 +2506,7 @@ function TeacherPage({ setPage, profile }) {
       </div>
 
       <div style={{ display: "flex", gap: 0, borderBottom: "2px solid #f0f0f0", marginBottom: 20 }}>
-        {["学生管理", "AI 出题", "题库管理", "审核资料"].map(t => (
+        {["学生管理", "AI 出题", "题库管理", "审核资料", "学情分析"].map(t => (
           <button key={t} onClick={() => setTab(t)} style={{ padding: "12px 22px", fontSize: 15, fontFamily: "inherit", border: "none", borderBottom: tab === t ? `3px solid ${G.teal}` : "3px solid transparent", background: "none", cursor: "pointer", color: tab === t ? G.teal : "#888", fontWeight: tab === t ? 700 : 400, marginBottom: -2 }}>{t}</button>
         ))}
       </div>
@@ -2305,6 +2721,28 @@ function TeacherPage({ setPage, profile }) {
           ))}
         </div>
       )}
+      {tab === "学情分析" && (
+        <div style={{ ...s.card }}>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>班级学情分析</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 16 }}>
+            <StatCard icon="👥" label="学生人数" value={analytics.students} color={G.blue} />
+            <StatCard icon="📝" label="答题记录" value={analytics.answers} color={G.teal} />
+            <StatCard icon="🎯" label="整体正确率" value={analytics.accuracy + "%"} color={analytics.accuracy >= 75 ? G.teal : G.red} />
+            <StatCard icon="🧠" label="知识点掌握" value={(analytics.mastery[0]?.value || 0) + "%"} color={G.purple} />
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10 }}>薄弱章节 Top</div>
+          {analytics.weak.length === 0 && <div style={{ color: "#888", fontSize: 14 }}>暂无足够数据，请先让学生完成练习。</div>}
+          {analytics.weak.map((w) => (
+            <div key={w.chapter} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f3f3f3" }}>
+              <div style={{ fontSize: 14 }}>{w.chapter}</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <Badge color={w.pct >= 75 ? "teal" : w.pct >= 60 ? "amber" : "red"}>{w.pct}%</Badge>
+                <span style={{ fontSize: 12, color: "#999" }}>{w.total} 次作答</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2318,6 +2756,31 @@ export default function App() {
   const [retryQuestion, setRetryQuestion] = useState(null);
   const [chapterFilter, setChapterFilter] = useState(null);
   const [sessionAnswers, setSessionAnswers] = useState({});
+  const recordAnswer = async (qid, correct, chapter, questionPayload = null) => {
+    try {
+      const updated = { ...sessionAnswers, [qid]: { correct, chapter } };
+      setSessionAnswers(updated);
+    } catch (e) {}
+    try {
+      if (!session?.user?.id) return;
+      await supabase.from("answers").insert({
+        user_id: session.user.id,
+        question_id: String(qid).length > 30 ? null : qid,
+        is_correct: !!correct,
+        user_answer: null,
+      });
+      if (!correct && questionPayload?.question) {
+        await supabase.from("wrong_drill_logs").insert({
+          user_id: session.user.id,
+          question_id: String(qid).length > 30 ? null : qid,
+          chapter: chapter || null,
+          question: questionPayload.question,
+          correct_answer: questionPayload.answer || null,
+          explanation: questionPayload.explanation || null,
+        });
+      }
+    } catch (e) {}
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -2361,6 +2824,7 @@ export default function App() {
     if (page === "首页") return <HomePage setPage={handleSetPage} profile={profile} />;
     if (page === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
     if (page === "上传资料") return <UploadPage setPage={handleSetPage} profile={profile} />;
+    if (page === "资料对话") return <MaterialChatPage setPage={handleSetPage} profile={profile} />;
     if (page === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} />;
     if (page === "题库练习" || page.startsWith("quiz_material_")) {
       let matId = null, matTitle = null;
@@ -2369,7 +2833,7 @@ export default function App() {
         matId = parts[0];
         matTitle = decodeURIComponent(parts.slice(1).join("_"));
       }
-      return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} materialId={matId} materialTitle={matTitle} onAnswer={(qid, correct, chapter) => { try { const updated = { ...sessionAnswers, [qid]: { correct, chapter } }; setSessionAnswers(updated); } catch(e) {} }} />;
+      return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} materialId={matId} materialTitle={matTitle} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
     }
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} />;
