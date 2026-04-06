@@ -116,7 +116,8 @@ const buildSeedClaimsFromText = (text, chapter, course, count = 12) => {
   const out = [];
   for (let i = 0; i < sents.length && out.length < count; i++) {
     const claim = sents[i].slice(0, 110);
-    if (!isLikelyRelevantClaim(claim)) continue;
+    // 种子 claim 来自 PDF 原句，不因「中文太少」丢弃英文教材
+    if (/Image Manager|Neelakantan|_rels|Content_Types\.xml|PK\u0003\u0004/i.test(claim)) continue;
     out.push({
       chunk_index: 0,
       claim_text: claim,
@@ -156,7 +157,7 @@ const fetchChapterFallbackQuestions = async (chapter, count = 6) => {
 const buildFallbackQuestions = (text, chapter, count = 6) => {
   const src = String(text || "").replace(/\s+/g, " ").trim();
   if (!src) return [];
-  const sents = src.split(/[。！？.!?]/).map(s => s.trim()).filter(s => s.length > 14).slice(0, count * 4);
+  const sents = src.split(/[。！？.!?]/).map(s => s.trim()).filter(s => s.length > 12).slice(0, count * 4);
   const qs = [];
   for (let i = 0; i < sents.length && qs.length < count; i++) {
     const sent = sents[i];
@@ -304,7 +305,7 @@ const extractMaterialText = async (file) => {
       const buf = await file.arrayBuffer();
       const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
       let text = "";
-      for (let i = 1; i <= Math.min(pdf.numPages, 20); i++) {
+      for (let i = 1; i <= Math.min(pdf.numPages, 45); i++) {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
         text += content.items.map(item => item.str).join(" ") + " ";
@@ -365,9 +366,13 @@ const isLikelyRelevantClaim = (claimText = "") => {
   if (t.length < 8) return false;
   if (/Image Manager|Neelakantan|_rels|Content_Types\.xml|PK\u0003\u0004/i.test(t)) return false;
   const chineseCount = (t.match(/[\u4e00-\u9fff]/g) || []).length;
-  const mathHint = /(矩阵|范数|收敛|迭代|导数|积分|微分|误差|牛顿|最小二乘|优化|特征值|条件数|插值|方程|算法|线性|非线性|梯度|hessian|newton|gauss|qr|lu|svd)/i.test(t);
-  if (chineseCount < 3 && !mathHint) return false;
-  return true;
+  const alphaCount = (t.match(/[A-Za-z]/g) || []).length;
+  const mathHint = /(矩阵|范数|收敛|迭代|导数|积分|微分|误差|牛顿|最小二乘|优化|特征值|条件数|插值|方程|算法|线性|非线性|梯度|行列式|向量|子空间|基|秩|转置|可逆|正交|对角化|hessian|newton|gauss|qr|lu|svd|matrix|vector|eigen|determinant|linear|subspace|basis|rank|transpose|invertible|orthogonal|theorem|definition|lemma|proof)/i.test(t);
+  if (chineseCount >= 3) return true;
+  if (mathHint) return true;
+  // 英文教材：足够长的字母句视为有效 claim（避免整段被清空）
+  if (alphaCount >= 18 && t.length >= 24) return true;
+  return false;
 };
 
 const fetchFileAsBrowserFile = async (url, fallbackName = "material.pdf") => {
@@ -579,7 +584,13 @@ const processMaterialWithAI = async ({
     }
     if (topics.length === 0 && claims.length > 0) topics = buildTopicsFromClaims(claims, material?.chapter || null);
     if (topics.length === 0) topics = buildFallbackTopics(text, material?.chapter, 4);
-    if (questions.length < Math.min(genCount, 4)) {
+    // 优先用 PDF 正文造句出题（避免落到「学习建议」类泛化保底）
+    if (questions.length < genCount && text.length > 80) {
+      const need = genCount - questions.length;
+      const fromText = buildFallbackQuestions(text, chapterKey, need);
+      questions = [...questions, ...fromText].filter((q) => !isLowQualityQuestion(q));
+    }
+    if (questions.length < genCount) {
       const supplement = await fetchChapterFallbackQuestions(chapterKey, genCount - questions.length);
       questions = [...questions, ...supplement].filter((q) => !isLowQualityQuestion(q));
     }
@@ -590,7 +601,10 @@ const processMaterialWithAI = async ({
       seen.add(key);
       return true;
     }).slice(0, genCount);
-    if (questions.length === 0) questions = buildMinimalChapterQuestions(chapterKey, Math.min(genCount, 4));
+    if (questions.length === 0) {
+      if (text.length > 80) questions = buildFallbackQuestions(text, chapterKey, genCount);
+      else questions = buildMinimalChapterQuestions(chapterKey, Math.min(genCount, 4));
+    }
     questions = questions.slice(0, genCount);
 
     if (chunks.length > 0) {
@@ -653,9 +667,16 @@ const processMaterialWithAI = async ({
       materialLinked: qResult.materialLinked,
     };
   } catch (err) {
-    // Fallback: keep topics/chunks and generate chapter-level backup questions.
+    // Fallback: keep topics/chunks；有正文则句段出题，避免泛化「学习建议」题
     const topics = buildFallbackTopics(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter, 4);
-    const questions = (await fetchChapterFallbackQuestions(chapterKey, genCount)).filter((q) => !isLowQualityQuestion(q));
+    let questions = text.length > 80
+      ? buildFallbackQuestions(text, chapterKey, genCount)
+      : [];
+    if (questions.length < genCount) {
+      const more = (await fetchChapterFallbackQuestions(chapterKey, genCount - questions.length)).filter((q) => !isLowQualityQuestion(q));
+      questions = [...questions, ...more];
+    }
+    if (questions.length === 0) questions = buildMinimalChapterQuestions(chapterKey, Math.min(genCount, 4));
     try {
       if (fallbackChunks.length > 0) {
         await supabase.from("material_chunks").delete().eq("material_id", materialId);
