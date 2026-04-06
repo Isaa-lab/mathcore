@@ -2226,6 +2226,7 @@ function MaterialChatPage({ setPage, profile }) {
   const [question, setQuestion] = useState("");
   const [chatting, setChatting] = useState(false);
   const [history, setHistory] = useState([]);
+  const selectedMaterial = materials.find(m => m.id === materialId);
 
   useEffect(() => {
     const loadChatMaterials = async () => {
@@ -2285,6 +2286,17 @@ function MaterialChatPage({ setPage, profile }) {
         <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={s.input}>
           {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
         </select>
+        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          <Btn
+            size="sm"
+            variant="primary"
+            onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))}
+            disabled={!materialId || !selectedMaterial}
+          >
+            去做这份资料的题
+          </Btn>
+          <Btn size="sm" onClick={() => setPage("知识点")}>看知识点卡片</Btn>
+        </div>
       </div>
       <div style={{ ...s.card, minHeight: 420 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14, maxHeight: 360, overflow: "auto" }}>
@@ -2294,6 +2306,16 @@ function MaterialChatPage({ setPage, profile }) {
               <div>{m.text}</div>
               {m.role === "assistant" && Array.isArray(m.sources) && m.sources.length > 0 && (
                 <div style={{ marginTop: 6, fontSize: 12, color: "#777" }}>来源片段：{m.sources.join(" | ")}</div>
+              )}
+              {m.role === "assistant" && (
+                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))} style={{ padding: "4px 10px", background: G.blueLight, color: G.blue, border: "1px solid " + G.blue + "44", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
+                    基于该资料做题
+                  </button>
+                  <button onClick={() => setPage("知识点")} style={{ padding: "4px 10px", background: G.tealLight, color: G.tealDark, border: "1px solid " + G.teal + "44", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
+                    跳转知识点学习
+                  </button>
+                </div>
               )}
             </div>
           ))}
