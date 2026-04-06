@@ -374,6 +374,53 @@ const FLASHCARDS = [
   { front: "SVM 软间隔参数 C", back: "C 大→惩罚误分重；C 小→允许更多误分但间隔宽", chapter: "最优化 Ch.1" },
 ];
 
+
+// ── Topic → Chapter mapping ───────────────────────────────────────────────────
+const TOPIC_CHAPTER = {
+  "多项式求值": "Ch.0", "二进制与浮点数": "Ch.0", "有效数字与舍入误差": "Ch.0", "微积分基础回顾": "Ch.0",
+  "二分法": "Ch.1", "不动点迭代": "Ch.1", "误差分析": "Ch.1", "Newton 法": "Ch.1", "割线法": "Ch.1",
+  "Gauss 消去法": "Ch.2", "LU 分解": "Ch.2", "条件数与误差": "Ch.2", "Jacobi / Gauss-Seidel 迭代": "Ch.2",
+  "Lagrange 插值": "Ch.3", "Newton 差商": "Ch.3", "Chebyshev 插值": "Ch.3", "三次样条": "Ch.3", "Bézier 曲线": "Ch.3",
+  "法方程": "Ch.4", "数据拟合模型": "Ch.4", "QR 分解": "Ch.4", "GMRES": "Ch.4", "非线性最小二乘": "Ch.4",
+  "有限差分公式": "Ch.5", "梯形法 / Simpson 法": "Ch.5", "Romberg 积分": "Ch.5", "Gauss 积分": "Ch.5",
+  "Euler 法": "Ch.6", "Runge-Kutta 法": "Ch.6", "方程组": "Ch.6", "刚性方程与隐式法": "Ch.6",
+  "打靶法": "Ch.7", "有限差分法": "Ch.7", "有限元 / Galerkin 法": "Ch.7",
+  "抛物型方程": "Ch.8", "双曲型方程": "Ch.8", "椭圆型方程": "Ch.8", "Crank-Nicolson 法": "Ch.8",
+  "伪随机数生成": "Ch.9", "Monte Carlo 模拟": "Ch.9", "方差缩减": "Ch.9",
+  "最小二乘数据拟合": "最优化 Ch.1", "线性 vs 非线性模型": "最优化 Ch.1",
+  "残差向量与范数": "最优化 Ch.1", "非线性规划定义": "最优化 Ch.1",
+  "设施选址问题": "最优化 Ch.1", "球缺体积最优化": "最优化 Ch.1",
+  "投资组合选择 (Markowitz)": "最优化 Ch.1", "交通流最小化": "最优化 Ch.1",
+  "最大似然估计": "最优化 Ch.1", "SVM 分类": "最优化 Ch.1",
+};
+
+// Get chapter stats from sessionAnswers {questionId: {correct, chapter}}
+const getChapterStats = (sessionAnswers) => {
+  const stats = {};
+  Object.values(sessionAnswers).forEach(({ correct, chapter }) => {
+    if (!stats[chapter]) stats[chapter] = { correct: 0, total: 0 };
+    stats[chapter].total++;
+    if (correct) stats[chapter].correct++;
+  });
+  return stats;
+};
+
+const getTopicStatus = (topic, chapterStats) => {
+  const ch = TOPIC_CHAPTER[topic];
+  if (!ch || !chapterStats[ch]) return "todo";
+  const { correct, total } = chapterStats[ch];
+  if (total >= 3) return "done";
+  if (total >= 1) return "doing";
+  return "todo";
+};
+
+const getTopicAccuracy = (topic, chapterStats) => {
+  const ch = TOPIC_CHAPTER[topic];
+  if (!ch || !chapterStats[ch]) return null;
+  const { correct, total } = chapterStats[ch];
+  return { correct, total, pct: Math.round(correct / total * 100) };
+};
+
 const CHAPTERS = [
   { id: 0, course: "数值分析", num: "Ch.0", name: "基础知识", topics: ["多项式求值", "二进制与浮点数", "有效数字与舍入误差", "微积分基础回顾"] },
   { id: 1, course: "数值分析", num: "Ch.1", name: "方程求解", topics: ["二分法", "不动点迭代", "误差分析", "Newton 法", "割线法"] },
@@ -602,10 +649,11 @@ function HomePage({ setPage, profile }) {
 }
 
 // ── Knowledge Page ────────────────────────────────────────────────────────────
-function KnowledgePage({ setPage, setChapterFilter }) {
+function KnowledgePage({ setPage, setChapterFilter, sessionAnswers = {} }) {
   const [sel, setSel] = useState(CHAPTERS[0]);
   const [filter, setFilter] = useState("全部");
   const [openTopic, setOpenTopic] = useState(null);
+  const chapterStats = getChapterStats(sessionAnswers);
   const filtered = filter === "全部" ? CHAPTERS : CHAPTERS.filter(c => c.course === filter);
   return (
     <>
@@ -613,10 +661,18 @@ function KnowledgePage({ setPage, setChapterFilter }) {
       <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, padding: "2rem", maxWidth: 1140, margin: "0 auto" }}>
         {/* Sidebar */}
         <div style={{ ...s.card, padding: "1.25rem 0", height: "fit-content" }}>
-          <div style={{ padding: "0 14px 12px", display: "flex", gap: 4 }}>
-            {["全部", "数值分析", "最优化"].map(c => (
-              <button key={c} onClick={() => setFilter(c)} style={{ flex: 1, fontSize: 12, padding: "6px 0", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: filter === c ? 600 : 400, background: filter === c ? G.teal : "#f5f5f5", color: filter === c ? "#fff" : "#666" }}>{c}</button>
-            ))}
+          <div style={{ padding: "12px 14px", borderBottom: "1px solid #f0f0f0", marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: "#aaa", marginBottom: 8, fontWeight: 500 }}>课程筛选</div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {["全部", "数值分析", "最优化"].map(c => (
+                <button key={c} onClick={() => setFilter(c)} style={{ flex: 1, fontSize: 12, padding: "6px 0", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: filter === c ? 600 : 400, background: filter === c ? G.teal : "#f5f5f5", color: filter === c ? "#fff" : "#666" }}>{c}</button>
+              ))}
+            </div>
+            {Object.keys(chapterStats).length > 0 && (
+              <div style={{ marginTop: 10, fontSize: 12, color: "#888" }}>
+                已练习 <strong style={{ color: G.teal }}>{Object.keys(chapterStats).length}</strong> 个章节
+              </div>
+            )}
           </div>
           {filtered.map(ch => (
             <div key={ch.id} onClick={() => setSel(ch)} style={{ padding: "10px 16px", cursor: "pointer", fontSize: 14, borderLeft: `3px solid ${sel.id === ch.id ? G.teal : "transparent"}`, background: sel.id === ch.id ? G.tealLight : "transparent", color: sel.id === ch.id ? G.tealDark : "#555", fontWeight: sel.id === ch.id ? 600 : 400, display: "flex", gap: 8, alignItems: "center" }}>
@@ -636,7 +692,13 @@ function KnowledgePage({ setPage, setChapterFilter }) {
                 <Badge color="red">{sel.topics.length} 个知识点</Badge>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              {chapterStats[sel.num] && (
+                <div style={{ fontSize: 13, color: "#888" }}>
+                  本章已答 <strong style={{ color: G.teal }}>{chapterStats[sel.num].total}</strong> 题，
+                  正确率 <strong style={{ color: chapterStats[sel.num].correct / chapterStats[sel.num].total >= 0.8 ? G.teal : G.amber }}>{Math.round(chapterStats[sel.num].correct / chapterStats[sel.num].total * 100)}%</strong>
+                </div>
+              )}
               <Btn size="sm" onClick={() => setPage("记忆卡片")}>🃏 记忆卡片</Btn>
               <Btn size="sm" variant="primary" onClick={() => { setChapterFilter(sel.num); setPage("题库练习"); }}>章节练习 →</Btn>
             </div>
@@ -659,6 +721,12 @@ function KnowledgePage({ setPage, setChapterFilter }) {
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                    {accuracy && (
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: accuracy.pct >= 80 ? G.teal : accuracy.pct >= 60 ? G.amber : G.red }}>{accuracy.pct}%</div>
+                        <div style={{ fontSize: 11, color: "#aaa" }}>{accuracy.correct}/{accuracy.total}题</div>
+                      </div>
+                    )}
                     {hasContent && <span style={{ fontSize: 18 }}>📐</span>}
                     <Badge color={status === "done" ? "teal" : status === "doing" ? "amber" : "red"}>{statusLabel}</Badge>
                   </div>
@@ -673,7 +741,7 @@ function KnowledgePage({ setPage, setChapterFilter }) {
 }
 
 // ── Quiz Page ─────────────────────────────────────────────────────────────────
-function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setChapterFilter }) {
+function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setChapterFilter, onAnswer }) {
   const [questions, setQuestions] = useState([]);
   const [current, setCurrent] = useState(0);
   const [selected, setSelected] = useState(null);
@@ -687,7 +755,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   useEffect(() => {
     supabase.from("questions").select("*").then(({ data }) => {
-      let pool = data?.length ? [...data, ...ALL_QUESTIONS] : ALL_QUESTIONS;
+      const dbQs = data || [];
+      const dbTexts = new Set(dbQs.map(q => q.question));
+      const uniqueSamples = ALL_QUESTIONS.filter(q => !dbTexts.has(q.question));
+      let pool = [...dbQs, ...uniqueSamples];
       // filter by chapter if set
       if (chapterFilter) {
         const filtered = pool.filter(q => q.chapter && q.chapter.startsWith(chapterFilter));
@@ -740,6 +811,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       : (selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误");
     if (correct) setScore(s => s + 1);
     else setWrongList(w => [...w, q]);
+    if (onAnswer && q) onAnswer(q.id || q.question, correct, q.chapter || "Unknown");
   };
 
   const handleNext = () => {
@@ -958,6 +1030,9 @@ function ReportPage({ setPage }) {
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
         <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
         <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>学习报告</div>
+        <div style={{ marginLeft: "auto" }}>
+          <Btn size="sm" onClick={() => { if (window.confirm("确定重置本地答题记录？")) { localStorage.removeItem("mc_answers"); window.location.reload(); } }}>重置记录</Btn>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 24 }}>
@@ -1274,8 +1349,11 @@ function TeacherPage({ setPage }) {
     if (!matFile || !matTitle) return;
     setExtracting(true); setMatError(""); setMatSuccess(""); setExtractResult(null);
     try {
-      // Step 1: Read PDF as base64 for storage
+      // Step 1: Check file size and read as base64
       setExtractStep("读取 PDF 文件…");
+      if (matFile.size > 5 * 1024 * 1024) {
+        throw new Error("文件过大（超过 5MB），请压缩后重试或上传较小的文件");
+      }
       const fileData = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = e => resolve(e.target.result);
@@ -1622,6 +1700,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [retryQuestion, setRetryQuestion] = useState(null);
   const [chapterFilter, setChapterFilter] = useState(null);
+  const [sessionAnswers, setSessionAnswers] = useState(() => { try { return JSON.parse(localStorage.getItem("mc_answers") || "{}"); } catch { return {}; } });
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1664,8 +1743,8 @@ export default function App() {
   const renderPage = () => {
     if (page === "首页") return <HomePage setPage={handleSetPage} profile={profile} />;
     if (page === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
-    if (page === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
-    if (page === "题库练习") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} />;
+    if (page === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} />;
+    if (page === "题库练习") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter) => { const updated = { ...sessionAnswers, [qid]: { correct, chapter } }; setSessionAnswers(updated); try { localStorage.setItem("mc_answers", JSON.stringify(updated)); } catch {} }} />;
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} />;
     if (page === "错题本") return <WrongPage setPage={handleSetPage} setRetryQuestion={setRetryQuestion} />;
