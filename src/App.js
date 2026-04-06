@@ -807,21 +807,27 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       <div style={{ ...s.card, textAlign: "center", padding: "3rem" }}>
         <div style={{ fontSize: 36, marginBottom: 14 }}>✏️</div>
         <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 10, color: "#111" }}>选择练习模式</div>
-        {chapterFilter && <div style={{ display: "inline-block", background: G.tealLight, color: G.tealDark, fontSize: 14, fontWeight: 600, padding: "6px 16px", borderRadius: 20, marginBottom: 12 }}>📖 {chapterFilter} 章节题目</div>}
-        <div style={{ fontSize: 15, color: "#888", marginBottom: 28 }}>共 {questions.length} 道题目可用{chapterFilter ? `（已筛选 ${chapterFilter} 章节）` : "（全部章节）"}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        {chapterFilter && (
+          <div style={{ display: "inline-block", background: G.tealLight, color: G.tealDark, fontSize: 14, fontWeight: 600, padding: "6px 16px", borderRadius: 20, marginBottom: 12 }}>
+            📖 {chapterFilter} 章节题目
+          </div>
+        )}
+        <div style={{ fontSize: 15, color: "#888", marginBottom: 28 }}>
+          共 {questions.length} 道题目可用{chapterFilter ? `（已筛选 ${chapterFilter} 章节）` : "（全部章节）"}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
           {[
-            { mode: "daily", icon: "⚡", title: "每日练习", desc: chapterFilter ? `本章随机 5 题` : "随机 5 题，轻松刷题", bg: "#EEF4FF", color: G.blue },
-            { mode: "full", icon: "📚", title: chapterFilter ? "章节全练" : "完整练习", desc: chapterFilter ? `${chapterFilter} 全部题目` : "全部题目，系统训练", bg: G.tealLight, color: G.teal },
+            { mode: "daily", icon: "⚡", title: "每日练习", desc: chapterFilter ? "本章随机 5 题" : "随机 5 题，轻松刷题", bg: "#EEF4FF", color: G.blue },
+            { mode: "full", icon: "📚", title: chapterFilter ? "章节全练" : "完整练习", desc: chapterFilter ? chapterFilter + " 全部题目" : "全部题目，系统训练", bg: G.tealLight, color: G.teal },
           ].map(m => (
-            <div key={m.mode} onClick={() => setQuizMode(m.mode)} style={{ background: m.bg, border: `2px solid ${m.color}44`, borderRadius: 16, padding: "1.5rem", cursor: "pointer" }}>
+            <div key={m.mode} onClick={() => setQuizMode(m.mode)} style={{ background: m.bg, border: "2px solid " + m.color + "44", borderRadius: 16, padding: "1.5rem", cursor: "pointer" }}>
               <div style={{ fontSize: 28, marginBottom: 10 }}>{m.icon}</div>
               <div style={{ fontSize: 16, fontWeight: 700, color: m.color, marginBottom: 6 }}>{m.title}</div>
               <div style={{ fontSize: 14, color: "#666" }}>{m.desc}</div>
             </div>
           ))}
         </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 20, padding: "14px", background: "#f9f9f9", borderRadius: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "14px", background: "#f9f9f9", borderRadius: 12 }}>
           <span style={{ fontSize: 14, color: "#888" }}>⏱ 计时模式</span>
           <div onClick={() => setTimerOn(v => !v)} style={{ width: 44, height: 24, borderRadius: 12, background: timerOn ? G.teal : "#ddd", cursor: "pointer", position: "relative", transition: "background .2s" }}>
             <div style={{ position: "absolute", top: 3, left: timerOn ? 22 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />
@@ -832,7 +838,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     </div>
   );
 
-  const displayQ = quizMode === "daily" ? questions.slice(0, 5) : questions;
+    const displayQ = quizMode === "daily" ? questions.slice(0, 5) : questions;
   const q = displayQ[current];
   const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
   const letters = ["A", "B", "C", "D"];
