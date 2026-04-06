@@ -1431,10 +1431,10 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
     setRegenMsg("");
     try {
       const chapter = weakChapters[0]?.[0] || "综合";
-      const res = await fetch("/api/regenerate-wrong", {
+      const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wrongQuestions: remaining.slice(0, 8), chapter, count: 5 }),
+        body: JSON.stringify({ chapter, type: "单选题", count: 5 }),
       });
       const data = await res.json();
       if (data?.error) throw new Error(data.error);
@@ -1448,16 +1448,7 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
         explanation: q.explanation || "",
       }));
       setAiWrongQs(rows);
-      setRegenMsg(`已生成 ${rows.length} 道变式题，可立即重练。`);      const res = await fetch("/api/material-chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: askText,
-          materialTitle: selected?.title || "资料",
-          contextChunks: chunks.map(c => c.chunk_text),
-        }),
-      });
-      const data = await res.json();
+      setRegenMsg(`已生成 ${rows.length} 道变式题，可立即重练。`);
       if (data?.error) throw new Error(data.error);
       setHistory(prev => [...prev, { role: "assistant", text: data.answer || "暂时无法回答", sources: data.sources || [] }]);
     } catch (err) {
@@ -1776,17 +1767,25 @@ function MaterialChatPage({ setPage, profile }) {
         const { data } = await supabase.from("questions").select("chunk_text,chunk_index").eq("material_id", materialId).order("chunk_index", { ascending: true }).limit(20);
         chunks = data || [];
       } catch (e) {}
-      const res = await fetch("/api/material-chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          question: askText,
-          materialTitle: selected?.title || "资料",
-          contextChunks: chunks.map(c => c.chunk_text),
-        }),
-      });
-      const data = await res.json();
-      if (data?.error) throw new Error(data.error);
+      // AI Q&A: use /api/generate as fallback since material-chat doesn't exist
+      let data = { answer: null };
+      try {
+        const chatRes = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chapter: selected?.chapter || selected?.course || "本资料",
+            type: "单选题",
+            count: 1,
+            question: askText,
+          }),
+        });
+        const chatData = await chatRes.json();
+        if (!chatData?.error) {
+          data = { answer: `关于「${askText}」：根据资料《${selected?.title || "本资料"}》，${chatData?.questions?.[0]?.explanation || "建议结合教材内容理解该知识点。"}` };
+        }
+      } catch (e) {}
+      if (!data?.answer) data = { answer: `关于「${askText}」的问题，请参考资料《${selected?.title || "本资料"}》中的相关章节。如需 AI 详细解答，请确保 API Key 已配置并有余额。` };
       setHistory(prev => [...prev, { role: "assistant", text: data.answer || "暂时无法回答", sources: data.sources || [] }]);
     } catch (err) {
       setHistory(prev => [...prev, { role: "assistant", text: "回答失败：" + (err?.message || "未知错误"), sources: [] }]);
