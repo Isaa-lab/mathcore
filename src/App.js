@@ -250,7 +250,7 @@ const KNOWLEDGE_CONTENT = {
 };
 
 // ── Topic Modal ───────────────────────────────────────────────────────────────
-function TopicModal({ topic, onClose }) {
+function TopicModal({ topic, onClose, setPage, setChapterFilter }) {
   const content = KNOWLEDGE_CONTENT[topic];
   const vizKey = content?.viz;
   return (
@@ -309,7 +309,12 @@ function TopicModal({ topic, onClose }) {
           </>
         )}
 
-        <div style={{ marginTop: 20, display: "flex", gap: 10, justifyContent: "flex-end" }}>
+        <div style={{ marginTop: 20, display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center" }}>
+          {setPage && setChapterFilter && TOPIC_CHAPTER[topic] && (
+            <button onClick={() => { const ch = TOPIC_CHAPTER[topic]; setChapterFilter(ch); onClose(); setPage("题库练习"); }} style={{ padding: "10px 20px", background: G.blueLight, color: G.blue, border: `1px solid ${G.blue}44`, borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+              ✏️ 做相关题目 →
+            </button>
+          )}
           <button onClick={onClose} style={{ padding: "10px 24px", background: G.teal, color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 500, cursor: "pointer" }}>关闭</button>
         </div>
       </div>
@@ -662,7 +667,7 @@ function KnowledgePage({ setPage, setChapterFilter, sessionAnswers = {} }) {
   const filtered = filter === "全部" ? CHAPTERS : CHAPTERS.filter(c => c.course === filter);
   return (
     <>
-      {openTopic && <TopicModal topic={openTopic} onClose={() => setOpenTopic(null)} />}
+      {openTopic && <TopicModal topic={openTopic} onClose={() => setOpenTopic(null)} setPage={setPage} setChapterFilter={setChapterFilter} />}
       <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, padding: "2rem", maxWidth: 1140, margin: "0 auto" }}>
         {/* Sidebar */}
         <div style={{ ...s.card, padding: "1.25rem 0", height: "fit-content" }}>
@@ -722,7 +727,7 @@ function KnowledgePage({ setPage, setChapterFilter, sessionAnswers = {} }) {
                     <div style={{ width: 32, height: 32, borderRadius: "50%", background: status === "done" ? G.teal : "#e8e8e8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: status === "done" ? "#fff" : "#aaa", flexShrink: 0 }}>{i + 1}</div>
                     <div>
                       <div style={{ fontSize: 16, fontWeight: 600, color: "#111", marginBottom: 3 }}>{t}</div>
-                      <div style={{ fontSize: 12, color: "#888" }}>{hasContent ? "点击查看公式、步骤与可视化 →" : "内容整理中…"}</div>
+                      <div style={{ fontSize: 12, color: "#888" }}>{hasContent ? "点击查看公式与可视化" : "内容整理中…"}</div>
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
@@ -1102,39 +1107,184 @@ function ReportPage({ setPage }) {
   );
 }
 
+// ── Wrong Drill Mode ──────────────────────────────────────────────────────────
+function WrongDrill({ questions, onExit, onMastered }) {
+  const [idx, setIdx] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [answered, setAnswered] = useState(false);
+  const [masteredIds, setMasteredIds] = useState(new Set());
+
+  const q = questions[idx];
+  const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
+  const letters = ["A", "B", "C", "D"];
+
+  if (!q) return (
+    <div style={{ ...s.card, textAlign: "center", padding: "3rem", marginTop: 20 }}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>🎉</div>
+      <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>全部错题已复习完成！</div>
+      <div style={{ fontSize: 15, color: "#888", marginBottom: 20 }}>已掌握 {masteredIds.size} / {questions.length} 题</div>
+      <Btn variant="primary" onClick={onExit}>返回错题本</Btn>
+    </div>
+  );
+
+  const isCorrect = answered && (opts
+    ? letters[selected] === q.answer
+    : (selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误"));
+
+  const handleSubmit = () => {
+    if (selected === null) return;
+    setAnswered(true);
+    if (isCorrect) {
+      setMasteredIds(s => new Set([...s, q.id || q.question]));
+      if (onMastered) onMastered(q.id || q.question);
+    }
+  };
+
+  const handleNext = () => {
+    setIdx(i => i + 1);
+    setSelected(null);
+    setAnswered(false);
+  };
+
+  return (
+    <div style={{ maxWidth: 780, margin: "0 auto" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <Btn size="sm" onClick={onExit}>退出复习</Btn>
+        <div style={{ flex: 1, background: "#f0f0f0", borderRadius: 20, height: 6 }}>
+          <div style={{ height: 6, borderRadius: 20, background: G.teal, width: `${((idx) / questions.length) * 100}%`, transition: "width .4s" }} />
+        </div>
+        <span style={{ fontSize: 14, color: "#888" }}>{idx + 1} / {questions.length}</span>
+      </div>
+
+      {/* Question */}
+      <div style={{ ...s.card, marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <Badge color="red">错题复习</Badge>
+          <Badge color="amber">{q.chapter}</Badge>
+          <Badge color="blue">{q.type}</Badge>
+        </div>
+        <div style={{ fontSize: 18, color: "#111", lineHeight: 1.75, marginBottom: 22 }}>{q.question}</div>
+
+        {opts && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {opts.map((opt, i) => {
+              let border = "2px solid #eee", bg = "#fafafa", col = "#333";
+              if (answered) {
+                if (letters[i] === q.answer) { bg = G.tealLight; border = `2px solid ${G.teal}`; col = G.tealDark; }
+                else if (i === selected && letters[i] !== q.answer) { bg = G.redLight; border = `2px solid ${G.red}`; col = G.red; }
+              } else if (selected === i) { bg = G.tealLight; border = `2px solid ${G.teal}`; }
+              return (
+                <div key={i} onClick={() => !answered && setSelected(i)} style={{ padding: "14px 18px", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 14, alignItems: "center" }}>
+                  <div style={{ width: 28, height: 28, borderRadius: "50%", border: `2px solid ${col}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, background: selected === i ? G.teal : "transparent", color: selected === i ? "#fff" : col }}>{letters[i]}</div>
+                  <span style={{ fontSize: 15, color: col }}>{opt}</span>
+                  {answered && letters[i] === q.answer && <span style={{ marginLeft: "auto", color: G.teal, fontSize: 18 }}>✓</span>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {!opts && q.type === "判断题" && (
+          <div style={{ display: "flex", gap: 12 }}>
+            {["正确", "错误"].map((opt, i) => {
+              let border = "2px solid #eee", bg = "#fafafa";
+              if (answered) {
+                if (opt === q.answer) { bg = G.tealLight; border = `2px solid ${G.teal}`; }
+                else if (i === selected && opt !== q.answer) { bg = G.redLight; border = `2px solid ${G.red}`; }
+              } else if (selected === i) { bg = G.tealLight; border = `2px solid ${G.teal}`; }
+              return <div key={i} onClick={() => !answered && setSelected(i)} style={{ flex: 1, padding: "16px 0", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, textAlign: "center", fontSize: 17, fontWeight: 600 }}>{opt}</div>;
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Feedback after answering */}
+      {answered && (
+        <div style={{ ...s.card, marginBottom: 14, borderLeft: `4px solid ${isCorrect ? G.teal : G.red}`, background: isCorrect ? "#f0fdf8" : "#fff8f8" }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+            <div style={{ fontSize: 24 }}>{isCorrect ? "✅" : "❌"}</div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: isCorrect ? G.teal : G.red, marginBottom: 6 }}>
+                {isCorrect ? "答对了！已从错题本移除" : `答错了，正确答案是：${q.answer}`}
+              </div>
+              <div style={{ fontSize: 14, color: "#444", lineHeight: 1.7 }}>{q.explanation}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <Btn onClick={onExit}>{isCorrect ? "已掌握，退出" : "退出复习"}</Btn>
+        <div style={{ display: "flex", gap: 10 }}>
+          {!answered
+            ? <Btn variant="primary" onClick={handleSubmit} disabled={selected === null}>提交答案</Btn>
+            : <Btn variant="primary" onClick={handleNext}>{idx < questions.length - 1 ? "继续下一题 →" : "完成复习"}</Btn>
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Wrong Page ────────────────────────────────────────────────────────────────
-function WrongPage({ setPage, setRetryQuestion }) {
-  const wrongs = [
-    { q: ALL_QUESTIONS.find(q => q.id === "4"), label: "Newton法对任意初始值都能收敛" },
-    { q: ALL_QUESTIONS.find(q => q.id === "11"), label: "Runge 现象" },
-    { q: ALL_QUESTIONS.find(q => q.id === "7"), label: "LU 分解存在性" },
-    { q: ALL_QUESTIONS.find(q => q.id === "26"), label: "非线性规划全局最优" },
-  ].filter(w => w.q);
+function WrongPage({ setPage }) {
+  const WRONG_QS = [
+    ALL_QUESTIONS.find(q => q.id === "4"),
+    ALL_QUESTIONS.find(q => q.id === "11"),
+    ALL_QUESTIONS.find(q => q.id === "7"),
+    ALL_QUESTIONS.find(q => q.id === "26"),
+  ].filter(Boolean);
+
+  const [drillMode, setDrillMode] = useState(false);
+  const [drillStart, setDrillStart] = useState(0);
+  const [mastered, setMastered] = useState(new Set());
+  const remaining = WRONG_QS.filter(q => !mastered.has(q.id || q.question));
+
+  if (drillMode) return (
+    <div style={{ padding: "2rem", maxWidth: 820, margin: "0 auto" }}>
+      <WrongDrill
+        questions={remaining.slice(drillStart)}
+        onExit={() => setDrillMode(false)}
+        onMastered={id => setMastered(s => new Set([...s, id]))}
+      />
+    </div>
+  );
 
   return (
     <div style={{ padding: "2rem", maxWidth: 820, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
         <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
         <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>错题本</div>
-        <Badge color="red">{wrongs.length} 题</Badge>
+        <Badge color="red">{remaining.length} 题待复习</Badge>
+        {mastered.size > 0 && <Badge color="teal">已掌握 {mastered.size} 题</Badge>}
+        {remaining.length > 0 && (
+          <button onClick={() => { setDrillStart(0); setDrillMode(true); }} style={{ marginLeft: "auto", padding: "10px 22px", background: G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 15, fontWeight: 700, fontFamily: "inherit" }}>
+            🔄 开始全部复习
+          </button>
+        )}
       </div>
 
       <div style={{ ...s.card }}>
-        {wrongs.map((w, i) => (
-          <div key={i} style={{ padding: "18px 0", borderBottom: i < wrongs.length - 1 ? "1px solid #f5f5f5" : "none" }}>
+        {remaining.length === 0 && (
+          <div style={{ textAlign: "center", padding: "3rem", color: "#888" }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>🎉</div>
+            <div style={{ fontSize: 18, fontWeight: 600 }}>所有错题已掌握！</div>
+          </div>
+        )}
+        {remaining.map((q, i) => (
+          <div key={i} style={{ padding: "18px 0", borderBottom: i < remaining.length - 1 ? "1px solid #f5f5f5" : "none" }}>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-              <div style={{ width: 10, height: 10, borderRadius: "50%", background: G.red, marginTop: 6, flexShrink: 0 }} />
+              <div style={{ width: 10, height: 10, borderRadius: "50%", background: G.red, marginTop: 8, flexShrink: 0 }} />
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 16, color: "#111", marginBottom: 6, fontWeight: 400 }}>{w.q.question}</div>
-                <div style={{ fontSize: 14, color: G.tealDark, marginBottom: 6 }}>
-                  ✓ 正确答案：{w.q.answer}
-                </div>
-                <div style={{ fontSize: 13, color: "#999" }}>{w.q.chapter} · {w.q.type}</div>
+                <div style={{ fontSize: 15, color: "#111", marginBottom: 6 }}>{q.question}</div>
+                <div style={{ fontSize: 13, color: G.tealDark, marginBottom: 4 }}>✓ {q.answer}</div>
+                <div style={{ fontSize: 12, color: "#aaa" }}>{q.chapter} · {q.type}</div>
               </div>
-              <button
-                onClick={() => { setRetryQuestion(w.q); setPage("题库练习"); }}
-                style={{ padding: "9px 18px", background: G.teal, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "inherit", flexShrink: 0 }}
-              >重做此题</button>
+              <button onClick={() => { setDrillStart(i); setDrillMode(true); }} style={{ padding: "8px 16px", background: G.redLight, color: G.red, border: `1px solid ${G.red}44`, borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit", flexShrink: 0 }}>
+                重做此题
+              </button>
             </div>
           </div>
         ))}
@@ -1752,7 +1902,7 @@ export default function App() {
     if (page === "题库练习") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter) => { try { const updated = { ...sessionAnswers, [qid]: { correct, chapter } }; setSessionAnswers(updated); } catch(e) {} }} />;
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} />;
-    if (page === "错题本") return <WrongPage setPage={handleSetPage} setRetryQuestion={setRetryQuestion} />;
+    if (page === "错题本") return <WrongPage setPage={handleSetPage} />;
     if (page === "教师管理") return <TeacherPage setPage={handleSetPage} />;
     return null;
   };
