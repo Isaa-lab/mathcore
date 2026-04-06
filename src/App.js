@@ -567,7 +567,7 @@ function AuthPage() {
           </div>
           <div style={{ marginBottom: 20 }}>
             <label style={s.label}>密码</label>
-            <input style={s.input} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={mode === "register" ? "至少 6 位" : "输入密码"} />
+            <input style={s.input} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={mode === "register" ? "至少 6 位" : "输入密码"} onKeyDown={e => { if (e.key === "Enter") { if (mode === "login") handleLogin(); else handleRegister(); }}} />
           </div>
 
           <button disabled={loading} onClick={mode === "login" ? handleLogin : handleRegister} style={{ width: "100%", padding: "14px 0", fontSize: 16, fontWeight: 600, fontFamily: "inherit", background: loading ? "#9FE1CB" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: loading ? "not-allowed" : "pointer" }}>
@@ -628,12 +628,17 @@ function HomePage({ setPage, profile }) {
       </div>
 
       {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 24 }}>
-        <StatCard icon="📚" label="门课程" value="2" sub="数值分析 · 最优化" color={G.teal} />
-        <StatCard icon="📖" label="章节" value="12" sub="共 19 小节" color={G.blue} />
-        <StatCard icon="✏️" label="题目" value={ALL_QUESTIONS.length + "+"} sub="持续更新" color={G.amber} />
-        <StatCard icon="🃏" label="记忆卡片" value={FLASHCARDS.length} sub="公式定理" color={G.purple} />
-      </div>
+      {(() => {
+        const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); const today = new Date().toDateString(); if (d.last !== today) { const yesterday = new Date(Date.now()-86400000).toDateString(); const s = d.last === yesterday ? (d.count || 0) + 1 : 1; localStorage.setItem("mc_streak", JSON.stringify({last: today, count: s})); return s; } return d.count || 1; } catch { return 1; } })();
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 24 }}>
+            <StatCard icon="📚" label="门课程" value="2" sub="数值分析 · 最优化" color={G.teal} />
+            <StatCard icon="✏️" label="题目" value={ALL_QUESTIONS.length + "+"} sub="持续更新" color={G.amber} />
+            <StatCard icon="🃏" label="记忆卡片" value={FLASHCARDS.length} sub="公式定理" color={G.purple} />
+            <StatCard icon="🔥" label="连续学习" value={streak + " 天"} sub="保持每日练习！" color="#E24B4A" />
+          </div>
+        );
+      })()}
 
       {/* Quick access */}
       <div style={{ fontSize: 14, fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14 }}>快速入口</div>
@@ -762,6 +767,18 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [wrongList, setWrongList] = useState([]);
   const [finished, setFinished] = useState(false);
   const [quizMode, setQuizMode] = useState(initialQuestion ? "single" : null);
+  const [timer, setTimer] = useState(0);
+  const [timerOn, setTimerOn] = useState(false);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    if (timerOn && quizMode && !finished) {
+      timerRef.current = setInterval(() => setTimer(t => t + 1), 1000);
+      return () => clearInterval(timerRef.current);
+    }
+  }, [timerOn, quizMode, finished, current]);
+
+  useEffect(() => { setTimer(0); }, [current]);
 
   useEffect(() => {
     supabase.from("questions").select("*").then(({ data }) => {
@@ -804,6 +821,13 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             </div>
           ))}
         </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 20, padding: "14px", background: "#f9f9f9", borderRadius: 12 }}>
+          <span style={{ fontSize: 14, color: "#888" }}>⏱ 计时模式</span>
+          <div onClick={() => setTimerOn(v => !v)} style={{ width: 44, height: 24, borderRadius: 12, background: timerOn ? G.teal : "#ddd", cursor: "pointer", position: "relative", transition: "background .2s" }}>
+            <div style={{ position: "absolute", top: 3, left: timerOn ? 22 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />
+          </div>
+          <span style={{ fontSize: 13, color: "#aaa" }}>{timerOn ? "开启 — 记录用时" : "关闭"}</span>
+        </div>
       </div>
     </div>
   );
@@ -823,6 +847,20 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     else setWrongList(w => [...w, q]);
     if (onAnswer && q) onAnswer(q.id || q.question, correct, q.chapter || "Unknown");
   };
+
+  useEffect(() => {
+    if (!quizMode || finished || !q) return;
+    const handler = (e) => {
+      if (answered) { if (e.key === "Enter" || e.key === "ArrowRight") handleNext(); return; }
+      if (e.key === "1" || e.key === "a") setSelected(0);
+      if (e.key === "2" || e.key === "b") setSelected(1);
+      if (e.key === "3" || e.key === "c") setSelected(2);
+      if (e.key === "4" || e.key === "d") setSelected(3);
+      if (e.key === "Enter") handleSubmit();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [quizMode, finished, q, answered, selected]);
 
   const handleNext = () => {
     if (current >= displayQ.length - 1) { setFinished(true); return; }
@@ -894,6 +932,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           </div>
         </div>
       </div>
+
+      {/* Keyboard hint */}
+      <div style={{ fontSize: 12, color: "#ccc", textAlign: "right", marginBottom: 6 }}>按 1-4 选择答案 · Enter 提交</div>
 
       {/* Question card */}
       <div style={{ ...s.card, marginBottom: 14 }}>
@@ -976,6 +1017,17 @@ function FlashcardPage({ setPage }) {
   const chapters = ["全部", ...new Set(FLASHCARDS.map(f => f.chapter))];
   const filtered = filter === "全部" ? FLASHCARDS : FLASHCARDS.filter(f => f.chapter === filter);
   const card = filtered[idx];
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === "ArrowRight" || e.key === "l") { setIdx(i => Math.min(filtered.length - 1, i + 1)); setFlipped(false); }
+      if (e.key === "ArrowLeft" || e.key === "j") { setIdx(i => Math.max(0, i - 1)); setFlipped(false); }
+      if (e.key === " " || e.key === "k") { e.preventDefault(); setFlipped(v => !v); }
+      if (e.key === "Enter" && flipped) { setKnown(k => new Set([...k, card?.front])); if (idx < filtered.length - 1) { setIdx(i => i + 1); setFlipped(false); } }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [flipped, idx, filtered.length, card]);
 
   return (
     <div style={{ padding: "2rem", maxWidth: 720, margin: "0 auto" }}>
@@ -1318,18 +1370,21 @@ function UploadPage({ setPage, profile }) {
   const handleUpload = async () => {
     if (!title.trim()) { setError("请填写资料名称"); return; }
     if (!file) { setError("请选择 PDF 文件"); return; }
-    if (file.size > 5 * 1024 * 1024) { setError("文件超过 5MB，请压缩后再上传"); return; }
+    if (file.size > 50 * 1024 * 1024) { setError("文件超过 50MB，请压缩后再上传"); return; }
     setUploading(true); setError(""); setSuccess("");
-
     try {
-      setStep("读取文件…");
-      const fileData = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = e => res(e.target.result);
-        r.onerror = () => rej(new Error("读取失败"));
-        r.readAsDataURL(file);
-      });
+      // Upload file to Supabase Storage
+      setStep("上传文件到存储空间…");
+      const filePath = `${profile?.id || "anon"}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const { data: storageData, error: storageErr } = await supabase.storage
+        .from("materials")
+        .upload(filePath, file, { upsert: false });
+      if (storageErr) throw new Error("存储失败: " + storageErr.message);
 
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage.from("materials").getPublicUrl(filePath);
+
+      // Save metadata to DB
       setStep("保存到资料库…");
       const { error: dbErr } = await supabase.from("materials").insert({
         title: title.trim(),
@@ -1337,14 +1392,16 @@ function UploadPage({ setPage, profile }) {
         chapter: chapter === "全部" ? null : chapter,
         description: desc.trim() || null,
         file_name: file.name,
-        file_size: (file.size / 1024).toFixed(0) + " KB",
-        file_data: fileData,
+        file_size: file.size > 1024 * 1024
+          ? (file.size / 1024 / 1024).toFixed(1) + " MB"
+          : (file.size / 1024).toFixed(0) + " KB",
+        file_data: publicUrl,
         uploader_name: profile?.name || "用户",
         uploaded_by: profile?.id || null,
       });
       if (dbErr) throw new Error(dbErr.message);
 
-      setSuccess("上传成功！资料已发布到资料库，所有人均可查看。");
+      setSuccess("上传成功！资料已发布到资料库。");
       setTitle(""); setDesc(""); setFile(null); setChapter("全部");
     } catch (e) {
       setError("上传失败：" + e.message);
@@ -1409,7 +1466,7 @@ function UploadPage({ setPage, profile }) {
             <input ref={pdfRef} type="file" accept=".pdf" style={{ display: "none" }} onChange={e => { const f = e.target.files[0]; if (f) setFile(f); }} />
             <div style={{ fontSize: 32, marginBottom: 10 }}>{file ? "✅" : "📂"}</div>
             <div style={{ fontSize: 15, fontWeight: 600, color: file ? G.tealDark : "#333", marginBottom: 4 }}>{file ? file.name : "点击选择 PDF 文件"}</div>
-            <div style={{ fontSize: 13, color: "#aaa" }}>{file ? `${(file.size / 1024).toFixed(0)} KB` : "仅支持 PDF，最大 5MB"}</div>
+            <div style={{ fontSize: 13, color: "#aaa" }}>{file ? `${(file.size / 1024).toFixed(0)} KB` : "支持 PDF，最大 50MB"}</div>
           </div>
         </div>
 
@@ -1439,6 +1496,7 @@ function MaterialsPage({ setPage, profile }) {
   const [noteSaved, setNoteSaved] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [filter, setFilter] = useState("全部");
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     supabase.from("materials").select("*").order("created_at", { ascending: false }).then(({ data }) => {
@@ -1464,7 +1522,7 @@ function MaterialsPage({ setPage, profile }) {
   };
 
   const courses = ["全部", ...new Set(materials.map(m => m.course))];
-  const filtered = filter === "全部" ? materials : materials.filter(m => m.course === filter);
+  const filtered = materials.filter(m => (filter === "全部" || m.course === filter) && (!search.trim() || [m.title, m.course, m.description].some(s => s && s.toLowerCase().includes(search.toLowerCase()))));
 
   if (selected) return (
     <div style={{ padding: "2rem", maxWidth: 1100, margin: "0 auto" }}>
@@ -1565,11 +1623,14 @@ function MaterialsPage({ setPage, profile }) {
         <Btn variant="primary" onClick={() => setPage("上传资料")}>+ 上传资料</Btn>
       </div>
 
-      {/* Filter */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-        {courses.map(c => (
-          <button key={c} onClick={() => setFilter(c)} style={{ fontSize: 14, padding: "8px 18px", borderRadius: 20, border: "2px solid " + (filter === c ? G.teal : "#e0e0e0"), cursor: "pointer", fontFamily: "inherit", fontWeight: filter === c ? 700 : 400, background: filter === c ? G.teal : "#fff", color: filter === c ? "#fff" : "#666" }}>{c}</button>
-        ))}
+      {/* Search + Filter */}
+      <div style={{ marginBottom: 16 }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 搜索资料名称、课程或简介…" style={{ width: "100%", fontSize: 15, padding: "12px 16px", border: "1.5px solid #e0e0e0", borderRadius: 12, fontFamily: "inherit", color: "#111", boxSizing: "border-box", marginBottom: 12 }} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {courses.map(c => (
+            <button key={c} onClick={() => setFilter(c)} style={{ fontSize: 14, padding: "8px 18px", borderRadius: 20, border: "2px solid " + (filter === c ? G.teal : "#e0e0e0"), cursor: "pointer", fontFamily: "inherit", fontWeight: filter === c ? 700 : 400, background: filter === c ? G.teal : "#fff", color: filter === c ? "#fff" : "#666" }}>{c}</button>
+          ))}
+        </div>
       </div>
 
       {loading && <div style={{ textAlign: "center", padding: "4rem", color: "#aaa", fontSize: 16 }}>加载中…</div>}
