@@ -528,8 +528,8 @@ function AuthPage() {
 // ── Nav ───────────────────────────────────────────────────────────────────────
 function TopNav({ page, setPage, profile, onLogout }) {
   const links = profile?.role === "teacher"
-    ? ["首页", "知识点", "题库练习", "记忆卡片", "学习报告", "错题本", "教师管理"]
-    : ["首页", "知识点", "题库练习", "记忆卡片", "学习报告", "错题本"];
+    ? ["首页", "资料库", "知识点", "题库练习", "记忆卡片", "学习报告", "错题本", "教师管理"]
+    : ["首页", "资料库", "知识点", "题库练习", "记忆卡片", "学习报告", "错题本"];
   return (
     <div style={{ background: "#fff", borderBottom: "1px solid #f0f0f0", padding: "0 2rem", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 12px rgba(0,0,0,0.04)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -1063,6 +1063,155 @@ function WrongPage({ setPage, setRetryQuestion }) {
   );
 }
 
+
+// ── Materials Library Page ─────────────────────────────────────────────────────
+function MaterialsPage({ setPage, profile }) {
+  const [materials, setMaterials] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+  const [note, setNote] = useState("");
+  const [noteSaved, setNoteSaved] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
+  const [filter, setFilter] = useState("全部");
+
+  useEffect(() => {
+    supabase.from("materials").select("*").order("created_at", { ascending: false }).then(({ data }) => {
+      setMaterials(data || []);
+      setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!selected || !profile) return;
+    setNote(""); setNoteSaved(false);
+    supabase.from("notes").select("content").eq("user_id", profile.id).eq("material_id", selected.id).single().then(({ data }) => {
+      if (data) setNote(data.content);
+    });
+  }, [selected, profile]);
+
+  const saveNote = async () => {
+    if (!profile || !selected) return;
+    setSavingNote(true);
+    const { error } = await supabase.from("notes").upsert({ user_id: profile.id, material_id: selected.id, content: note, updated_at: new Date().toISOString() }, { onConflict: "user_id,material_id" });
+    if (!error) { setNoteSaved(true); setTimeout(() => setNoteSaved(false), 2000); }
+    setSavingNote(false);
+  };
+
+  const courses = ["全部", ...new Set(materials.map(m => m.course))];
+  const filtered = filter === "全部" ? materials : materials.filter(m => m.course === filter);
+
+  if (selected) return (
+    <div style={{ padding: "2rem", maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+        <Btn size="sm" onClick={() => setSelected(null)}>← 返回资料库</Btn>
+        <div style={{ fontSize: 20, fontWeight: 700, color: "#111" }}>{selected.title}</div>
+        <Badge color={selected.course === "数值分析" ? "teal" : "blue"}>{selected.course}</Badge>
+        {selected.chapter && <Badge color="amber">{selected.chapter}</Badge>}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16 }}>
+        {/* PDF Viewer */}
+        <div style={{ ...s.card, padding: 0, overflow: "hidden" }}>
+          {selected.file_data ? (
+            <iframe
+              src={selected.file_data}
+              style={{ width: "100%", height: "75vh", border: "none" }}
+              title={selected.title}
+            />
+          ) : (
+            <div style={{ height: "75vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#aaa", gap: 14 }}>
+              <div style={{ fontSize: 48 }}>📄</div>
+              <div style={{ fontSize: 16 }}>PDF 文件未上传或已过期</div>
+              <div style={{ fontSize: 13 }}>请联系教师重新上传</div>
+            </div>
+          )}
+        </div>
+
+        {/* Notes panel */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ ...s.card }}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>📋 资料信息</div>
+            <div style={{ fontSize: 13, color: "#888", lineHeight: 1.8 }}>
+              <div>上传者：{selected.uploader_name || "教师"}</div>
+              <div>文件：{selected.file_name}</div>
+              <div>大小：{selected.file_size}</div>
+              <div>时间：{new Date(selected.created_at).toLocaleDateString("zh-CN")}</div>
+            </div>
+            {selected.description && (
+              <div style={{ marginTop: 12, fontSize: 14, color: "#444", lineHeight: 1.6, padding: "10px 14px", background: G.tealLight, borderRadius: 10 }}>{selected.description}</div>
+            )}
+          </div>
+
+          <div style={{ ...s.card, flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>✏️ 我的笔记</div>
+            <textarea
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              placeholder="在此记录学习笔记、重点、疑问…"
+              style={{ width: "100%", minHeight: 260, fontSize: 14, padding: "12px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontFamily: "inherit", resize: "vertical", color: "#111", lineHeight: 1.7, boxSizing: "border-box" }}
+            />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
+              <span style={{ fontSize: 12, color: "#aaa" }}>{note.length} 字</span>
+              <button onClick={saveNote} disabled={savingNote || !note.trim()} style={{ padding: "9px 20px", background: noteSaved ? G.tealLight : G.teal, color: noteSaved ? G.tealDark : "#fff", border: "none", borderRadius: 10, cursor: savingNote ? "not-allowed" : "pointer", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>
+                {noteSaved ? "✓ 已保存" : savingNote ? "保存中…" : "保存笔记"}
+              </button>
+            </div>
+          </div>
+
+          <Btn variant="primary" onClick={() => setPage("题库练习")}>做相关练习题 →</Btn>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "2rem", maxWidth: 1000, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+        <div>
+          <div style={{ fontSize: 26, fontWeight: 700, color: "#111", marginBottom: 4 }}>📚 教材资料库</div>
+          <div style={{ fontSize: 15, color: "#888" }}>所有上传的教材均可查看和做笔记</div>
+        </div>
+        {profile?.role === "teacher" && <Btn variant="primary" onClick={() => setPage("教师管理")}>上传新教材 +</Btn>}
+      </div>
+
+      {/* Filter */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+        {courses.map(c => (
+          <button key={c} onClick={() => setFilter(c)} style={{ fontSize: 14, padding: "8px 18px", borderRadius: 20, border: "2px solid " + (filter === c ? G.teal : "#e0e0e0"), cursor: "pointer", fontFamily: "inherit", fontWeight: filter === c ? 700 : 400, background: filter === c ? G.teal : "#fff", color: filter === c ? "#fff" : "#666" }}>{c}</button>
+        ))}
+      </div>
+
+      {loading && <div style={{ textAlign: "center", padding: "4rem", color: "#aaa", fontSize: 16 }}>加载中…</div>}
+
+      {!loading && filtered.length === 0 && (
+        <div style={{ ...s.card, textAlign: "center", padding: "4rem" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>📭</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: "#333", marginBottom: 8 }}>暂无资料</div>
+          <div style={{ fontSize: 15, color: "#888" }}>{profile?.role === "teacher" ? "点击右上角上传第一份教材" : "请等待教师上传教材"}</div>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+        {filtered.map(m => (
+          <div key={m.id} onClick={() => setSelected(m)} style={{ ...s.card, cursor: "pointer", transition: "transform .15s, box-shadow .15s", borderTop: `4px solid ${m.course === "数值分析" ? G.teal : G.blue}` }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>📄</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "#111", marginBottom: 6 }}>{m.title}</div>
+            {m.description && <div style={{ fontSize: 14, color: "#666", marginBottom: 10, lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{m.description}</div>}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <Badge color={m.course === "数值分析" ? "teal" : "blue"}>{m.course}</Badge>
+              {m.chapter && <Badge color="amber">{m.chapter}</Badge>}
+            </div>
+            <div style={{ fontSize: 12, color: "#aaa", borderTop: "1px solid #f5f5f5", paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
+              <span>{m.uploader_name || "教师"} 上传</span>
+              <span>{new Date(m.created_at).toLocaleDateString("zh-CN")}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Teacher Page ──────────────────────────────────────────────────────────────
 function TeacherPage({ setPage }) {
   const [tab, setTab] = useState("学生管理");
@@ -1078,9 +1227,22 @@ function TeacherPage({ setPage }) {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [hwAssigned, setHwAssigned] = useState({});
   const pdfRef = useRef();
+  // Material upload states
+  const [matTitle, setMatTitle] = useState("");
+  const [matCourse, setMatCourse] = useState("数值分析");
+  const [matChapter, setMatChapter] = useState("");
+  const [matDesc, setMatDesc] = useState("");
+  const [matFile, setMatFile] = useState(null);
+  const [matError, setMatError] = useState("");
+  const [matSuccess, setMatSuccess] = useState("");
+  const [extracting, setExtracting] = useState(false);
+  const [extractStep, setExtractStep] = useState("");
+  const [extractResult, setExtractResult] = useState(null);
+  const [uploadedMaterials, setUploadedMaterials] = useState([]);
 
   useEffect(() => {
     supabase.from("questions").select("*").order("created_at", { ascending: false }).then(({ data }) => { if (data) setDbQuestions(data); });
+    supabase.from("materials").select("*").order("created_at", { ascending: false }).then(({ data }) => { if (data) setUploadedMaterials(data); });
   }, []);
 
   const handlePdfDrop = useCallback((e) => {
@@ -1106,6 +1268,70 @@ function TeacherPage({ setPage }) {
       setAiError("生成失败：" + err.message);
     }
     setAiLoading(false);
+  };
+
+  const handleUploadAndExtract = async () => {
+    if (!matFile || !matTitle) return;
+    setExtracting(true); setMatError(""); setMatSuccess(""); setExtractResult(null);
+    try {
+      // Step 1: Read PDF as base64 for storage
+      setExtractStep("读取 PDF 文件…");
+      const fileData = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target.result);
+        reader.onerror = () => reject(new Error("读取失败"));
+        reader.readAsDataURL(matFile);
+      });
+
+      // Step 2: Extract text from PDF (read as text)
+      setExtractStep("提取 PDF 文字内容…");
+      const textReader = new FileReader();
+      const pdfText = await new Promise((resolve) => {
+        textReader.onload = e => resolve(e.target.result || "");
+        textReader.onerror = () => resolve("");
+        textReader.readAsText(matFile);
+      });
+
+      // Step 3: Call AI extraction API
+      setExtractStep("AI 正在分析教材内容并生成题目…");
+      const res = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: pdfText, course: matCourse, chapter: matChapter, count: 5 }),
+      });
+      const result = await res.json();
+      if (result.error) throw new Error(result.error);
+      setExtractResult(result);
+
+      // Step 4: Save material to Supabase
+      setExtractStep("保存教材到资料库…");
+      const { data: matData, error: matErr } = await supabase.from("materials").insert({
+        title: matTitle, course: matCourse, chapter: matChapter, description: matDesc,
+        file_name: matFile.name, file_size: (matFile.size / 1024).toFixed(0) + " KB",
+        file_data: fileData, uploader_name: "教师",
+      }).select().single();
+      if (matErr) throw new Error("保存资料失败: " + matErr.message);
+      setUploadedMaterials(prev => [matData, ...prev]);
+
+      // Step 5: Save questions to DB
+      setExtractStep("保存题目到题库…");
+      if (result.questions?.length > 0) {
+        const qs = result.questions.map(q => ({
+          chapter: matChapter || matCourse, course: matCourse,
+          type: "单选题", question: q.question,
+          options: q.options, answer: q.answer, explanation: q.explanation,
+        }));
+        await supabase.from("questions").insert(qs);
+        const { data: newQs } = await supabase.from("questions").select("*").order("created_at", { ascending: false });
+        if (newQs) setDbQuestions(newQs);
+      }
+
+      setMatSuccess(`上传成功！提取了 ${result.topics?.length || 0} 个知识点，生成了 ${result.questions?.length || 0} 道题目，已发布到资料库。`);
+      setMatTitle(""); setMatChapter(""); setMatDesc(""); setMatFile(null);
+    } catch (err) {
+      setMatError("上传失败：" + err.message);
+    }
+    setExtracting(false); setExtractStep("");
   };
 
   const saveToDb = async (q) => {
@@ -1245,23 +1471,84 @@ function TeacherPage({ setPage }) {
       {tab === "上传教材" && (
         <div style={{ ...s.card }}>
           <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>上传教材 PDF</div>
-          <div style={{ fontSize: 15, color: "#888", marginBottom: 20 }}>上传教材后，AI 将基于内容自动出题</div>
-          <div onDrop={handlePdfDrop} onDragOver={e => e.preventDefault()} onClick={() => pdfRef.current?.click()} style={{ border: "2px dashed #ddd", borderRadius: 16, padding: "3.5rem", textAlign: "center", cursor: "pointer", marginBottom: 20, background: "#fafafa" }}>
-            <input ref={pdfRef} type="file" accept=".pdf" multiple style={{ display: "none" }} onChange={handlePdfDrop} />
-            <div style={{ fontSize: 36, marginBottom: 12 }}>📂</div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6 }}>拖拽 PDF 到此处，或点击选择</div>
-            <div style={{ fontSize: 14, color: "#aaa" }}>支持多文件，仅限 PDF 格式</div>
-          </div>
-          {uploadedFiles.map((f, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 0", borderBottom: "1px solid #f5f5f5" }}>
-              <span style={{ fontSize: 20 }}>📄</span>
-              <div style={{ flex: 1 }}><div style={{ fontSize: 15, fontWeight: 500 }}>{f.name}</div><div style={{ fontSize: 13, color: "#aaa", marginTop: 2 }}>{f.size} · {f.date}</div></div>
-              <Badge color="teal">已上传</Badge>
+          <div style={{ fontSize: 15, color: "#888", marginBottom: 20 }}>上传后 AI 自动提取知识点并生成题目，所有学生均可在资料库查看</div>
+
+          {/* Upload form */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+            <div>
+              <div style={{ fontSize: 13, color: "#666", marginBottom: 5, fontWeight: 500 }}>资料标题 *</div>
+              <input value={matTitle} onChange={e => setMatTitle(e.target.value)} placeholder="例：数值分析第三章讲义" style={{ ...s.input }} />
             </div>
-          ))}
-          <div style={{ marginTop: 16, padding: "14px 18px", background: G.tealLight, borderRadius: 12, fontSize: 15, color: G.tealDark }}>
-            📚 已有教材：<strong>数值分析（Sauer, 2nd Ed.）</strong>・<strong>最优化 Ch.1（OR4030）</strong>
+            <div>
+              <div style={{ fontSize: 13, color: "#666", marginBottom: 5, fontWeight: 500 }}>课程</div>
+              <select value={matCourse} onChange={e => setMatCourse(e.target.value)} style={{ width: "100%", fontSize: 14, padding: "11px 12px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontFamily: "inherit", background: "#fff" }}>
+                <option>数值分析</option>
+                <option>最优化</option>
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 13, color: "#666", marginBottom: 5, fontWeight: 500 }}>章节</div>
+              <input value={matChapter} onChange={e => setMatChapter(e.target.value)} placeholder="例：Ch.3 插值" style={{ ...s.input }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 13, color: "#666", marginBottom: 5, fontWeight: 500 }}>简介（可选）</div>
+              <input value={matDesc} onChange={e => setMatDesc(e.target.value)} placeholder="本资料涵盖…" style={{ ...s.input }} />
+            </div>
           </div>
+
+          <div onDrop={handlePdfDrop} onDragOver={e => e.preventDefault()} onClick={() => pdfRef.current?.click()} style={{ border: "2px dashed " + (matFile ? G.teal : "#ddd"), borderRadius: 16, padding: "2.5rem", textAlign: "center", cursor: "pointer", marginBottom: 16, background: matFile ? G.tealLight : "#fafafa" }}>
+            <input ref={pdfRef} type="file" accept=".pdf" style={{ display: "none" }} onChange={e => { const f = e.target.files[0]; if (f) setMatFile(f); }} />
+            <div style={{ fontSize: 36, marginBottom: 10 }}>{matFile ? "✅" : "📂"}</div>
+            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4, color: matFile ? G.tealDark : "#333" }}>{matFile ? matFile.name : "点击选择 PDF 文件"}</div>
+            <div style={{ fontSize: 13, color: "#aaa" }}>{matFile ? (matFile.size / 1024).toFixed(0) + " KB" : "仅支持 PDF 格式"}</div>
+          </div>
+
+          {matError && <div style={{ padding: "12px 16px", background: G.redLight, color: G.red, borderRadius: 10, fontSize: 14, marginBottom: 14 }}>{matError}</div>}
+          {matSuccess && <div style={{ padding: "12px 16px", background: G.tealLight, color: G.tealDark, borderRadius: 10, fontSize: 14, marginBottom: 14 }}>{matSuccess}</div>}
+
+          {extracting && (
+            <div style={{ padding: "20px", background: "#fafafa", borderRadius: 12, marginBottom: 14, textAlign: "center" }}>
+              <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
+              <div style={{ fontSize: 15, color: "#666" }}>{extractStep}</div>
+            </div>
+          )}
+
+          {extractResult && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12, color: G.tealDark }}>✅ AI 提取结果</div>
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 13, color: "#888", marginBottom: 8, fontWeight: 500 }}>提取到的知识点：</div>
+                {extractResult.topics?.map((t, i) => (
+                  <div key={i} style={{ padding: "8px 14px", background: G.tealLight, borderRadius: 8, marginBottom: 6, fontSize: 14, color: G.tealDark }}>
+                    <strong>{t.name}</strong>：{t.summary}
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 13, color: "#888", marginBottom: 8, fontWeight: 500 }}>生成了 {extractResult.questions?.length || 0} 道题目（将自动保存到题库）</div>
+            </div>
+          )}
+
+          <button disabled={extracting || !matFile || !matTitle} onClick={handleUploadAndExtract} style={{ width: "100%", padding: "14px 0", fontSize: 16, fontWeight: 700, fontFamily: "inherit", background: extracting || !matFile || !matTitle ? "#ccc" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: extracting || !matFile || !matTitle ? "not-allowed" : "pointer" }}>
+            {extracting ? extractStep : "📤 上传教材并 AI 出题"}
+          </button>
+
+          {/* Existing materials */}
+          {uploadedMaterials.length > 0 && (
+            <div style={{ marginTop: 20, borderTop: "1px solid #f0f0f0", paddingTop: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#888", marginBottom: 12 }}>已上传的资料</div>
+              {uploadedMaterials.map((m, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 0", borderBottom: "1px solid #f5f5f5" }}>
+                  <span style={{ fontSize: 20 }}>📄</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 500 }}>{m.title}</div>
+                    <div style={{ fontSize: 12, color: "#aaa" }}>{m.file_name} · {m.file_size}</div>
+                  </div>
+                  <Badge color="teal">已发布</Badge>
+                  <Btn size="sm" onClick={async () => { await supabase.from("materials").delete().eq("id", m.id); setUploadedMaterials(prev => prev.filter(x => x.id !== m.id)); }}>删除</Btn>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -1376,6 +1663,7 @@ export default function App() {
 
   const renderPage = () => {
     if (page === "首页") return <HomePage setPage={handleSetPage} profile={profile} />;
+    if (page === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
     if (page === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
     if (page === "题库练习") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} />;
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
