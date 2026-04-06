@@ -602,7 +602,7 @@ function HomePage({ setPage, profile }) {
 }
 
 // ── Knowledge Page ────────────────────────────────────────────────────────────
-function KnowledgePage({ setPage }) {
+function KnowledgePage({ setPage, setChapterFilter }) {
   const [sel, setSel] = useState(CHAPTERS[0]);
   const [filter, setFilter] = useState("全部");
   const [openTopic, setOpenTopic] = useState(null);
@@ -638,7 +638,7 @@ function KnowledgePage({ setPage }) {
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <Btn size="sm" onClick={() => setPage("记忆卡片")}>🃏 记忆卡片</Btn>
-              <Btn size="sm" variant="primary" onClick={() => setPage("题库练习")}>章节练习 →</Btn>
+              <Btn size="sm" variant="primary" onClick={() => { setChapterFilter(sel.num); setPage("题库练习"); }}>章节练习 →</Btn>
             </div>
           </div>
 
@@ -673,7 +673,7 @@ function KnowledgePage({ setPage }) {
 }
 
 // ── Quiz Page ─────────────────────────────────────────────────────────────────
-function QuizPage({ setPage, initialQuestion = null }) {
+function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setChapterFilter }) {
   const [questions, setQuestions] = useState([]);
   const [current, setCurrent] = useState(0);
   const [selected, setSelected] = useState(null);
@@ -687,9 +687,13 @@ function QuizPage({ setPage, initialQuestion = null }) {
 
   useEffect(() => {
     supabase.from("questions").select("*").then(({ data }) => {
-      const pool = data?.length ? [...data, ...ALL_QUESTIONS] : ALL_QUESTIONS;
+      let pool = data?.length ? [...data, ...ALL_QUESTIONS] : ALL_QUESTIONS;
+      // filter by chapter if set
+      if (chapterFilter) {
+        const filtered = pool.filter(q => q.chapter && q.chapter.startsWith(chapterFilter));
+        pool = filtered.length > 0 ? filtered : pool;
+      }
       if (initialQuestion) {
-        // put the specific question first
         const rest = pool.filter(q => q.id !== initialQuestion.id).sort(() => Math.random() - 0.5);
         setQuestions([initialQuestion, ...rest.slice(0, 4)]);
       } else {
@@ -705,11 +709,12 @@ function QuizPage({ setPage, initialQuestion = null }) {
       <div style={{ ...s.card, textAlign: "center", padding: "3rem" }}>
         <div style={{ fontSize: 36, marginBottom: 14 }}>✏️</div>
         <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 10, color: "#111" }}>选择练习模式</div>
-        <div style={{ fontSize: 15, color: "#888", marginBottom: 28 }}>共 {questions.length} 道题目可用</div>
+        {chapterFilter && <div style={{ display: "inline-block", background: G.tealLight, color: G.tealDark, fontSize: 14, fontWeight: 600, padding: "6px 16px", borderRadius: 20, marginBottom: 12 }}>📖 {chapterFilter} 章节题目</div>}
+        <div style={{ fontSize: 15, color: "#888", marginBottom: 28 }}>共 {questions.length} 道题目可用{chapterFilter ? `（已筛选 ${chapterFilter} 章节）` : "（全部章节）"}</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           {[
-            { mode: "daily", icon: "⚡", title: "每日练习", desc: "随机 5 题，轻松刷题", bg: "#EEF4FF", color: G.blue },
-            { mode: "full", icon: "📚", title: "完整练习", desc: "全部题目，系统训练", bg: G.tealLight, color: G.teal },
+            { mode: "daily", icon: "⚡", title: "每日练习", desc: chapterFilter ? `本章随机 5 题` : "随机 5 题，轻松刷题", bg: "#EEF4FF", color: G.blue },
+            { mode: "full", icon: "📚", title: chapterFilter ? "章节全练" : "完整练习", desc: chapterFilter ? `${chapterFilter} 全部题目` : "全部题目，系统训练", bg: G.tealLight, color: G.teal },
           ].map(m => (
             <div key={m.mode} onClick={() => setQuizMode(m.mode)} style={{ background: m.bg, border: `2px solid ${m.color}44`, borderRadius: 16, padding: "1.5rem", cursor: "pointer" }}>
               <div style={{ fontSize: 28, marginBottom: 10 }}>{m.icon}</div>
@@ -988,7 +993,7 @@ function ReportPage({ setPage }) {
                 <span style={{ fontSize: 15, color: "#333" }}>{c.name}</span>
                 <div style={{ display: "flex", gap: 10 }}>
                   <Badge color="red">{Math.round(c.correct / c.total * 100)}%</Badge>
-                  <Btn size="sm" onClick={() => setPage("题库练习")}>练习</Btn>
+                  <Btn size="sm" onClick={() => { if (setChapterFilter) setChapterFilter(c.name.split(" ")[0]); setPage("题库练习"); }}>练习</Btn>
                 </div>
               </div>
             ))}
@@ -1329,6 +1334,7 @@ export default function App() {
   const [page, setPage] = useState("首页");
   const [loading, setLoading] = useState(true);
   const [retryQuestion, setRetryQuestion] = useState(null);
+  const [chapterFilter, setChapterFilter] = useState(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1353,7 +1359,7 @@ export default function App() {
   const handleLogout = async () => { await supabase.auth.signOut(); setPage("首页"); };
 
   const handleSetPage = (p) => {
-    if (p !== "题库练习") setRetryQuestion(null);
+    if (p !== "题库练习") { setRetryQuestion(null); setChapterFilter(null); }
     setPage(p);
   };
 
@@ -1370,8 +1376,8 @@ export default function App() {
 
   const renderPage = () => {
     if (page === "首页") return <HomePage setPage={handleSetPage} profile={profile} />;
-    if (page === "知识点") return <KnowledgePage setPage={handleSetPage} />;
-    if (page === "题库练习") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} />;
+    if (page === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
+    if (page === "题库练习") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} />;
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} />;
     if (page === "错题本") return <WrongPage setPage={handleSetPage} setRetryQuestion={setRetryQuestion} />;
