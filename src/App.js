@@ -1789,6 +1789,7 @@ function TeacherPage({ setPage, profile }) {
   const [reviewMsg, setReviewMsg] = useState("");
   const [seeding, setSeeding] = useState(false);
   const [seedMsg, setSeedMsg] = useState("");
+  const [previewQuestion, setPreviewQuestion] = useState(null);
 
   const refreshMaterials = async () => {
     const { data } = await supabase.from("materials").select("*").order("created_at", { ascending: false });
@@ -2130,12 +2131,36 @@ function TeacherPage({ setPage, profile }) {
           </div>
           {seedMsg && <div style={{ padding: "10px 12px", borderRadius: 10, background: G.tealLight, color: G.tealDark, marginBottom: 12, fontSize: 14 }}>{seedMsg}</div>}
           {dbQuestions.length === 0 && <div style={{ textAlign: "center", padding: "3rem", color: "#aaa", fontSize: 16 }}>📝 暂无题目，请先用 AI 出题</div>}
+          {previewQuestion && (
+            <div style={{ border: "1px solid #e8f2ee", background: "#f8fffb", borderRadius: 12, padding: "14px 16px", marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Badge color="blue">{previewQuestion.type}</Badge>
+                  <Badge color="amber">{previewQuestion.chapter}</Badge>
+                </div>
+                <Btn size="sm" onClick={() => setPreviewQuestion(null)}>关闭</Btn>
+              </div>
+              <div style={{ fontSize: 15, color: "#111", lineHeight: 1.7, marginBottom: 10 }}>{previewQuestion.question}</div>
+              {previewQuestion.options && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                  {(typeof previewQuestion.options === "string" ? JSON.parse(previewQuestion.options) : previewQuestion.options).map((opt, idx) => (
+                    <div key={idx} style={{ fontSize: 13, padding: "8px 10px", background: "#fff", border: "1px solid #eee", borderRadius: 8, color: "#444" }}>{opt}</div>
+                  ))}
+                </div>
+              )}
+              <div style={{ fontSize: 13, color: "#555" }}>
+                <strong>答案：</strong>{previewQuestion.answer}
+                {previewQuestion.explanation ? <>　·　<strong>解析：</strong>{previewQuestion.explanation}</> : null}
+              </div>
+            </div>
+          )}
           {dbQuestions.map((q, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 0", borderBottom: "1px solid #f5f5f5" }}>
+            <div key={i} onClick={() => setPreviewQuestion(q)} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 0", borderBottom: "1px solid #f5f5f5", cursor: "pointer" }}>
               <Badge color="amber">{q.chapter}</Badge>
               <div style={{ flex: 1, fontSize: 15, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.question}</div>
               <Badge color="blue">{q.type}</Badge>
-              <Btn size="sm" onClick={() => deleteQuestion(q.id)}>删除</Btn>
+              <Btn size="sm" onClick={(e) => { e.stopPropagation(); setPreviewQuestion(q); }}>查看</Btn>
+              <Btn size="sm" onClick={(e) => { e.stopPropagation(); deleteQuestion(q.id); }}>删除</Btn>
             </div>
           ))}
         </div>
