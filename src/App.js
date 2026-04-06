@@ -30,6 +30,17 @@ const isMissingMaterialsStatusColumn = (err) => {
   return false;
 };
 
+const isMissingQuestionsMaterialIdColumn = (err) => {
+  const msg = String(err?.message || "");
+  const code = String(err?.code || "");
+  if (/Could not find the ['"]material_id['"] column of ['"]questions['"]/i.test(msg)) return true;
+  if (/column\s+.*\bmaterial_id\b.*does not exist/i.test(msg)) return true;
+  if ((code === "PGRST204" || msg.includes("PGRST204")) && /\bmaterial_id\b/i.test(msg) && /\bquestions\b/i.test(msg)) {
+    return true;
+  }
+  return false;
+};
+
 const getFileExt = (name = "") => {
   const idx = name.lastIndexOf(".");
   return idx >= 0 ? name.slice(idx).toLowerCase() : "";
@@ -193,6 +204,26 @@ const processMaterialWithAI = async ({
   };
 
   await startJob();
+  const insertQuestionsForMaterial = async (questions) => {
+    if (!questions.length) return { insertedCount: 0, materialLinked: true };
+    const withMaterial = questions.map((q) => ({
+      chapter: q.chapter || material?.chapter || material?.course || "资料专题",
+      course: material?.course || "数学",
+      type: q.type || (q.options ? "单选题" : "判断题"),
+      question: q.question,
+      options: q.options || null,
+      answer: q.answer || (q.options ? "A" : "正确"),
+      explanation: q.explanation || "",
+      material_id: materialId,
+    }));
+    let { error } = await supabase.from("questions").insert(withMaterial);
+    if (!error) return { insertedCount: withMaterial.length, materialLinked: true };
+    if (!isMissingQuestionsMaterialIdColumn(error)) throw error;
+    const withoutMaterial = withMaterial.map(({ material_id, ...rest }) => rest);
+    const retry = await supabase.from("questions").insert(withoutMaterial);
+    if (retry.error) throw retry.error;
+    return { insertedCount: withoutMaterial.length, materialLinked: false };
+  };
   try {
     const res = await fetch("/api/extract", {
       method: "POST",
@@ -243,24 +274,10 @@ const processMaterialWithAI = async ({
       } catch (e) {}
     }
 
-    if (questions.length > 0) {
-      try {
-        const qs = questions.map((q) => ({
-          chapter: material?.chapter || material?.course || "资料专题",
-          course: material?.course || "数学",
-          type: "单选题",
-          question: q.question,
-          options: q.options || null,
-          answer: q.answer || "A",
-          explanation: q.explanation || "",
-          material_id: materialId,
-        }));
-        await supabase.from("questions").insert(qs);
-      } catch (e) {}
-    }
+    const qResult = await insertQuestionsForMaterial(questions);
 
     await finishJob(true);
-    return { topics, questions, chunks, ext, actorName };
+    return { topics, questions, chunks, ext, actorName, insertedCount: qResult.insertedCount, materialLinked: qResult.materialLinked };
   } catch (err) {
     // Hard fallback: AI failure still guarantees question availability.
     const topics = buildFallbackTopics(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter, 4);
@@ -287,21 +304,11 @@ const processMaterialWithAI = async ({
           solution_hint: null,
         })));
       }
-      if (questions.length > 0) {
-        await supabase.from("questions").insert(questions.map((q) => ({
-          chapter: q.chapter || material?.chapter || material?.course || "资料专题",
-          course: material?.course || "数学",
-          type: q.type || "单选题",
-          question: q.question,
-          options: q.options || null,
-          answer: q.answer || "A",
-          explanation: q.explanation || "",
-          material_id: materialId,
-        })));
-      }
+      const qResult = await insertQuestionsForMaterial(questions);
+      await finishJob(questions.length > 0, err?.message || "unknown");
+      if (questions.length > 0) return { topics, questions, chunks, ext, actorName, insertedCount: qResult.insertedCount, materialLinked: qResult.materialLinked };
     } catch (e) {}
-    await finishJob(questions.length > 0, err?.message || "unknown");
-    if (questions.length > 0) return { topics, questions, chunks, ext, actorName };
+    await finishJob(false, err?.message || "unknown");
     throw err;
   }
 };
@@ -1114,16 +1121,25 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [wrongList, setWrongList] = useState([]);
   const [finished, setFinished] = useState(false);
   const [timer, setTimer] = useState(0);
+  const [materialFilterFallback, setMaterialFilterFallback] = useState(false);
   const timerRef = useRef(null);
 
   useEffect(() => {
-    let query = supabase.from("questions").select("*");
-    // If materialId given, fetch ONLY questions from that material
-    if (materialId) {
-      query = query.eq("material_id", materialId);
-    }
-    query.then(({ data }) => {
-      const dbQs = data || [];
+    const loadQuestions = async () => {
+      let dbQs = [];
+      if (materialId) {
+        const byMaterial = await supabase.from("questions").select("*").eq("material_id", materialId);
+        if (byMaterial.error && isMissingQuestionsMaterialIdColumn(byMaterial.error)) {
+          setMaterialFilterFallback(true);
+          const fallback = await supabase.from("questions").select("*").order("created_at", { ascending: false }).limit(80);
+          dbQs = fallback.data || [];
+        } else {
+          dbQs = byMaterial.data || [];
+        }
+      } else {
+        const normal = await supabase.from("questions").select("*");
+        dbQs = normal.data || [];
+      }
       let pool;
       if (materialId) {
         // Only questions from this material (no sample questions mixed in)
@@ -1139,7 +1155,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       }
       setAllQuestions(pool.sort(() => Math.random() - 0.5));
       setLoading(false);
-    });
+    };
+    loadQuestions();
   }, [materialId]);
 
   useEffect(() => {
@@ -1231,6 +1248,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           </div>
         ) : (
           <div style={{ fontSize: 14, color: "#888", marginBottom: 24 }}>自定义范围，精准刷题</div>
+        )}
+        {materialId && materialFilterFallback && (
+          <div style={{ marginBottom: 14, padding: "10px 12px", borderRadius: 10, background: G.amberLight, color: G.amber, fontSize: 13 }}>
+            检测到数据库缺少 `questions.material_id`，当前使用“全题库回退模式”。执行 SQL 补齐后可按资料精准出题。
+          </div>
         )}
 
         {/* Quick start */}
@@ -1672,7 +1694,8 @@ function UploadPage({ setPage, profile }) {
             genCount: 6,
             actorName: profile?.name || "用户",
           });
-          setSuccess(`上传成功！已提取 ${result.topics.length} 个知识点，并生成 ${result.questions.length} 道题目。`);
+          const linkedHint = result.materialLinked ? "" : "（当前数据库缺少 questions.material_id，题目已入库但未绑定资料；请执行 SQL 补齐后可按资料精准练习）";
+          setSuccess(`上传成功！已提取 ${result.topics.length} 个知识点，入库 ${result.insertedCount ?? result.questions.length} 道题目。${linkedHint}`);
         } catch (e) {
           setSuccess("上传成功！资料已发布，AI 解析稍后可在教师端重试。");
         }
