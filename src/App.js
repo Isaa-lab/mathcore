@@ -78,12 +78,9 @@ const normalizeMaterialText = (input) => {
     .replace(/\s+/g, " ")
     .trim();
   if (!cleaned) return "";
-  // If text is mostly Latin junk from binary decoding, treat as invalid extraction
-  const chineseCount = (cleaned.match(/[\u4e00-\u9fff]/g) || []).length;
-  const alphaCount = (cleaned.match(/[A-Za-z]/g) || []).length;
+  // Only block obvious office-zip/binary artifacts; keep normal English textbook text.
   const junkLike = /PK\u0003\u0004|word\/|ppt\/|_rels|Content_Types\.xml|Image Manager/i.test(cleaned);
   if (junkLike) return "";
-  if (alphaCount > 600 && chineseCount < 3 && cleaned.length > 1200) return "";
   return cleaned;
 };
 
