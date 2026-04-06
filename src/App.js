@@ -96,6 +96,54 @@ const splitTextIntoChunks = (text, maxLen = 700) => {
   return out.slice(0, 30);
 };
 
+const buildSeedClaimsFromText = (text, chapter, course, count = 12) => {
+  const src = String(text || "").replace(/\s+/g, " ").trim();
+  if (!src) return [];
+  const sents = src
+    .split(/[。！？.!?]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 10)
+    .slice(0, count * 3);
+  const out = [];
+  for (let i = 0; i < sents.length && out.length < count; i++) {
+    const claim = sents[i].slice(0, 110);
+    if (!isLikelyRelevantClaim(claim)) continue;
+    out.push({
+      chunk_index: 0,
+      claim_text: claim,
+      claim_type: "fact",
+      difficulty: 2,
+      source_quote: claim.slice(0, 80),
+      chapter: chapter || null,
+      course: course || "数学",
+    });
+  }
+  return out;
+};
+
+const fetchChapterFallbackQuestions = async (chapter, count = 6) => {
+  if (!count || count <= 0) return [];
+  try {
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chapter: chapter || "资料专题", type: "单选题", count }),
+    });
+    const data = await res.json();
+    if (data?.error) return [];
+    const arr = Array.isArray(data?.questions) ? data.questions : [];
+    return arr.map((q) => ({
+      ...q,
+      type: q?.type || (q?.options ? "单选题" : "判断题"),
+      quality_score: Math.max(72, Number(q?.quality_score || 72)),
+      source_quote: q?.source_quote || `来自章节「${chapter || "资料专题"}」的兜底命题`,
+      source_chunk_id: Number.isFinite(Number(q?.source_chunk_id)) ? Number(q.source_chunk_id) : null,
+    }));
+  } catch (e) {
+    return [];
+  }
+};
+
 const buildFallbackQuestions = (text, chapter, count = 6) => {
   const src = String(text || "").replace(/\s+/g, " ").trim();
   if (!src) return [];
@@ -265,6 +313,10 @@ const processMaterialWithAI = async ({
   const safeFallback = normalizeMaterialText(fallbackText || `${material?.title || ""} ${material?.description || ""}`);
   const text = normalizeMaterialText((fromFile || safeFallback).slice(0, 30000));
   const chunks = splitTextIntoChunks(text, 650);
+  const chapterKey = material?.chapter || material?.course || "资料专题";
+  const fallbackChunks = chunks.length > 0
+    ? chunks
+    : splitTextIntoChunks(normalizeMaterialText(`${material?.title || ""} ${material?.description || ""} ${chapterKey}`), 220);
 
   const startJob = async () => {
     try {
@@ -322,37 +374,57 @@ const processMaterialWithAI = async ({
     return { insertedCount: withoutMaterial.length, materialLinked: false };
   };
   try {
-    const claimRes = await fetch("/api/extract-claims", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chunks,
-        course: material?.course || "数学",
-        chapter: material?.chapter || "未知章节",
-        maxClaims: Math.max(genCount * 2, 10),
-      }),
-    });
-    const claimResult = await claimRes.json();
-    if (claimResult?.error) throw new Error(claimResult.error);
-    let topics = Array.isArray(claimResult?.topics) ? claimResult.topics : [];
-    let claims = Array.isArray(claimResult?.claims) ? claimResult.claims : [];
+    let topics = [];
+    let claims = [];
+    if (fallbackChunks.length > 0) {
+      const claimRes = await fetch("/api/extract-claims", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chunks: fallbackChunks,
+          course: material?.course || "数学",
+          chapter: material?.chapter || "未知章节",
+          maxClaims: Math.max(genCount * 2, 10),
+        }),
+      });
+      const claimResult = await claimRes.json();
+      if (!claimResult?.error) {
+        topics = Array.isArray(claimResult?.topics) ? claimResult.topics : [];
+        claims = Array.isArray(claimResult?.claims) ? claimResult.claims : [];
+      }
+    }
     claims = claims.filter((c) => isLikelyRelevantClaim(c?.claim_text));
+    if (claims.length < Math.min(4, genCount)) {
+      const seeded = buildSeedClaimsFromText(
+        text || `${material?.title || ""} ${material?.description || ""} ${chapterKey}`,
+        material?.chapter || null,
+        material?.course || "数学",
+        Math.max(genCount * 2, 8)
+      );
+      claims = [...claims, ...seeded].slice(0, Math.max(genCount * 2, 10));
+    }
 
-    const genRes = await fetch("/api/generate-from-claims", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        claims,
-        course: material?.course || "数学",
-        chapter: material?.chapter || "未知章节",
-        count: genCount,
-      }),
-    });
-    const genResult = await genRes.json();
-    if (genResult?.error) throw new Error(genResult.error);
-    let questions = Array.isArray(genResult?.questions) ? genResult.questions : [];
+    let questions = [];
+    if (claims.length > 0) {
+      const genRes = await fetch("/api/generate-from-claims", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          claims,
+          course: material?.course || "数学",
+          chapter: material?.chapter || "未知章节",
+          count: genCount,
+        }),
+      });
+      const genResult = await genRes.json();
+      if (!genResult?.error) questions = Array.isArray(genResult?.questions) ? genResult.questions : [];
+    }
     questions = questions.filter((q) => !isLowQualityQuestion(q));
     if (topics.length === 0) topics = buildFallbackTopics(text, material?.chapter, 4);
+    if (questions.length < Math.min(genCount, 4)) {
+      const supplement = await fetchChapterFallbackQuestions(chapterKey, genCount - questions.length);
+      questions = [...questions, ...supplement].filter((q) => !isLowQualityQuestion(q));
+    }
     const seen = new Set();
     questions = questions.filter((q) => {
       const key = String(q?.question || "").trim();
@@ -410,10 +482,10 @@ const processMaterialWithAI = async ({
     const qResult = await insertQuestionsForMaterial(questions);
 
     await finishJob(true);
-    return {
+      return {
       topics,
       questions,
-      chunks,
+        chunks: fallbackChunks,
       claims,
       ext,
       actorName,
@@ -421,13 +493,13 @@ const processMaterialWithAI = async ({
       materialLinked: qResult.materialLinked,
     };
   } catch (err) {
-    // AI failure fallback: keep topics/chunks, but do not inject generic noisy questions.
+    // Fallback: keep topics/chunks and generate chapter-level backup questions.
     const topics = buildFallbackTopics(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter, 4);
-    const questions = [];
+    const questions = (await fetchChapterFallbackQuestions(chapterKey, genCount)).filter((q) => !isLowQualityQuestion(q));
     try {
-      if (chunks.length > 0) {
+      if (fallbackChunks.length > 0) {
         await supabase.from("material_chunks").delete().eq("material_id", materialId);
-        await supabase.from("material_chunks").insert(chunks.map((c, idx) => ({
+        await supabase.from("material_chunks").insert(fallbackChunks.map((c, idx) => ({
           material_id: materialId,
           chunk_index: idx,
           chunk_text: c,
@@ -446,8 +518,9 @@ const processMaterialWithAI = async ({
           solution_hint: null,
         })));
       }
-      await finishJob(false, err?.message || "unknown");
-      return { topics, questions, chunks, ext, actorName, insertedCount: 0, materialLinked: true };
+      const qResult = await insertQuestionsForMaterial(questions);
+      await finishJob(qResult.insertedCount > 0, err?.message || "unknown");
+      return { topics, questions, chunks: fallbackChunks, ext, actorName, insertedCount: qResult.insertedCount, materialLinked: qResult.materialLinked };
     } catch (e) {}
     await finishJob(false, err?.message || "unknown");
     throw err;
@@ -1288,7 +1361,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         actorName: "系统自动补题",
       });
       const inserted = result?.insertedCount ?? result?.questions?.length ?? 0;
-      setMaterialGenerateMsg(inserted > 0 ? `已为该资料补充 ${inserted} 道题。` : "补题完成，但未新增题目。");
+      const hint = (!fetchedFile && [".doc", ".docx", ".ppt", ".pptx"].includes(getFileExt(material?.file_name || "")))
+        ? "（当前建议优先上传 PDF，DOCX/PPTX 容易提取失败）"
+        : "";
+      setMaterialGenerateMsg(inserted > 0 ? `已为该资料补充 ${inserted} 道题。` : `补题完成，但未新增题目。${hint}`);
       return { ok: inserted > 0, inserted };
     } catch (e) {
       setMaterialGenerateMsg("补题失败：" + (e?.message || "未知错误"));
