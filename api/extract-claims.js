@@ -9,33 +9,52 @@ const parseJsonLoose = (rawText) => {
   }
 };
 
+const segmentRawText = (merged) => {
+  const m = String(merged || "").replace(/\s+/g, " ").trim();
+  if (!m) return [];
+  let parts = m
+    .split(/[。！？]|\.\s+|\?\s+|\!\s+|;\s+|；\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 12);
+  if (parts.length < 4) {
+    parts = m.split(/\n+/).map((s) => s.trim()).filter((s) => s.length >= 12);
+  }
+  if (parts.length < 4) {
+    const win = [];
+    for (let i = 0; i < m.length && win.length < 24; i += 95) {
+      const w = m.slice(i, i + 92).trim();
+      if (w.length >= 20) win.push(w);
+    }
+    parts = win;
+  }
+  return parts.slice(0, 20);
+};
+
 const buildLocalFallback = (chunks, chapter, maxClaims) => {
   const merged = (Array.isArray(chunks) ? chunks : [])
     .map((c) => String(c || "").trim())
     .filter(Boolean)
-    .join(" ");
-  const sents = merged
-    .split(/[。！？.!?]/)
-    .map((s) => s.trim())
-    .filter((s) => s.length >= 10)
-    .slice(0, Math.max(8, Math.min(maxClaims || 20, 20)));
+    .join("\n");
+  const sents = segmentRawText(merged).slice(0, Math.max(8, Math.min(maxClaims || 20, 20)));
 
-  const claims = sents.map((s, i) => ({
+  const claims = sents.map((s) => ({
     chunk_index: 0,
     claim_text: s.slice(0, 120),
     claim_type: "fact",
     difficulty: 2,
     source_quote: s.slice(0, 80),
   }));
-  const topics = sents.slice(0, 4).map((s, i) => ({
-    name: `${chapter || "资料专题"} 知识点 ${i + 1}`,
-    summary: s.slice(0, 80),
-  }));
-  if (!topics.length) {
-    topics.push(
-      { name: `${chapter || "资料专题"} 知识点 1`, summary: "核心定义与概念理解" },
-      { name: `${chapter || "资料专题"} 知识点 2`, summary: "条件与结论的对应关系" }
-    );
+  const topics = sents.slice(0, 8).map((s, i) => {
+    const title = s.length > 42 ? s.slice(0, 40) + "…" : s;
+    return {
+      name: title,
+      summary: s.slice(0, 100),
+      chapter: chapter || null,
+    };
+  });
+  if (!topics.length && merged.length >= 30) {
+    const w = merged.slice(0, 200);
+    topics.push({ name: w.slice(0, 48), summary: w, chapter: chapter || null });
   }
   return { topics, claims };
 };
@@ -89,8 +108,8 @@ ${chunkText}
 2) 每条 claim 必须是可判定真伪或可用于选择题干扰项构造的明确陈述；
 3) 输出 8-${Math.min(Math.max(maxClaims, 8), 24)} 条，尽量覆盖定义、结论、方法、公式；
 4) source_quote 必须是对应片段里的原句或近似原句（<=80字）。
-5) 只保留和${course || "数学"}课程相关内容；忽略文件元数据、软件名称、无意义英文串。
-6) 输出统一使用中文（公式符号可保留英文/希腊字母）。
+5) 只保留与教材数学内容相关的陈述；忽略版权页、软件名、纯页眉页脚。
+6) 若原文为英文，topics 与 claims 可用英文（或中英对照），须忠实于片段，勿编造。
 
 仅返回 JSON：
 {

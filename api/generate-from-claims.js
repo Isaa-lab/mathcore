@@ -63,7 +63,7 @@ ${JSON.stringify(normalizedClaims)}
 4) 对每题给出 source_chunk_id、source_quote、quality_score(0-100)；
 5) quality_score 低于 70 的题不要输出；
 6) 单选题必须提供4个选项（A/B/C/D），答案为 A/B/C/D；判断题 options 为 null，答案为 正确/错误。
-7) 题干、选项、解析统一用中文；禁止出现和数学学习无关的英文专有名词（如软件名、文件名、作者签名）。
+7) 若 claims 为英文教材内容，题干与选项可使用英文；判断题答案仍为「正确」或「错误」。禁止无关软件名、文件名、作者署名。
 
 仅返回 JSON：
 {
