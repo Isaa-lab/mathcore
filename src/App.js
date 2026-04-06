@@ -1243,11 +1243,13 @@ function ReportPage({ setPage }) {
 
 // ── Upload Page ─────────────────────────────────────────────────────────────
 function UploadPage({ setPage, profile }) {
+  const DEFAULT_UPLOAD_COURSES = ["数值分析", "最优化方法", "高等数学", "线性代数"];
+  const ALLOWED_EXTS = [".pdf", ".ppt", ".pptx", ".doc", ".docx"];
   const [title, setTitle] = useState("");
   const [course, setCourse] = useState("数值分析");
   const [customCourse, setCustomCourse] = useState("");
   const [addingCourse, setAddingCourse] = useState(false);
-  const [courses, setCourses] = useState(DEFAULT_COURSES);
+  const [courses, setCourses] = useState(DEFAULT_UPLOAD_COURSES);
   const [chapter, setChapter] = useState("全部");
   const [desc, setDesc] = useState("");
   const [file, setFile] = useState(null);
@@ -1258,10 +1260,29 @@ function UploadPage({ setPage, profile }) {
   const pdfRef = useRef();
 
   const CHAPTERS = ["全部", ...Array.from({ length: 12 }, (_, i) => `Ch.${i + 1}`)];
+  const getExt = (name = "") => {
+    const idx = name.lastIndexOf(".");
+    return idx >= 0 ? name.slice(idx).toLowerCase() : "";
+  };
+  const buildUploadError = (err) => {
+    const msg = String(err?.message || "未知错误");
+    if (/row-level security|permission denied|42501/i.test(msg)) {
+      if (profile?.role === "student") {
+        return "当前数据库策略仅允许教师直接发布资料。学生上传需走“待审核”流程（你现在的 SQL 还未开启该策略）。";
+      }
+      return "权限不足：请检查 Supabase RLS 策略（materials 表 / storage bucket）的 insert 与 upload 权限。";
+    }
+    return msg;
+  };
 
   const handleUpload = async () => {
     if (!title.trim()) { setError("请填写资料名称"); return; }
-    if (!file) { setError("请选择 PDF 文件"); return; }
+    if (!file) { setError("请选择 PDF / PPT / DOC 文件"); return; }
+    const ext = getExt(file.name);
+    if (!ALLOWED_EXTS.includes(ext)) {
+      setError("仅支持 PDF / PPT / DOC 文件（.pdf .ppt .pptx .doc .docx）");
+      return;
+    }
     if (file.size > 50 * 1024 * 1024) { setError("文件超过 50MB，请压缩后再上传"); return; }
     setUploading(true); setError(""); setSuccess("");
     try {
@@ -1271,14 +1292,14 @@ function UploadPage({ setPage, profile }) {
       const { data: storageData, error: storageErr } = await supabase.storage
         .from("materials")
         .upload(filePath, file, { upsert: false });
-      if (storageErr) throw new Error("存储失败: " + storageErr.message);
+      if (storageErr) throw new Error("存储失败: " + storageErr.message + (storageErr.code ? ` (code: ${storageErr.code})` : ""));
 
       // Get public URL
       const { data: { publicUrl } } = supabase.storage.from("materials").getPublicUrl(filePath);
 
       // Save metadata to DB
       setStep("保存到资料库…");
-      const { error: dbErr } = await supabase.from("materials").insert({
+      const basePayload = {
         title: title.trim(),
         course,
         chapter: chapter === "全部" ? null : chapter,
@@ -1290,13 +1311,23 @@ function UploadPage({ setPage, profile }) {
         file_data: publicUrl,
         uploader_name: profile?.name || "用户",
         uploaded_by: profile?.id || null,
+      };
+      const statusValue = profile?.role === "teacher" ? "approved" : "pending";
+      let { error: dbErr } = await supabase.from("materials").insert({
+        ...basePayload,
+        status: statusValue,
       });
-      if (dbErr) throw new Error(dbErr.message);
+      // Backward compatible: older schema may not have status column yet.
+      if (dbErr && /column .*status.* does not exist/i.test(dbErr.message || "")) {
+        const retry = await supabase.from("materials").insert(basePayload);
+        dbErr = retry.error;
+      }
+      if (dbErr) throw new Error(dbErr.message + (dbErr.code ? ` (code: ${dbErr.code})` : ""));
 
-      setSuccess("上传成功！资料已发布到资料库。");
+      setSuccess(profile?.role === "teacher" ? "上传成功！资料已发布到资料库。" : "上传成功！资料已提交，等待教师审核后发布。");
       setTitle(""); setDesc(""); setFile(null); setChapter("全部");
     } catch (e) {
-      setError("上传失败：" + e.message);
+      setError("上传失败：" + buildUploadError(e));
     }
     setUploading(false); setStep("");
   };
@@ -1353,12 +1384,12 @@ function UploadPage({ setPage, profile }) {
 
         {/* 文件上传 */}
         <div style={{ marginBottom: 20 }}>
-          <label style={{ ...s.label }}>上传 PDF 文件 *</label>
+          <label style={{ ...s.label }}>上传资料文件 *</label>
           <div onClick={() => pdfRef.current?.click()} style={{ border: "2px dashed " + (file ? G.teal : "#ddd"), borderRadius: 14, padding: "2.5rem", textAlign: "center", cursor: "pointer", background: file ? G.tealLight : "#fafafa" }}>
-            <input ref={pdfRef} type="file" accept=".pdf" style={{ display: "none" }} onChange={e => { const f = e.target.files[0]; if (f) setFile(f); }} />
+            <input ref={pdfRef} type="file" accept=".pdf,.ppt,.pptx,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation" style={{ display: "none" }} onChange={e => { const f = e.target.files[0]; if (f) setFile(f); }} />
             <div style={{ fontSize: 32, marginBottom: 10 }}>{file ? "✅" : "📂"}</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: file ? G.tealDark : "#333", marginBottom: 4 }}>{file ? file.name : "点击选择 PDF 文件"}</div>
-            <div style={{ fontSize: 13, color: "#aaa" }}>{file ? `${(file.size / 1024).toFixed(0)} KB` : "支持 PDF，最大 50MB"}</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: file ? G.tealDark : "#333", marginBottom: 4 }}>{file ? file.name : "点击选择文件（PDF/PPT/DOC）"}</div>
+            <div style={{ fontSize: 13, color: "#aaa" }}>{file ? `${(file.size / 1024).toFixed(0)} KB` : "支持 PDF/PPT/DOC，最大 50MB"}</div>
           </div>
         </div>
 
@@ -1552,10 +1583,15 @@ function MaterialsPage({ setPage, profile }) {
 
   useEffect(() => {
     supabase.from("materials").select("*").order("created_at", { ascending: false }).then(({ data }) => {
-      setMaterials(data || []);
+      const rows = data || [];
+      // Students only browse approved materials by default, but can see their own submissions.
+      const visible = profile?.role === "teacher"
+        ? rows
+        : rows.filter(m => (m.status || "approved") === "approved" || m.uploaded_by === profile?.id);
+      setMaterials(visible);
       setLoading(false);
     });
-  }, []);
+  }, [profile?.id, profile?.role]);
 
   useEffect(() => {
     if (!selected || !profile) return;
@@ -1709,6 +1745,7 @@ function MaterialsPage({ setPage, profile }) {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
               <Badge color={m.course === "数值分析" ? "teal" : "blue"}>{m.course}</Badge>
               {m.chapter && <Badge color="amber">{m.chapter}</Badge>}
+              {(m.status || "approved") !== "approved" && <Badge color="red">待审核</Badge>}
             </div>
             <div style={{ fontSize: 12, color: "#aaa", borderTop: "1px solid #f5f5f5", paddingTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span>{m.uploader_name || "用户"} 上传 · {new Date(m.created_at).toLocaleDateString("zh-CN")}</span>
@@ -1722,7 +1759,7 @@ function MaterialsPage({ setPage, profile }) {
 }
 
 // ── Teacher Page ──────────────────────────────────────────────────────────────
-function TeacherPage({ setPage }) {
+function TeacherPage({ setPage, profile }) {
   const [tab, setTab] = useState("学生管理");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiQuestions, setAiQuestions] = useState([]);
@@ -1748,11 +1785,37 @@ function TeacherPage({ setPage }) {
   const [extractStep, setExtractStep] = useState("");
   const [extractResult, setExtractResult] = useState(null);
   const [uploadedMaterials, setUploadedMaterials] = useState([]);
+  const [reviewBusyId, setReviewBusyId] = useState(null);
+  const [reviewMsg, setReviewMsg] = useState("");
+
+  const refreshMaterials = async () => {
+    const { data } = await supabase.from("materials").select("*").order("created_at", { ascending: false });
+    if (data) setUploadedMaterials(data);
+  };
 
   useEffect(() => {
     supabase.from("questions").select("*").order("created_at", { ascending: false }).then(({ data }) => { if (data) setDbQuestions(data); });
-    supabase.from("materials").select("*").order("created_at", { ascending: false }).then(({ data }) => { if (data) setUploadedMaterials(data); });
+    refreshMaterials();
   }, []);
+
+  const pendingMaterials = uploadedMaterials.filter(m => (m.status || "approved") === "pending");
+  const reviewMaterial = async (material, status) => {
+    setReviewMsg("");
+    setReviewBusyId(material.id);
+    const payload = {
+      status,
+      reviewed_by: profile?.id || null,
+      reviewed_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from("materials").update(payload).eq("id", material.id);
+    if (error) {
+      setReviewMsg("审核失败：" + error.message);
+    } else {
+      setReviewMsg(status === "approved" ? "已通过并发布到资料库。" : "已驳回该资料。");
+      await refreshMaterials();
+    }
+    setReviewBusyId(null);
+  };
 
   const handlePdfDrop = useCallback((e) => {
     e.preventDefault();
@@ -1883,7 +1946,7 @@ function TeacherPage({ setPage }) {
       </div>
 
       <div style={{ display: "flex", gap: 0, borderBottom: "2px solid #f0f0f0", marginBottom: 20 }}>
-        {["学生管理", "AI 出题", "题库管理"].map(t => (
+        {["学生管理", "AI 出题", "题库管理", "审核资料"].map(t => (
           <button key={t} onClick={() => setTab(t)} style={{ padding: "12px 22px", fontSize: 15, fontFamily: "inherit", border: "none", borderBottom: tab === t ? `3px solid ${G.teal}` : "3px solid transparent", background: "none", cursor: "pointer", color: tab === t ? G.teal : "#888", fontWeight: tab === t ? 700 : 400, marginBottom: -2 }}>{t}</button>
         ))}
       </div>
@@ -2038,6 +2101,36 @@ function TeacherPage({ setPage }) {
           ))}
         </div>
       )}
+      {tab === "审核资料" && (
+        <div style={{ ...s.card }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 18, paddingBottom: 14, borderBottom: "1px solid #f0f0f0" }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>资料审核</div>
+            <Badge color="amber">待审核 {pendingMaterials.length}</Badge>
+          </div>
+          {reviewMsg && <div style={{ padding: "10px 12px", borderRadius: 10, background: G.blueLight, color: G.blue, marginBottom: 12, fontSize: 14 }}>{reviewMsg}</div>}
+          {pendingMaterials.length === 0 && <div style={{ textAlign: "center", padding: "2.5rem", color: "#999" }}>暂无待审核资料</div>}
+          {pendingMaterials.map((m) => (
+            <div key={m.id} style={{ border: "1px solid #eee", borderRadius: 12, padding: "14px 16px", marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>{m.title}</div>
+                  <div style={{ fontSize: 12, color: "#999", marginTop: 4 }}>{m.uploader_name || "用户"} · {new Date(m.created_at).toLocaleString("zh-CN")}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                  <Btn size="sm" onClick={() => reviewMaterial(m, "rejected")} disabled={reviewBusyId === m.id}>驳回</Btn>
+                  <Btn size="sm" variant="primary" onClick={() => reviewMaterial(m, "approved")} disabled={reviewBusyId === m.id}>{reviewBusyId === m.id ? "处理中…" : "通过发布"}</Btn>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <Badge color="blue">{m.course || "未知课程"}</Badge>
+                {m.chapter && <Badge color="amber">{m.chapter}</Badge>}
+                <Badge color="red">待审核</Badge>
+              </div>
+              {m.description && <div style={{ fontSize: 14, color: "#666", lineHeight: 1.6 }}>{m.description}</div>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2107,7 +2200,7 @@ export default function App() {
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} />;
     if (page === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} />;
-    if (page === "教师管理") return <TeacherPage setPage={handleSetPage} />;
+    if (page === "教师管理") return <TeacherPage setPage={handleSetPage} profile={profile} />;
     return null;
   };
 
