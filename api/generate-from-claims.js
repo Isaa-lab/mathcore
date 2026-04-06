@@ -1,3 +1,14 @@
+const parseJsonLoose = (rawText) => {
+  const clean = String(rawText || "").replace(/```json|```/g, "").trim();
+  try {
+    return JSON.parse(clean);
+  } catch (e) {
+    const m = clean.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+    throw e;
+  }
+};
+
 const callAnthropic = async (prompt) => {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -18,8 +29,7 @@ const callAnthropic = async (prompt) => {
   }
   const data = await response.json();
   const raw = data.content?.map((b) => b.text || "").join("") || "";
-  const clean = raw.replace(/```json|```/g, "").trim();
-  return JSON.parse(clean);
+  return parseJsonLoose(raw);
 };
 
 export default async function handler(req, res) {

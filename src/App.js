@@ -246,6 +246,19 @@ const buildMinimalChapterQuestions = (chapter = "资料专题", count = 4) => {
   return out;
 };
 
+const buildTopicsFromClaims = (claims = [], chapter = null) => {
+  const rows = (Array.isArray(claims) ? claims : [])
+    .map((c) => String(c?.claim_text || "").trim())
+    .filter((t) => t.length >= 8)
+    .slice(0, 6);
+  if (!rows.length) return [];
+  return rows.map((t, i) => ({
+    name: `知识点 ${i + 1}`,
+    summary: t.slice(0, 80),
+    chapter: chapter || null,
+  }));
+};
+
 const ensurePdfJs = async () => {
   if (window.pdfjsLib) return;
   await new Promise((res, rej) => {
@@ -474,6 +487,27 @@ const processMaterialWithAI = async ({
       if (!genResult?.error) questions = Array.isArray(genResult?.questions) ? genResult.questions : [];
     }
     questions = questions.filter((q) => !isLowQualityQuestion(q));
+    if (questions.length < Math.min(genCount, 4) && text.length > 30) {
+      // Prefer content-based backup before chapter generic backup
+      try {
+        const extractRes = await withTimeout(fetch("/api/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: text.slice(0, 7000),
+            course: material?.course || "数学",
+            chapter: material?.chapter || "未知章节",
+            count: genCount,
+          }),
+        }), 10000);
+        const extractData = await extractRes.json();
+        const q2 = Array.isArray(extractData?.questions) ? extractData.questions : [];
+        const t2 = Array.isArray(extractData?.topics) ? extractData.topics : [];
+        if (q2.length > 0) questions = [...questions, ...q2].filter((q) => !isLowQualityQuestion(q));
+        if (topics.length === 0 && t2.length > 0) topics = t2;
+      } catch (e) {}
+    }
+    if (topics.length === 0 && claims.length > 0) topics = buildTopicsFromClaims(claims, material?.chapter || null);
     if (topics.length === 0) topics = buildFallbackTopics(text, material?.chapter, 4);
     if (questions.length < Math.min(genCount, 4)) {
       const supplement = await fetchChapterFallbackQuestions(chapterKey, genCount - questions.length);
