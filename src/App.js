@@ -1790,6 +1790,9 @@ function TeacherPage({ setPage, profile }) {
   const [seeding, setSeeding] = useState(false);
   const [seedMsg, setSeedMsg] = useState("");
   const [previewQuestion, setPreviewQuestion] = useState(null);
+  const [importingCsv, setImportingCsv] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
+  const csvRef = useRef();
 
   const refreshMaterials = async () => {
     const { data } = await supabase.from("materials").select("*").order("created_at", { ascending: false });
@@ -1963,6 +1966,111 @@ function TeacherPage({ setPage, profile }) {
     }
     setSeeding(false);
   };
+  const parseCsvLine = (line) => {
+    const out = [];
+    let cur = "";
+    let inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuote && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuote = !inQuote;
+        }
+      } else if (ch === "," && !inQuote) {
+        out.push(cur.trim());
+        cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur.trim());
+    return out;
+  };
+  const parseCsvText = (text) => {
+    const lines = (text || "").replace(/\r/g, "").split("\n").filter(Boolean);
+    if (lines.length < 2) return [];
+    const headers = parseCsvLine(lines[0]).map(h => h.trim());
+    return lines.slice(1).map((line) => {
+      const cols = parseCsvLine(line);
+      const row = {};
+      headers.forEach((h, i) => { row[h] = cols[i] || ""; });
+      return row;
+    });
+  };
+  const normalizeOptions = (raw) => {
+    const txt = String(raw || "").trim();
+    if (!txt) return null;
+    return txt.split("|").map(s => s.trim()).filter(Boolean);
+  };
+  const normalizeAnswer = (type, answer) => {
+    const a = String(answer || "").trim().toUpperCase().replace(/\s+/g, "");
+    if (type === "单选题") return a.replace("，", ",");
+    if (type === "多选题") return a.replace("，", ",");
+    return String(answer || "").trim();
+  };
+  const handleImportCsv = async (file) => {
+    if (!file) return;
+    setImportingCsv(true);
+    setImportMsg("");
+    try {
+      const text = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(String(e.target?.result || ""));
+        reader.onerror = () => reject(new Error("读取 CSV 失败"));
+        reader.readAsText(file, "utf-8");
+      });
+      const rows = parseCsvText(text);
+      if (rows.length === 0) throw new Error("CSV 没有可导入的数据行");
+      const legalTypes = new Set(["单选题", "多选题", "填空题", "判断题", "计算题"]);
+      const legalDifficulty = new Set(["基础", "进阶", "综合"]);
+      const errors = [];
+      const normalized = rows.map((r, idx) => {
+        const lineNo = idx + 2;
+        const chapter = (r.chapter || "").trim();
+        const course = (r.course || "").trim() || (chapter.startsWith("最优化") ? "最优化" : "数值分析");
+        const type = (r.type || "").trim();
+        const question = (r.question || "").trim();
+        const options = normalizeOptions(r.options);
+        const answer = normalizeAnswer(type, r.answer);
+        const explanation = (r.explanation || "").trim() || null;
+        const difficulty = legalDifficulty.has((r.difficulty || "").trim()) ? (r.difficulty || "").trim() : "基础";
+        if (!chapter || !type || !question || !answer) errors.push(`第 ${lineNo} 行缺少必填字段`);
+        if (type && !legalTypes.has(type)) errors.push(`第 ${lineNo} 行题型非法：${type}`);
+        if ((type === "单选题" || type === "多选题") && (!options || options.length < 2)) {
+          errors.push(`第 ${lineNo} 行选项不足（用 | 分隔，如 A.xxx|B.xxx）`);
+        }
+        if (type === "判断题" && !["正确", "错误"].includes(answer)) {
+          errors.push(`第 ${lineNo} 行判断题答案必须为“正确/错误”`);
+        }
+        if (type === "单选题" && !/^[A-D]$/.test(answer)) {
+          errors.push(`第 ${lineNo} 行单选题答案格式应为 A/B/C/D`);
+        }
+        if (type === "多选题" && !/^[A-D](,[A-D])*$/.test(answer)) {
+          errors.push(`第 ${lineNo} 行多选题答案格式应为 A,C 或 A,B,D`);
+        }
+        return { chapter, course, type, question, options, answer, explanation, difficulty, created_by: profile?.id || null };
+      });
+      if (errors.length > 0) throw new Error(errors.slice(0, 8).join("；"));
+      const { data: existing } = await supabase.from("questions").select("question");
+      const exists = new Set((existing || []).map(q => q.question));
+      const toInsert = normalized.filter(r => !exists.has(r.question));
+      if (toInsert.length === 0) {
+        setImportMsg("CSV 校验通过，但题目已全部存在（按题干去重）。");
+      } else {
+        const { error } = await supabase.from("questions").insert(toInsert);
+        if (error) throw error;
+        setImportMsg(`CSV 导入完成：新增 ${toInsert.length} 题（原始 ${rows.length} 行）。`);
+      }
+      const { data } = await supabase.from("questions").select("*").order("created_at", { ascending: false });
+      if (data) setDbQuestions(data);
+    } catch (err) {
+      setImportMsg("CSV 导入失败：" + (err?.message || "未知错误"));
+    }
+    setImportingCsv(false);
+  };
 
   const STUDENTS = [
     { name: "张同学", email: "zhang@example.com", pct: 82, questions: 48, weak: ["Ch.3 插值", "Ch.4 最小二乘"], strong: ["Ch.1 方程求解", "Ch.2 线性方程组"] },
@@ -2126,10 +2234,17 @@ function TeacherPage({ setPage, profile }) {
             <div style={{ fontSize: 18, fontWeight: 700 }}>题库管理</div>
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               <Badge color="blue">共 {dbQuestions.length} 题</Badge>
+              <input ref={csvRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportCsv(f); e.target.value = ""; }} />
+              <Btn size="sm" onClick={() => csvRef.current?.click()} disabled={importingCsv}>{importingCsv ? "导入中…" : "CSV 批量导入"}</Btn>
               <Btn size="sm" variant="primary" onClick={seedQuestionBank} disabled={seeding}>{seeding ? "导入中…" : "一键导入基础题库"}</Btn>
             </div>
           </div>
           {seedMsg && <div style={{ padding: "10px 12px", borderRadius: 10, background: G.tealLight, color: G.tealDark, marginBottom: 12, fontSize: 14 }}>{seedMsg}</div>}
+          {importMsg && <div style={{ padding: "10px 12px", borderRadius: 10, background: G.blueLight, color: G.blue, marginBottom: 12, fontSize: 14 }}>{importMsg}</div>}
+          <div style={{ fontSize: 12, color: "#888", marginBottom: 12 }}>
+            CSV 表头格式：chapter,course,type,question,options,answer,explanation,difficulty。<br />
+            其中 options 用 | 分隔（示例：A.选项1|B.选项2|C.选项3|D.选项4）。
+          </div>
           {dbQuestions.length === 0 && <div style={{ textAlign: "center", padding: "3rem", color: "#aaa", fontSize: 16 }}>📝 暂无题目，请先用 AI 出题</div>}
           {dbQuestions.map((q, i) => (
             <div key={i} style={{ borderBottom: "1px solid #f5f5f5" }}>
