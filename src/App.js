@@ -90,6 +90,18 @@ const buildFallbackQuestions = (text, chapter, count = 6) => {
       });
     }
   }
+  // Ensure at least count questions, even when extracted text is too short.
+  while (qs.length < count) {
+    const idx = qs.length + 1;
+    qs.push({
+      question: `关于本资料内容的第 ${idx} 个理解点，以下判断是否正确？`,
+      options: null,
+      answer: "正确",
+      explanation: "请结合资料原文和课堂笔记复核该结论，并关注定义、条件与适用范围。",
+      type: "判断题",
+      chapter: chapter || "资料专题",
+    });
+  }
   return qs;
 };
 
@@ -197,7 +209,7 @@ const processMaterialWithAI = async ({
     let topics = Array.isArray(result?.topics) ? result.topics : [];
     let questions = Array.isArray(result?.questions) ? result.questions : [];
     if (topics.length === 0) topics = buildFallbackTopics(text, material?.chapter, 4);
-    if (questions.length === 0) questions = buildFallbackQuestions(text, material?.chapter || material?.course, genCount);
+    if (questions.length === 0) questions = buildFallbackQuestions(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter || material?.course, genCount);
 
     if (chunks.length > 0) {
       try {
@@ -251,8 +263,8 @@ const processMaterialWithAI = async ({
     return { topics, questions, chunks, ext, actorName };
   } catch (err) {
     // Hard fallback: AI failure still guarantees question availability.
-    const topics = buildFallbackTopics(text, material?.chapter, 4);
-    const questions = buildFallbackQuestions(text, material?.chapter || material?.course, genCount);
+    const topics = buildFallbackTopics(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter, 4);
+    const questions = buildFallbackQuestions(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter || material?.course, genCount);
     try {
       if (chunks.length > 0) {
         await supabase.from("material_chunks").delete().eq("material_id", materialId);
@@ -1976,18 +1988,42 @@ function MaterialsPage({ setPage, profile }) {
   const [savingNote, setSavingNote] = useState(false);
   const [filter, setFilter] = useState("全部");
   const [search, setSearch] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
+  const loadMaterials = async () => {
+    let query = supabase.from("materials").select("*").order("created_at", { ascending: false });
+    let dataRows = [];
+    let err = null;
+    try {
+      const { data, error } = await query;
+      dataRows = data || [];
+      err = error || null;
+    } catch (e) {
+      err = e;
+    }
+    // If status column does not exist yet, still load list.
+    if (err && isMissingMaterialsStatusColumn(err)) {
+      const fallback = await supabase.from("materials").select("*").order("created_at", { ascending: false });
+      dataRows = fallback.data || [];
+    }
+    const visible = profile?.role === "teacher"
+      ? dataRows
+      : dataRows.filter(m => (m.status || "approved") === "approved" || m.uploaded_by === profile?.id);
+    setMaterials(visible);
+    setLoading(false);
+  };
 
   useEffect(() => {
-    supabase.from("materials").select("*").order("created_at", { ascending: false }).then(({ data }) => {
-      const rows = data || [];
-      // Students only browse approved materials by default, but can see their own submissions.
-      const visible = profile?.role === "teacher"
-        ? rows
-        : rows.filter(m => (m.status || "approved") === "approved" || m.uploaded_by === profile?.id);
-      setMaterials(visible);
-      setLoading(false);
-    });
+    loadMaterials();
   }, [profile?.id, profile?.role]);
+
+  const deleteMaterial = async (m) => {
+    if (!window.confirm(`确认删除资料「${m.title}」？`)) return;
+    setDeletingId(m.id);
+    const { error } = await supabase.from("materials").delete().eq("id", m.id);
+    if (error) alert("删除失败：" + error.message);
+    await loadMaterials();
+    setDeletingId(null);
+  };
 
   useEffect(() => {
     if (!selected || !profile) return;
@@ -2145,7 +2181,14 @@ function MaterialsPage({ setPage, profile }) {
             </div>
             <div style={{ fontSize: 12, color: "#aaa", borderTop: "1px solid #f5f5f5", paddingTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span>{m.uploader_name || "用户"} 上传 · {new Date(m.created_at).toLocaleDateString("zh-CN")}</span>
-              <button onClick={e => { e.stopPropagation(); setPage("quiz_material_" + m.id + "_" + encodeURIComponent(m.title)); }} style={{ padding: "4px 10px", background: G.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>做题 ✏️</button>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={e => { e.stopPropagation(); setPage("quiz_material_" + m.id + "_" + encodeURIComponent(m.title)); }} style={{ padding: "4px 10px", background: G.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>做题 ✏️</button>
+                {profile?.role === "teacher" && (
+                  <button onClick={e => { e.stopPropagation(); deleteMaterial(m); }} disabled={deletingId === m.id} style={{ padding: "4px 10px", background: G.red, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>
+                    {deletingId === m.id ? "删除中…" : "删除"}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         ))}
@@ -2162,12 +2205,19 @@ function MaterialChatPage({ setPage, profile }) {
   const [history, setHistory] = useState([]);
 
   useEffect(() => {
-    supabase.from("materials").select("id,title,course,status,uploaded_by").order("created_at", { ascending: false }).then(({ data }) => {
-      const rows = data || [];
+    const loadChatMaterials = async () => {
+      let rows = [];
+      let { data, error } = await supabase.from("materials").select("id,title,course,status,uploaded_by").order("created_at", { ascending: false });
+      if (error && isMissingMaterialsStatusColumn(error)) {
+        const fallback = await supabase.from("materials").select("id,title,course,uploaded_by").order("created_at", { ascending: false });
+        data = fallback.data;
+      }
+      rows = data || [];
       const visible = profile?.role === "teacher" ? rows : rows.filter(m => (m.status || "approved") === "approved" || m.uploaded_by === profile?.id);
       setMaterials(visible);
       if (visible[0]?.id) setMaterialId(visible[0].id);
-    });
+    };
+    loadChatMaterials();
   }, [profile?.id, profile?.role]);
 
   const ask = async () => {
