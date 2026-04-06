@@ -757,17 +757,23 @@ function KnowledgePage({ setPage, setChapterFilter, sessionAnswers = {} }) {
 
 // ── Quiz Page ─────────────────────────────────────────────────────────────────
 function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setChapterFilter, onAnswer }) {
-  const [questions, setQuestions] = useState([]);
+  const [allQuestions, setAllQuestions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  // Setup state (moved to top - never in conditional)
+  const [selectedChapters, setSelectedChapters] = useState(chapterFilter ? [chapterFilter] : []);
+  const [selectedTypes, setSelectedTypes] = useState([]);
+  const [quizCount, setQuizCount] = useState(10);
+  const [timerOn, setTimerOn] = useState(false);
+  // Quiz state
+  const [quizMode, setQuizMode] = useState(null);
+  const [displayQ, setDisplayQ] = useState([]);
   const [current, setCurrent] = useState(0);
   const [selected, setSelected] = useState(null);
   const [answered, setAnswered] = useState(false);
   const [showHint, setShowHint] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [score, setScore] = useState(0);
   const [wrongList, setWrongList] = useState([]);
   const [finished, setFinished] = useState(false);
-  const [quizMode, setQuizMode] = useState(initialQuestion ? "single" : null);
-  const [timerOn, setTimerOn] = useState(false);
   const [timer, setTimer] = useState(0);
   const timerRef = useRef(null);
 
@@ -777,33 +783,50 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       const dbTexts = new Set(dbQs.map(q => q.question));
       const uniqueSamples = ALL_QUESTIONS.filter(q => !dbTexts.has(q.question));
       let pool = [...dbQs, ...uniqueSamples];
-      if (chapterFilter) {
-        const filtered = pool.filter(q => q.chapter && q.chapter.startsWith(chapterFilter));
-        pool = filtered.length > 0 ? filtered : pool;
-      }
       if (initialQuestion) {
         const rest = pool.filter(q => q.id !== initialQuestion.id).sort(() => Math.random() - 0.5);
-        setQuestions([initialQuestion, ...rest.slice(0, 4)]);
-      } else {
-        setQuestions(pool.sort(() => Math.random() - 0.5));
+        pool = [initialQuestion, ...rest];
       }
+      setAllQuestions(pool.sort(() => Math.random() - 0.5));
       setLoading(false);
     });
   }, []);
 
-  // Timer
   useEffect(() => {
     if (timerOn && quizMode && !finished) {
       timerRef.current = setInterval(() => setTimer(t => t + 1), 1000);
-      return () => clearInterval(timerRef.current);
     } else {
       clearInterval(timerRef.current);
     }
+    return () => clearInterval(timerRef.current);
   }, [timerOn, quizMode, finished]);
 
   useEffect(() => { setTimer(0); }, [current]);
 
-  const displayQ = quizMode === "daily" ? questions.slice(0, 5) : questions;
+  const allChapters = [...new Set(allQuestions.map(q => q.chapter).filter(Boolean))].sort();
+  const toggleChapter = (ch) => setSelectedChapters(prev =>
+    prev.includes(ch) ? prev.filter(x => x !== ch) : [...prev, ch]
+  );
+  const toggleType = (t) => setSelectedTypes(prev =>
+    prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]
+  );
+
+  const buildPool = (chapters, types) => {
+    let pool = allQuestions;
+    if (chapters.length > 0) pool = pool.filter(q => chapters.some(c => q.chapter && q.chapter.startsWith(c)));
+    if (types.length > 0) pool = pool.filter(q => types.includes(q.type));
+    return pool;
+  };
+  const previewPool = buildPool(selectedChapters, selectedTypes);
+
+  const startQuiz = (chapters, types, count) => {
+    const pool = buildPool(chapters, types);
+    setDisplayQ(pool.slice(0, count));
+    setQuizMode("active");
+    setCurrent(0); setSelected(null); setAnswered(false);
+    setScore(0); setWrongList([]); setFinished(false); setTimer(0);
+  };
+
   const q = displayQ[current];
   const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
   const letters = ["A", "B", "C", "D"];
@@ -826,7 +849,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   // Keyboard shortcuts
   useEffect(() => {
-    if (!quizMode || finished || !q) return;
+    if (quizMode !== "active" || finished || !q) return;
     const handler = (e) => {
       if (answered) { if (e.key === "Enter" || e.key === "ArrowRight") handleNext(); return; }
       if (e.key === "1") setSelected(0);
@@ -837,86 +860,118 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [quizMode, finished, q, answered, selected, handleSubmit, handleNext]);
+  }, [quizMode, finished, q, answered, selected]);
 
-  if (loading) return <div style={{ padding: "4rem", textAlign: "center", color: "#888", fontSize: 16 }}>加载题目中…</div>;
+  if (loading) return <div style={{ padding: "4rem", textAlign: "center", color: "#888" }}>加载题目中…</div>;
 
-  // Mode selection screen
+  // ── Setup screen ──
   if (!quizMode) return (
-    <div style={{ padding: "2rem", maxWidth: 640, margin: "0 auto" }}>
+    <div style={{ padding: "2rem", maxWidth: 780, margin: "0 auto" }}>
       <Btn size="sm" onClick={() => setPage("首页")} style={{ marginBottom: 20 }}>← 返回</Btn>
-      <div style={{ ...s.card, textAlign: "center", padding: "3rem" }}>
-        <div style={{ fontSize: 36, marginBottom: 14 }}>✏️</div>
-        <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 10, color: "#111" }}>选择练习模式</div>
-        {chapterFilter && (
-          <div style={{ display: "inline-block", background: G.tealLight, color: G.tealDark, fontSize: 14, fontWeight: 600, padding: "6px 16px", borderRadius: 20, marginBottom: 12 }}>
-            📖 {chapterFilter} 章节题目
-          </div>
-        )}
-        <div style={{ fontSize: 15, color: "#888", marginBottom: 28 }}>
-          共 {questions.length} 道题目{chapterFilter ? `（${chapterFilter} 章节）` : "（全部）"}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
+      <div style={{ ...s.card, padding: "2rem" }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#111", marginBottom: 4 }}>✏️ 练习设置</div>
+        <div style={{ fontSize: 14, color: "#888", marginBottom: 24 }}>自定义范围，精准刷题</div>
+
+        {/* Quick start */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 24 }}>
           {[
-            { mode: "daily", icon: "⚡", title: "每日练习", desc: chapterFilter ? "本章随机 5 题" : "随机 5 题，轻松刷题", bg: "#EEF4FF", color: G.blue },
-            { mode: "full", icon: "📚", title: chapterFilter ? "章节全练" : "完整练习", desc: chapterFilter ? chapterFilter + " 全部题目" : "全部题目，系统训练", bg: G.tealLight, color: G.teal },
+            { icon: "⚡", label: "每日 5 题", color: G.blue, bg: "#EEF4FF", action: () => startQuiz([], [], 5) },
+            { icon: "📚", label: "全部 " + allQuestions.length + " 题", color: G.teal, bg: G.tealLight, action: () => startQuiz([], [], allQuestions.length) },
+            { icon: "🎯", label: "自定义范围", color: G.purple, bg: G.purpleLight, action: null },
           ].map(m => (
-            <div key={m.mode} onClick={() => setQuizMode(m.mode)} style={{ background: m.bg, border: "2px solid " + m.color + "44", borderRadius: 16, padding: "1.5rem", cursor: "pointer" }}>
-              <div style={{ fontSize: 28, marginBottom: 10 }}>{m.icon}</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: m.color, marginBottom: 6 }}>{m.title}</div>
-              <div style={{ fontSize: 14, color: "#666" }}>{m.desc}</div>
+            <div key={m.label} onClick={m.action || undefined} style={{ border: "2px solid " + m.color + "44", borderRadius: 14, padding: "1.25rem", cursor: m.action ? "pointer" : "default", textAlign: "center", background: m.bg, opacity: m.action ? 1 : 0.6 }}>
+              <div style={{ fontSize: 24, marginBottom: 6 }}>{m.icon}</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: m.color }}>{m.label}</div>
             </div>
           ))}
         </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "14px", background: "#f9f9f9", borderRadius: 12 }}>
-          <span style={{ fontSize: 14, color: "#888" }}>⏱ 计时模式</span>
+
+        {/* Chapter selection */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#111", marginBottom: 10 }}>📖 章节范围</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => setSelectedChapters([])} style={{ padding: "7px 14px", borderRadius: 20, border: "2px solid " + (selectedChapters.length === 0 ? G.teal : "#e0e0e0"), cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: selectedChapters.length === 0 ? 700 : 400, background: selectedChapters.length === 0 ? G.teal : "#fff", color: selectedChapters.length === 0 ? "#fff" : "#555" }}>全部</button>
+            {allChapters.map(ch => (
+              <button key={ch} onClick={() => toggleChapter(ch)} style={{ padding: "7px 14px", borderRadius: 20, border: "2px solid " + (selectedChapters.includes(ch) ? G.teal : "#e0e0e0"), cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: selectedChapters.includes(ch) ? 700 : 400, background: selectedChapters.includes(ch) ? G.tealLight : "#fff", color: selectedChapters.includes(ch) ? G.tealDark : "#555" }}>{ch}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Type selection */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#111", marginBottom: 10 }}>📝 题型</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => setSelectedTypes([])} style={{ padding: "7px 14px", borderRadius: 20, border: "2px solid " + (selectedTypes.length === 0 ? G.blue : "#e0e0e0"), cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: selectedTypes.length === 0 ? 700 : 400, background: selectedTypes.length === 0 ? G.blue : "#fff", color: selectedTypes.length === 0 ? "#fff" : "#555" }}>全部</button>
+            {["单选题", "判断题", "多选题", "填空题"].map(t => (
+              <button key={t} onClick={() => toggleType(t)} style={{ padding: "7px 14px", borderRadius: 20, border: "2px solid " + (selectedTypes.includes(t) ? G.blue : "#e0e0e0"), cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: selectedTypes.includes(t) ? 700 : 400, background: selectedTypes.includes(t) ? G.blueLight : "#fff", color: selectedTypes.includes(t) ? G.blue : "#555" }}>{t}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Count slider */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: "#111" }}>🔢 题目数量</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: G.teal }}>{Math.min(quizCount, previewPool.length)} 题（共 {previewPool.length} 可用）</span>
+          </div>
+          <input type="range" min={1} max={Math.min(previewPool.length || 30, 30)} value={quizCount} onChange={e => setQuizCount(Number(e.target.value))} style={{ width: "100%", accentColor: G.teal }} />
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginTop: 4 }}><span>1</span><span>10</span><span>20</span><span>30</span></div>
+        </div>
+
+        {/* Timer toggle */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "#f9f9f9", borderRadius: 12, marginBottom: 20 }}>
+          <span style={{ fontSize: 14, color: "#888", flex: 1 }}>⏱ 计时模式</span>
           <div onClick={() => setTimerOn(v => !v)} style={{ width: 44, height: 24, borderRadius: 12, background: timerOn ? G.teal : "#ddd", cursor: "pointer", position: "relative", transition: "background .2s" }}>
             <div style={{ position: "absolute", top: 3, left: timerOn ? 22 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left .2s" }} />
           </div>
-          <span style={{ fontSize: 13, color: "#aaa" }}>{timerOn ? "开启 — 记录用时" : "关闭"}</span>
+          <span style={{ fontSize: 13, color: "#aaa", minWidth: 60 }}>{timerOn ? "已开启" : "已关闭"}</span>
         </div>
+
+        <button disabled={previewPool.length === 0} onClick={() => startQuiz(selectedChapters, selectedTypes, quizCount)} style={{ width: "100%", padding: "14px 0", fontSize: 16, fontWeight: 700, fontFamily: "inherit", background: previewPool.length === 0 ? "#ccc" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: previewPool.length === 0 ? "not-allowed" : "pointer" }}>
+          {previewPool.length === 0 ? "无可用题目" : "开始练习 →"}
+        </button>
+        <div style={{ fontSize: 12, color: "#aaa", textAlign: "center", marginTop: 10 }}>⌨️ 键盘：1-4 选择 · Enter 提交/下一题</div>
       </div>
     </div>
   );
 
-  // Finished screen
+  // ── Finished screen ──
   if (finished) {
-    const pct = Math.round(score / displayQ.length * 100);
+    const pct = displayQ.length ? Math.round(score / displayQ.length * 100) : 0;
     const cwrong = {};
     wrongList.forEach(w => { cwrong[w.chapter] = (cwrong[w.chapter] || 0) + 1; });
     return (
       <div style={{ padding: "2rem", maxWidth: 700, margin: "0 auto" }}>
         <div style={{ ...s.card, padding: "2.5rem" }}>
-          <div style={{ textAlign: "center", marginBottom: 28 }}>
-            <div style={{ fontSize: 52, marginBottom: 14 }}>{pct >= 80 ? "🎉" : pct >= 60 ? "👍" : "💪"}</div>
-            <div style={{ fontSize: 26, fontWeight: 700, color: "#111", marginBottom: 8 }}>练习完成！</div>
-            <div style={{ fontSize: 52, fontWeight: 800, color: pct >= 80 ? G.teal : pct >= 60 ? G.amber : G.red, marginBottom: 6 }}>{pct}%</div>
-            <div style={{ fontSize: 16, color: "#888", marginBottom: 8 }}>答对 {score} / {displayQ.length} 题</div>
-            {timerOn && timer > 0 && <div style={{ fontSize: 14, color: "#aaa", marginBottom: 12 }}>⏱ 用时 {Math.floor(timer/60)}分{timer%60}秒 · 平均每题 {Math.round(timer/displayQ.length)} 秒</div>}
+          <div style={{ textAlign: "center", marginBottom: 24 }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>{pct >= 80 ? "🎉" : pct >= 60 ? "👍" : "💪"}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: "#111", marginBottom: 6 }}>练习完成！</div>
+            <div style={{ fontSize: 52, fontWeight: 800, color: pct >= 80 ? G.teal : pct >= 60 ? G.amber : G.red }}>{pct}%</div>
+            <div style={{ fontSize: 15, color: "#888", margin: "6px 0 12px" }}>答对 {score} / {displayQ.length} 题</div>
+            {timerOn && timer > 0 && <div style={{ fontSize: 14, color: "#aaa", marginBottom: 12 }}>⏱ 用时 {Math.floor(timer/60)}分{timer%60}秒 · 平均 {Math.round(timer/displayQ.length)} 秒/题</div>}
             <ProgressBar value={score} max={displayQ.length} color={pct >= 80 ? G.teal : pct >= 60 ? G.amber : G.red} height={10} />
           </div>
           {wrongList.length > 0 && (
-            <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 20, marginTop: 8 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 14 }}>⚠️ 本次薄弱章节</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 18 }}>
+            <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 20 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>⚠️ 本次答错</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
                 {Object.entries(cwrong).map(([ch, cnt]) => (
-                  <div key={ch} style={{ background: G.redLight, borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 14, color: G.red }}>{ch}</span>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: G.red }}>错 {cnt} 题</span>
+                  <div key={ch} style={{ background: G.redLight, borderRadius: 10, padding: "8px 14px", fontSize: 14 }}>
+                    <span style={{ color: G.red }}>{ch}</span> <strong style={{ color: G.red }}>×{cnt}</strong>
                   </div>
                 ))}
               </div>
               {wrongList.map((w, i) => (
-                <div key={i} style={{ padding: "14px 16px", background: "#fafafa", borderRadius: 12, marginBottom: 10, border: "1px solid #f0f0f0" }}>
-                  <div style={{ fontSize: 15, color: "#111", marginBottom: 6 }}>{w.question}</div>
-                  <div style={{ fontSize: 13, color: G.tealDark }}>✓ {w.answer} · {w.explanation}</div>
+                <div key={i} style={{ padding: "12px 14px", background: "#fafafa", borderRadius: 10, marginBottom: 8, fontSize: 14 }}>
+                  <div style={{ color: "#111", marginBottom: 4 }}>{w.question}</div>
+                  <div style={{ color: G.tealDark, fontSize: 13 }}>✓ {w.answer} · {w.explanation}</div>
                 </div>
               ))}
             </div>
           )}
           <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 20 }}>
-            <Btn onClick={() => { setCurrent(0); setSelected(null); setAnswered(false); setFinished(false); setScore(0); setWrongList([]); setQuizMode(null); if (setChapterFilter) setChapterFilter(null); }}>再练一次</Btn>
-            <Btn variant="primary" onClick={() => setPage("学习报告")}>查看完整报告</Btn>
+            <Btn onClick={() => { setQuizMode(null); setFinished(false); }}>再练一次</Btn>
+            <Btn variant="primary" onClick={() => setPage("学习报告")}>查看报告</Btn>
           </div>
         </div>
       </div>
@@ -925,90 +980,80 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   if (!q) return null;
 
-  // Quiz screen
+  // ── Quiz screen ──
   return (
     <div style={{ padding: "2rem", maxWidth: 820, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
-        <Btn size="sm" onClick={() => { setQuizMode(null); setCurrent(0); setScore(0); setWrongList([]); setAnswered(false); setSelected(null); if (setChapterFilter) setChapterFilter(null); }}>← 返回</Btn>
-        <div style={{ ...s.card, flex: 1, padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <Btn size="sm" onClick={() => { setQuizMode(null); setFinished(false); }}>← 返回</Btn>
+        <div style={{ ...s.card, flex: 1, padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#111" }}>{quizMode === "daily" ? "⚡ 每日练习" : "📚 完整练习"} · 第 {current + 1} / {displayQ.length} 题</div>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>第 {current + 1} / {displayQ.length} 题</div>
             <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{q.chapter} · {q.type}</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            {timerOn && <div style={{ fontSize: 14, color: "#888", background: "#f5f5f5", padding: "4px 12px", borderRadius: 20 }}>⏱ {Math.floor(timer/60).toString().padStart(2,"0")}:{(timer%60).toString().padStart(2,"0")}</div>}
-            <div style={{ fontSize: 14, color: "#666" }}>得分 <strong style={{ color: G.teal, fontSize: 18 }}>{score}</strong>/{current}</div>
+            {timerOn && <div style={{ fontSize: 14, color: "#888", background: "#f5f5f5", padding: "4px 12px", borderRadius: 20 }}>⏱ {String(Math.floor(timer/60)).padStart(2,"0")}:{String(timer%60).padStart(2,"0")}</div>}
+            <span style={{ fontSize: 14, color: "#666" }}>得分 <strong style={{ color: G.teal, fontSize: 18 }}>{score}</strong>/{current}</span>
             <div style={{ width: 100, height: 6, background: "#f0f0f0", borderRadius: 3 }}>
-              <div style={{ height: 6, background: G.teal, borderRadius: 3, width: ((current + 1) / displayQ.length * 100) + "%" }} />
+              <div style={{ height: 6, background: G.teal, borderRadius: 3, width: ((current+1)/displayQ.length*100)+"%" }} />
             </div>
           </div>
         </div>
       </div>
-
-      <div style={{ fontSize: 12, color: "#ccc", textAlign: "right", marginBottom: 6 }}>键盘：1-4 选择 · Enter 提交</div>
-
+      <div style={{ fontSize: 12, color: "#ccc", textAlign: "right", marginBottom: 6 }}>⌨️ 1-4 选择 · Enter 提交</div>
       <div style={{ ...s.card, marginBottom: 14 }}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           <Badge color="blue">{q.type}</Badge>
           <Badge color="amber">{q.chapter}</Badge>
         </div>
-        <div style={{ fontSize: 18, color: "#111", lineHeight: 1.75, marginBottom: 24 }}>{q.question}</div>
-
+        <div style={{ fontSize: 18, color: "#111", lineHeight: 1.75, marginBottom: 22 }}>{q.question}</div>
         {opts && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {opts.map((opt, i) => {
               let border = "2px solid #eee", bg = "#fafafa", col = "#333";
               if (answered) {
-                if (letters[i] === q.answer) { bg = G.tealLight; border = "2px solid " + G.teal; col = G.tealDark; }
-                else if (i === selected && letters[i] !== q.answer) { bg = G.redLight; border = "2px solid " + G.red; col = G.red; }
-              } else if (selected === i) { bg = G.tealLight; border = "2px solid " + G.teal; col = G.tealDark; }
+                if (letters[i] === q.answer) { bg = G.tealLight; border = "2px solid "+G.teal; col = G.tealDark; }
+                else if (i === selected && letters[i] !== q.answer) { bg = G.redLight; border = "2px solid "+G.red; col = G.red; }
+              } else if (selected === i) { bg = G.tealLight; border = "2px solid "+G.teal; col = G.tealDark; }
               return (
                 <div key={i} onClick={() => !answered && setSelected(i)} style={{ padding: "14px 18px", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 14, alignItems: "center" }}>
-                  <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid " + col + "44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, background: selected === i ? G.teal : "transparent", color: selected === i ? "#fff" : col }}>{letters[i]}</div>
+                  <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid "+col+"44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, background: selected === i ? G.teal : "transparent", color: selected === i ? "#fff" : col }}>{letters[i]}</div>
                   <span style={{ fontSize: 15, color: col }}>{opt}</span>
-                  {answered && letters[i] === q.answer && <span style={{ marginLeft: "auto", color: G.teal, fontSize: 18 }}>✓</span>}
+                  {answered && letters[i] === q.answer && <span style={{ marginLeft: "auto", color: G.teal }}>✓</span>}
                 </div>
               );
             })}
           </div>
         )}
-
         {!opts && q.type === "判断题" && (
           <div style={{ display: "flex", gap: 12 }}>
-            {["正确", "错误"].map((opt, i) => {
+            {["正确","错误"].map((opt, i) => {
               let border = "2px solid #eee", bg = "#fafafa";
-              if (answered) {
-                if (opt === q.answer) { bg = G.tealLight; border = "2px solid " + G.teal; }
-                else if (i === selected && opt !== q.answer) { bg = G.redLight; border = "2px solid " + G.red; }
-              } else if (selected === i) { bg = G.tealLight; border = "2px solid " + G.teal; }
+              if (answered) { if (opt === q.answer) { bg = G.tealLight; border = "2px solid "+G.teal; } else if (i === selected) { bg = G.redLight; border = "2px solid "+G.red; } } else if (selected === i) { bg = G.tealLight; border = "2px solid "+G.teal; }
               return <div key={i} onClick={() => !answered && setSelected(i)} style={{ flex: 1, padding: "16px 0", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, textAlign: "center", fontSize: 17, fontWeight: 600 }}>{opt}</div>;
             })}
           </div>
         )}
       </div>
-
       {(showHint || answered) && (
-        <div style={{ ...s.card, marginBottom: 14, borderLeft: "4px solid " + G.teal, background: "#fafffe" }}>
+        <div style={{ ...s.card, marginBottom: 14, borderLeft: "4px solid "+G.teal, background: "#fafffe" }}>
           <div style={{ display: "flex", gap: 14 }}>
             <div style={{ width: 34, height: 34, borderRadius: "50%", background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>AI</span>
             </div>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#111", marginBottom: 6 }}>{answered ? "正确答案：" + q.answer : "解题提示"}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#111", marginBottom: 6 }}>{answered ? "正确答案："+q.answer : "解题提示"}</div>
               <div style={{ fontSize: 15, color: "#444", lineHeight: 1.7 }}>{q.explanation}</div>
             </div>
           </div>
         </div>
       )}
-
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <Btn onClick={() => { if (current > 0) { setCurrent(c => c - 1); setSelected(null); setAnswered(false); setShowHint(false); } }}>← 上一题</Btn>
+        <Btn onClick={() => { if (current > 0) { setCurrent(c => c-1); setSelected(null); setAnswered(false); setShowHint(false); } }}>← 上一题</Btn>
         <div style={{ display: "flex", gap: 10 }}>
           {!answered && <Btn size="sm" onClick={() => setShowHint(v => !v)}>💡 {showHint ? "隐藏" : "提示"}</Btn>}
           {!answered
             ? <Btn variant="primary" onClick={handleSubmit} disabled={selected === null}>提交答案</Btn>
-            : <Btn variant="primary" onClick={handleNext}>{current >= displayQ.length - 1 ? "查看结果 →" : "下一题 →"}</Btn>
-          }
+            : <Btn variant="primary" onClick={handleNext}>{current >= displayQ.length-1 ? "查看结果 →" : "下一题 →"}</Btn>}
         </div>
       </div>
     </div>
@@ -1165,197 +1210,7 @@ function ReportPage({ setPage }) {
   );
 }
 
-// ── Wrong Drill Mode ──────────────────────────────────────────────────────────
-function WrongDrill({ questions, onExit, onMastered }) {
-  const [idx, setIdx] = useState(0);
-  const [selected, setSelected] = useState(null);
-  const [answered, setAnswered] = useState(false);
-  const [masteredIds, setMasteredIds] = useState(new Set());
-
-  const q = questions[idx];
-  const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
-  const letters = ["A", "B", "C", "D"];
-
-  if (!q) return (
-    <div style={{ ...s.card, textAlign: "center", padding: "3rem", marginTop: 20 }}>
-      <div style={{ fontSize: 40, marginBottom: 12 }}>🎉</div>
-      <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>全部错题已复习完成！</div>
-      <div style={{ fontSize: 15, color: "#888", marginBottom: 20 }}>已掌握 {masteredIds.size} / {questions.length} 题</div>
-      <Btn variant="primary" onClick={onExit}>返回错题本</Btn>
-    </div>
-  );
-
-  const isCorrect = answered && (opts
-    ? letters[selected] === q.answer
-    : (selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误"));
-
-  const handleSubmit = () => {
-    if (selected === null) return;
-    setAnswered(true);
-    if (isCorrect) {
-      setMasteredIds(s => new Set([...s, q.id || q.question]));
-      if (onMastered) onMastered(q.id || q.question);
-    }
-  };
-
-  const handleNext = () => {
-    setIdx(i => i + 1);
-    setSelected(null);
-    setAnswered(false);
-  };
-
-  return (
-    <div style={{ maxWidth: 780, margin: "0 auto" }}>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <Btn size="sm" onClick={onExit}>退出复习</Btn>
-        <div style={{ flex: 1, background: "#f0f0f0", borderRadius: 20, height: 6 }}>
-          <div style={{ height: 6, borderRadius: 20, background: G.teal, width: `${((idx) / questions.length) * 100}%`, transition: "width .4s" }} />
-        </div>
-        <span style={{ fontSize: 14, color: "#888" }}>{idx + 1} / {questions.length}</span>
-      </div>
-
-      {/* Question */}
-      <div style={{ ...s.card, marginBottom: 14 }}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          <Badge color="red">错题复习</Badge>
-          <Badge color="amber">{q.chapter}</Badge>
-          <Badge color="blue">{q.type}</Badge>
-        </div>
-        <div style={{ fontSize: 18, color: "#111", lineHeight: 1.75, marginBottom: 22 }}>{q.question}</div>
-
-        {opts && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {opts.map((opt, i) => {
-              let border = "2px solid #eee", bg = "#fafafa", col = "#333";
-              if (answered) {
-                if (letters[i] === q.answer) { bg = G.tealLight; border = `2px solid ${G.teal}`; col = G.tealDark; }
-                else if (i === selected && letters[i] !== q.answer) { bg = G.redLight; border = `2px solid ${G.red}`; col = G.red; }
-              } else if (selected === i) { bg = G.tealLight; border = `2px solid ${G.teal}`; }
-              return (
-                <div key={i} onClick={() => !answered && setSelected(i)} style={{ padding: "14px 18px", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 14, alignItems: "center" }}>
-                  <div style={{ width: 28, height: 28, borderRadius: "50%", border: `2px solid ${col}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, background: selected === i ? G.teal : "transparent", color: selected === i ? "#fff" : col }}>{letters[i]}</div>
-                  <span style={{ fontSize: 15, color: col }}>{opt}</span>
-                  {answered && letters[i] === q.answer && <span style={{ marginLeft: "auto", color: G.teal, fontSize: 18 }}>✓</span>}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {!opts && q.type === "判断题" && (
-          <div style={{ display: "flex", gap: 12 }}>
-            {["正确", "错误"].map((opt, i) => {
-              let border = "2px solid #eee", bg = "#fafafa";
-              if (answered) {
-                if (opt === q.answer) { bg = G.tealLight; border = `2px solid ${G.teal}`; }
-                else if (i === selected && opt !== q.answer) { bg = G.redLight; border = `2px solid ${G.red}`; }
-              } else if (selected === i) { bg = G.tealLight; border = `2px solid ${G.teal}`; }
-              return <div key={i} onClick={() => !answered && setSelected(i)} style={{ flex: 1, padding: "16px 0", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, textAlign: "center", fontSize: 17, fontWeight: 600 }}>{opt}</div>;
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Feedback after answering */}
-      {answered && (
-        <div style={{ ...s.card, marginBottom: 14, borderLeft: `4px solid ${isCorrect ? G.teal : G.red}`, background: isCorrect ? "#f0fdf8" : "#fff8f8" }}>
-          <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-            <div style={{ fontSize: 24 }}>{isCorrect ? "✅" : "❌"}</div>
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: isCorrect ? G.teal : G.red, marginBottom: 6 }}>
-                {isCorrect ? "答对了！已从错题本移除" : `答错了，正确答案是：${q.answer}`}
-              </div>
-              <div style={{ fontSize: 14, color: "#444", lineHeight: 1.7 }}>{q.explanation}</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Actions */}
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <Btn onClick={onExit}>{isCorrect ? "已掌握，退出" : "退出复习"}</Btn>
-        <div style={{ display: "flex", gap: 10 }}>
-          {!answered
-            ? <Btn variant="primary" onClick={handleSubmit} disabled={selected === null}>提交答案</Btn>
-            : <Btn variant="primary" onClick={handleNext}>{idx < questions.length - 1 ? "继续下一题 →" : "完成复习"}</Btn>
-          }
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Wrong Page ────────────────────────────────────────────────────────────────
-function WrongPage({ setPage }) {
-  const WRONG_QS = [
-    ALL_QUESTIONS.find(q => q.id === "4"),
-    ALL_QUESTIONS.find(q => q.id === "11"),
-    ALL_QUESTIONS.find(q => q.id === "7"),
-    ALL_QUESTIONS.find(q => q.id === "26"),
-  ].filter(Boolean);
-
-  const [drillMode, setDrillMode] = useState(false);
-  const [drillStart, setDrillStart] = useState(0);
-  const [mastered, setMastered] = useState(new Set());
-  const remaining = WRONG_QS.filter(q => !mastered.has(q.id || q.question));
-
-  if (drillMode) return (
-    <div style={{ padding: "2rem", maxWidth: 820, margin: "0 auto" }}>
-      <WrongDrill
-        questions={remaining.slice(drillStart)}
-        onExit={() => setDrillMode(false)}
-        onMastered={id => setMastered(s => new Set([...s, id]))}
-      />
-    </div>
-  );
-
-  return (
-    <div style={{ padding: "2rem", maxWidth: 820, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
-        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
-        <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>错题本</div>
-        <Badge color="red">{remaining.length} 题待复习</Badge>
-        {mastered.size > 0 && <Badge color="teal">已掌握 {mastered.size} 题</Badge>}
-        {remaining.length > 0 && (
-          <button onClick={() => { setDrillStart(0); setDrillMode(true); }} style={{ marginLeft: "auto", padding: "10px 22px", background: G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 15, fontWeight: 700, fontFamily: "inherit" }}>
-            🔄 开始全部复习
-          </button>
-        )}
-      </div>
-
-      <div style={{ ...s.card }}>
-        {remaining.length === 0 && (
-          <div style={{ textAlign: "center", padding: "3rem", color: "#888" }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>🎉</div>
-            <div style={{ fontSize: 18, fontWeight: 600 }}>所有错题已掌握！</div>
-          </div>
-        )}
-        {remaining.map((q, i) => (
-          <div key={i} style={{ padding: "18px 0", borderBottom: i < remaining.length - 1 ? "1px solid #f5f5f5" : "none" }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-              <div style={{ width: 10, height: 10, borderRadius: "50%", background: G.red, marginTop: 8, flexShrink: 0 }} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 15, color: "#111", marginBottom: 6 }}>{q.question}</div>
-                <div style={{ fontSize: 13, color: G.tealDark, marginBottom: 4 }}>✓ {q.answer}</div>
-                <div style={{ fontSize: 12, color: "#aaa" }}>{q.chapter} · {q.type}</div>
-              </div>
-              <button onClick={() => { setDrillStart(i); setDrillMode(true); }} style={{ padding: "8px 16px", background: G.redLight, color: G.red, border: `1px solid ${G.red}44`, borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit", flexShrink: 0 }}>
-                重做此题
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-
-
-// ── Upload Page (all users) ───────────────────────────────────────────────────
-const DEFAULT_COURSES = ["数值分析", "最优化", "线性代数", "概率论与统计", "数学分析"];
-
+// ── Upload Page ─────────────────────────────────────────────────────────────
 function UploadPage({ setPage, profile }) {
   const [title, setTitle] = useState("");
   const [course, setCourse] = useState("数值分析");
@@ -1494,6 +1349,166 @@ function UploadPage({ setPage, profile }) {
 }
 
 // ── Materials Library Page ─────────────────────────────────────────────────────
+
+// ── Materials Library Page ──────────────────────────────────────────────────
+
+// ── Wrong Drill ───────────────────────────────────────────────────────────────
+function WrongDrill({ questions, onExit, onMastered }) {
+  const [idx, setIdx] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [answered, setAnswered] = useState(false);
+  const [masteredCount, setMasteredCount] = useState(0);
+  const q = questions[idx];
+  const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
+  const letters = ["A","B","C","D"];
+  if (!q) return (
+    <div style={{ ...s.card, textAlign: "center", padding: "3rem" }}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>🎉</div>
+      <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>复习完成！</div>
+      <div style={{ fontSize: 15, color: "#888", marginBottom: 20 }}>本次掌握 {masteredCount}/{questions.length} 题</div>
+      <Btn variant="primary" onClick={onExit}>返回错题本</Btn>
+    </div>
+  );
+  const isCorrect = answered && (opts ? letters[selected] === q.answer : (selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误"));
+  const handleSubmit = () => {
+    if (selected === null) return;
+    setAnswered(true);
+    if (isCorrect) { setMasteredCount(c => c+1); if (onMastered) onMastered(q.id || q.question); }
+  };
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+        <Btn size="sm" onClick={onExit}>退出</Btn>
+        <div style={{ flex: 1, height: 6, background: "#f0f0f0", borderRadius: 3 }}>
+          <div style={{ height: 6, borderRadius: 3, background: G.teal, width: (idx/questions.length*100)+"%" }} />
+        </div>
+        <span style={{ fontSize: 14, color: "#888" }}>{idx+1}/{questions.length}</span>
+      </div>
+      <div style={{ ...s.card, marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}><Badge color="red">错题</Badge><Badge color="amber">{q.chapter}</Badge></div>
+        <div style={{ fontSize: 18, lineHeight: 1.75, marginBottom: 20 }}>{q.question}</div>
+        {opts ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {opts.map((opt, i) => {
+              let border = "2px solid #eee", bg = "#fafafa", col = "#333";
+              if (answered) { if (letters[i] === q.answer) { bg = G.tealLight; border = "2px solid "+G.teal; col = G.tealDark; } else if (i === selected) { bg = G.redLight; border = "2px solid "+G.red; col = G.red; } } else if (selected === i) { bg = G.tealLight; border = "2px solid "+G.teal; }
+              return <div key={i} onClick={() => !answered && setSelected(i)} style={{ padding: "12px 16px", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 12, alignItems: "center" }}>
+                <div style={{ width: 26, height: 26, borderRadius: "50%", background: selected===i ? G.teal : "transparent", border: "2px solid "+col+"44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: selected===i ? "#fff" : col, flexShrink: 0 }}>{letters[i]}</div>
+                <span style={{ fontSize: 15, color: col }}>{opt}</span>
+              </div>;
+            })}
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 10 }}>
+            {["正确","错误"].map((opt, i) => {
+              let border = "2px solid #eee", bg = "#fafafa";
+              if (answered) { if (opt === q.answer) { bg = G.tealLight; border = "2px solid "+G.teal; } else if (i === selected) { bg = G.redLight; border = "2px solid "+G.red; } } else if (selected === i) { bg = G.tealLight; border = "2px solid "+G.teal; }
+              return <div key={i} onClick={() => !answered && setSelected(i)} style={{ flex: 1, padding: "14px 0", border, borderRadius: 12, textAlign: "center", fontSize: 16, fontWeight: 600, cursor: answered ? "default" : "pointer", background: bg }}>{opt}</div>;
+            })}
+          </div>
+        )}
+      </div>
+      {answered && (
+        <div style={{ ...s.card, marginBottom: 14, borderLeft: "4px solid "+(isCorrect ? G.teal : G.red), background: isCorrect ? "#f0fdf8" : "#fff8f8" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: isCorrect ? G.teal : G.red, marginBottom: 6 }}>
+            {isCorrect ? "✅ 答对！已从错题本移除" : "❌ 答错了，正确答案："+q.answer}
+          </div>
+          <div style={{ fontSize: 14, color: "#444", lineHeight: 1.7 }}>{q.explanation}</div>
+        </div>
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <Btn onClick={onExit}>{isCorrect ? "已掌握，退出" : "退出"}</Btn>
+        {!answered
+          ? <Btn variant="primary" onClick={handleSubmit} disabled={selected === null}>提交答案</Btn>
+          : <Btn variant="primary" onClick={() => { setIdx(i => i+1); setSelected(null); setAnswered(false); }}>{idx < questions.length-1 ? "继续 →" : "完成"}</Btn>}
+      </div>
+    </div>
+  );
+}
+
+// ── Wrong Page ─────────────────────────────────────────────────────────────────
+function WrongPage({ setPage, sessionAnswers = {} }) {
+  const chapterStats = getChapterStats(sessionAnswers);
+  const weakChapters = Object.entries(chapterStats)
+    .filter(([, s]) => s.total >= 2 && s.correct / s.total < 0.75)
+    .sort((a, b) => (a[1].correct/a[1].total) - (b[1].correct/b[1].total));
+
+  const WRONG_QS = [
+    ALL_QUESTIONS.find(q => q.id === "4"),
+    ALL_QUESTIONS.find(q => q.id === "11"),
+    ALL_QUESTIONS.find(q => q.id === "7"),
+    ALL_QUESTIONS.find(q => q.id === "26"),
+  ].filter(Boolean);
+
+  const [drillMode, setDrillMode] = useState(false);
+  const [drillStart, setDrillStart] = useState(0);
+  const [mastered, setMastered] = useState(new Set());
+  const remaining = WRONG_QS.filter(q => !mastered.has(q.id || q.question));
+
+  if (drillMode) return (
+    <div style={{ padding: "2rem", maxWidth: 780, margin: "0 auto" }}>
+      <WrongDrill questions={remaining.slice(drillStart)} onExit={() => setDrillMode(false)} onMastered={id => setMastered(s => new Set([...s, id]))} />
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "2rem", maxWidth: 900, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
+        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>错题本 & 薄弱分析</div>
+        {remaining.length > 0 && <Badge color="red">{remaining.length} 题</Badge>}
+        {mastered.size > 0 && <Badge color="teal">已掌握 {mastered.size}</Badge>}
+      </div>
+
+      {/* Weak chapter stats from session */}
+      {weakChapters.length > 0 && (
+        <div style={{ ...s.card, marginBottom: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>📊 薄弱章节（根据本次答题记录）</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10 }}>
+            {weakChapters.map(([ch, stat]) => {
+              const pct = Math.round(stat.correct/stat.total*100);
+              return (
+                <div key={ch} style={{ background: G.redLight, borderRadius: 12, padding: "14px", border: "1px solid "+G.red+"22" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: G.red, marginBottom: 4 }}>{ch}</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: G.red, marginBottom: 4 }}>{pct}%</div>
+                  <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>{stat.correct}/{stat.total} 题正确</div>
+                  <ProgressBar value={stat.correct} max={stat.total} color={G.red} height={5} />
+                  <button onClick={() => setPage("题库练习")} style={{ marginTop: 10, width: "100%", padding: "7px 0", background: G.red, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>专项练习 →</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Wrong list */}
+      <div style={{ ...s.card }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 14, borderBottom: "1px solid #f0f0f0" }}>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>收录错题 <span style={{ fontSize: 14, color: "#aaa", fontWeight: 400 }}>({remaining.length}题)</span></div>
+          {remaining.length > 0 && (
+            <button onClick={() => { setDrillStart(0); setDrillMode(true); }} style={{ padding: "10px 22px", background: G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 14, fontWeight: 700, fontFamily: "inherit" }}>🔄 全部复习</button>
+          )}
+        </div>
+        {remaining.length === 0 && <div style={{ textAlign: "center", padding: "3rem", color: "#888" }}><div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div><div style={{ fontSize: 18, fontWeight: 600 }}>所有错题已掌握！</div></div>}
+        {remaining.map((q, i) => (
+          <div key={i} style={{ padding: "16px 0", borderBottom: i < remaining.length-1 ? "1px solid #f5f5f5" : "none", display: "flex", alignItems: "flex-start", gap: 14 }}>
+            <div style={{ width: 10, height: 10, borderRadius: "50%", background: G.red, marginTop: 8, flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, color: "#111", marginBottom: 4 }}>{q.question}</div>
+              <div style={{ fontSize: 13, color: G.tealDark, marginBottom: 3 }}>✓ {q.answer}</div>
+              <div style={{ fontSize: 12, color: "#aaa" }}>{q.chapter} · {q.type}</div>
+            </div>
+            <button onClick={() => { setDrillStart(i); setDrillMode(true); }} style={{ padding: "8px 14px", background: G.redLight, color: G.red, border: "1px solid "+G.red+"44", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit", flexShrink: 0 }}>重做</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Teacher Page ──────────────────────────────────────────────────────────────
+
+// ── Materials Library Page ──────────────────────────────────────────────────
 function MaterialsPage({ setPage, profile }) {
   const [materials, setMaterials] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2047,7 +2062,7 @@ export default function App() {
     if (page === "题库练习") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter) => { try { const updated = { ...sessionAnswers, [qid]: { correct, chapter } }; setSessionAnswers(updated); } catch(e) {} }} />;
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} />;
-    if (page === "错题本") return <WrongPage setPage={handleSetPage} />;
+    if (page === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} />;
     if (page === "教师管理") return <TeacherPage setPage={handleSetPage} />;
     return null;
   };
@@ -2058,4 +2073,82 @@ export default function App() {
       {renderPage()}
     </div>
   );
-}
+}  const extractAndGenerate = async (f, ch, count) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          if (!window.pdfjsLib) {
+            await new Promise((res, rej) => {
+              const sc = document.createElement("script");
+              sc.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+              sc.onload = res; sc.onerror = rej;
+              document.head.appendChild(sc);
+            });
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+          }
+          const pdf = await window.pdfjsLib.getDocument({ data: e.target.result }).promise;
+          let text = "";
+          for (let i = 1; i <= Math.min(pdf.numPages, 15); i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            text += content.items.map(item => item.str).join(" ") + " ";
+          }
+          // Generate questions from text
+          const sents = text.replace(/  +/g, " ").split(/[。.!？]/).map(s => s.trim()).filter(s => s.length > 15 && s.length < 160);
+          const qs = [];
+          sents.slice(0, count * 3).forEach((sent, idx) => {
+            if (qs.length >= count) return;
+            if (idx % 2 === 0) {
+              qs.push({ question: "以下说法是否正确：「" + sent.slice(0, 55) + "」", options: null, answer: "正确", explanation: sent, chapter: ch, type: "判断题" });
+            } else {
+              const words = sent.split(/[，,\s]+/).filter(w => w.length > 1);
+              const key = words[0] || "该内容";
+              qs.push({ question: "关于「" + key + "」，以下哪个描述最正确？", options: ["A." + sent.slice(0, 35), "B.与" + key + "定义相反", "C.该概念不存在", "D.以上都不对"], answer: "A", explanation: sent, chapter: ch, type: "单选题" });
+            }
+          });
+          resolve(qs.slice(0, count));
+        } catch (err) { resolve([]); }
+      };
+      reader.onerror = () => resolve([]);
+      reader.readAsArrayBuffer(f);
+    });
+  };
+
+  const handleUpload = async () => {
+    if (!title.trim()) { setError("请填写资料名称"); return; }
+    if (!file) { setError("请选择 PDF 文件"); return; }
+    if (file.size > 50 * 1024 * 1024) { setError("文件超过 50MB"); return; }
+    setUploading(true); setError(""); setSuccess(""); setExtractedQs([]);
+    try {
+      setStep("上传文件…");
+      const filePath = (profile?.id || "anon") + "/" + Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      let publicUrl = "";
+      const { error: storageErr } = await supabase.storage.from("materials").upload(filePath, file, { upsert: false });
+      if (!storageErr) {
+        const { data: { publicUrl: u } } = supabase.storage.from("materials").getPublicUrl(filePath);
+        publicUrl = u;
+      }
+      const chLabel = chapter === "全部" ? course : chapter;
+      let newQs = [];
+      if (genCount > 0) {
+        setStep("提取文字并生成题目（免费）…");
+        newQs = await extractAndGenerate(file, chLabel, genCount);
+        setExtractedQs(newQs);
+      }
+      setStep("保存到资料库…");
+      const { error: dbErr } = await supabase.from("materials").insert({
+        title: title.trim(), course, chapter: chapter === "全部" ? null : chapter,
+        description: desc.trim() || null, file_name: file.name,
+        file_size: file.size > 1024*1024 ? (file.size/1024/1024).toFixed(1)+" MB" : (file.size/1024).toFixed(0)+" KB",
+        file_data: publicUrl || "", uploader_name: profile?.name || "用户", uploaded_by: profile?.id || null,
+      });
+      if (dbErr) throw new Error(dbErr.message);
+      if (newQs.length > 0) {
+        await supabase.from("questions").insert(newQs.map(q => ({ chapter: q.chapter, course, type: q.type, question: q.question, options: q.options, answer: q.answer, explanation: q.explanation })));
+      }
+      setSuccess("上传成功！" + (newQs.length > 0 ? `已免费生成 ${newQs.length} 道题目。` : "资料已发布。"));
+      setTitle(""); setDesc(""); setFile(null); setChapter("全部");
+    } catch (e) { setError("上传失败：" + e.message); }
+    setUploading(false); setStep("");
+  };
