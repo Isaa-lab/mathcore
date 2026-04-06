@@ -756,7 +756,7 @@ function KnowledgePage({ setPage, setChapterFilter, sessionAnswers = {} }) {
 }
 
 // ── Quiz Page ─────────────────────────────────────────────────────────────────
-function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setChapterFilter, onAnswer }) {
+function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setChapterFilter, onAnswer, materialId = null, materialTitle = null }) {
   const [allQuestions, setAllQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
   // Setup state (moved to top - never in conditional)
@@ -778,19 +778,30 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const timerRef = useRef(null);
 
   useEffect(() => {
-    supabase.from("questions").select("*").then(({ data }) => {
+    let query = supabase.from("questions").select("*");
+    // If materialId given, fetch ONLY questions from that material
+    if (materialId) {
+      query = query.eq("material_id", materialId);
+    }
+    query.then(({ data }) => {
       const dbQs = data || [];
-      const dbTexts = new Set(dbQs.map(q => q.question));
-      const uniqueSamples = ALL_QUESTIONS.filter(q => !dbTexts.has(q.question));
-      let pool = [...dbQs, ...uniqueSamples];
-      if (initialQuestion) {
+      let pool;
+      if (materialId) {
+        // Only questions from this material (no sample questions mixed in)
+        pool = dbQs;
+      } else {
+        const dbTexts = new Set(dbQs.map(q => q.question));
+        const uniqueSamples = ALL_QUESTIONS.filter(q => !dbTexts.has(q.question));
+        pool = [...dbQs, ...uniqueSamples];
+      }
+      if (initialQuestion && !materialId) {
         const rest = pool.filter(q => q.id !== initialQuestion.id).sort(() => Math.random() - 0.5);
         pool = [initialQuestion, ...rest];
       }
       setAllQuestions(pool.sort(() => Math.random() - 0.5));
       setLoading(false);
     });
-  }, []);
+  }, [materialId]);
 
   useEffect(() => {
     if (timerOn && quizMode && !finished) {
@@ -870,7 +881,18 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       <Btn size="sm" onClick={() => setPage("首页")} style={{ marginBottom: 20 }}>← 返回</Btn>
       <div style={{ ...s.card, padding: "2rem" }}>
         <div style={{ fontSize: 22, fontWeight: 700, color: "#111", marginBottom: 4 }}>✏️ 练习设置</div>
-        <div style={{ fontSize: 14, color: "#888", marginBottom: 24 }}>自定义范围，精准刷题</div>
+        {materialId ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: G.blueLight, borderRadius: 10, marginBottom: 20, border: "1.5px solid " + G.blue + "44" }}>
+            <div style={{ fontSize: 20 }}>📄</div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: G.blue }}>基于资料出题模式</div>
+              <div style={{ fontSize: 13, color: G.blue + "cc" }}>{materialTitle} · {allQuestions.length} 道相关题目</div>
+            </div>
+            <button onClick={() => setPage("资料库")} style={{ marginLeft: "auto", padding: "6px 12px", background: "transparent", color: G.blue, border: "1.5px solid " + G.blue + "44", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>← 返回资料库</button>
+          </div>
+        ) : (
+          <div style={{ fontSize: 14, color: "#888", marginBottom: 24 }}>自定义范围，精准刷题</div>
+        )}
 
         {/* Quick start */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 24 }}>
@@ -927,9 +949,18 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           <span style={{ fontSize: 13, color: "#aaa", minWidth: 60 }}>{timerOn ? "已开启" : "已关闭"}</span>
         </div>
 
-        <button disabled={previewPool.length === 0} onClick={() => startQuiz(selectedChapters, selectedTypes, quizCount)} style={{ width: "100%", padding: "14px 0", fontSize: 16, fontWeight: 700, fontFamily: "inherit", background: previewPool.length === 0 ? "#ccc" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: previewPool.length === 0 ? "not-allowed" : "pointer" }}>
-          {previewPool.length === 0 ? "无可用题目" : "开始练习 →"}
-        </button>
+        {materialId && allQuestions.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "2rem", background: G.amberLight, borderRadius: 12, marginBottom: 16 }}>
+            <div style={{ fontSize: 32, marginBottom: 10 }}>📭</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: G.amber, marginBottom: 6 }}>该资料暂无关联题目</div>
+            <div style={{ fontSize: 14, color: "#888", marginBottom: 16 }}>此资料上传时未自动生成题目，或题目数量为 0</div>
+            <button onClick={() => setPage("上传资料")} style={{ padding: "10px 22px", background: G.amber, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>重新上传并出题 →</button>
+          </div>
+        ) : (
+          <button disabled={previewPool.length === 0} onClick={() => startQuiz(selectedChapters, selectedTypes, quizCount)} style={{ width: "100%", padding: "14px 0", fontSize: 16, fontWeight: 700, fontFamily: "inherit", background: previewPool.length === 0 ? "#ccc" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: previewPool.length === 0 ? "not-allowed" : "pointer" }}>
+            {previewPool.length === 0 ? "无可用题目" : "开始练习 →"}
+          </button>
+        )}
         <div style={{ fontSize: 12, color: "#aaa", textAlign: "center", marginTop: 10 }}>⌨️ 键盘：1-4 选择 · Enter 提交/下一题</div>
       </div>
     </div>
@@ -1577,7 +1608,7 @@ function MaterialsPage({ setPage, profile }) {
           <div style={{ ...s.card }}>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>📋 资料信息</div>
             <div style={{ fontSize: 13, color: "#888", lineHeight: 1.8 }}>
-              <div>上传者：{selected.uploader_name || "教师"}</div>
+              <div>上传者：{selected.uploader_name || "用户"}</div>
               <div>文件：{selected.file_name}</div>
               <div>大小：{selected.file_size}</div>
               <div>时间：{new Date(selected.created_at).toLocaleDateString("zh-CN")}</div>
@@ -1628,7 +1659,12 @@ function MaterialsPage({ setPage, profile }) {
             </div>
           </div>
 
-          <Btn variant="primary" onClick={() => setPage("题库练习")}>做相关练习题 →</Btn>
+          <button onClick={() => setPage("quiz_material_" + selected.id + "_" + encodeURIComponent(selected.title))} style={{ width: "100%", padding: "12px 0", background: G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 15, fontWeight: 700, fontFamily: "inherit" }}>
+            ✏️ 基于此资料做练习题
+          </button>
+          <button onClick={() => setPage("题库练习")} style={{ width: "100%", padding: "10px 0", background: "transparent", color: G.blue, border: "1.5px solid " + G.blue, borderRadius: 12, cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "inherit", marginTop: 8 }}>
+            📚 进入全部题库
+          </button>
         </div>
       </div>
     </div>
@@ -1674,9 +1710,9 @@ function MaterialsPage({ setPage, profile }) {
               <Badge color={m.course === "数值分析" ? "teal" : "blue"}>{m.course}</Badge>
               {m.chapter && <Badge color="amber">{m.chapter}</Badge>}
             </div>
-            <div style={{ fontSize: 12, color: "#aaa", borderTop: "1px solid #f5f5f5", paddingTop: 10, display: "flex", justifyContent: "space-between" }}>
-              <span>{m.uploader_name || "教师"} 上传</span>
-              <span>{new Date(m.created_at).toLocaleDateString("zh-CN")}</span>
+            <div style={{ fontSize: 12, color: "#aaa", borderTop: "1px solid #f5f5f5", paddingTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>{m.uploader_name || "用户"} 上传 · {new Date(m.created_at).toLocaleDateString("zh-CN")}</span>
+              <button onClick={e => { e.stopPropagation(); setPage("quiz_material_" + m.id + "_" + encodeURIComponent(m.title)); }} style={{ padding: "4px 10px", background: G.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>做题 ✏️</button>
             </div>
           </div>
         ))}
@@ -2059,7 +2095,15 @@ export default function App() {
     if (page === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
     if (page === "上传资料") return <UploadPage setPage={handleSetPage} profile={profile} />;
     if (page === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} />;
-    if (page === "题库练习") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter) => { try { const updated = { ...sessionAnswers, [qid]: { correct, chapter } }; setSessionAnswers(updated); } catch(e) {} }} />;
+    if (page === "题库练习" || page.startsWith("quiz_material_")) {
+      let matId = null, matTitle = null;
+      if (page.startsWith("quiz_material_")) {
+        const parts = page.replace("quiz_material_", "").split("_");
+        matId = parts[0];
+        matTitle = decodeURIComponent(parts.slice(1).join("_"));
+      }
+      return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} materialId={matId} materialTitle={matTitle} onAnswer={(qid, correct, chapter) => { try { const updated = { ...sessionAnswers, [qid]: { correct, chapter } }; setSessionAnswers(updated); } catch(e) {} }} />;
+    }
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} />;
     if (page === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} />;
@@ -2137,17 +2181,22 @@ export default function App() {
         setExtractedQs(newQs);
       }
       setStep("保存到资料库…");
-      const { error: dbErr } = await supabase.from("materials").insert({
+      const { data: matData, error: dbErr } = await supabase.from("materials").insert({
         title: title.trim(), course, chapter: chapter === "全部" ? null : chapter,
         description: desc.trim() || null, file_name: file.name,
         file_size: file.size > 1024*1024 ? (file.size/1024/1024).toFixed(1)+" MB" : (file.size/1024).toFixed(0)+" KB",
         file_data: publicUrl || "", uploader_name: profile?.name || "用户", uploaded_by: profile?.id || null,
-      });
+      }).select().single();
       if (dbErr) throw new Error(dbErr.message);
-      if (newQs.length > 0) {
-        await supabase.from("questions").insert(newQs.map(q => ({ chapter: q.chapter, course, type: q.type, question: q.question, options: q.options, answer: q.answer, explanation: q.explanation })));
+      if (newQs.length > 0 && matData) {
+        await supabase.from("questions").insert(newQs.map(q => ({
+          chapter: q.chapter, course, type: q.type,
+          question: q.question, options: q.options,
+          answer: q.answer, explanation: q.explanation,
+          material_id: matData.id,
+        })));
       }
-      setSuccess("上传成功！" + (newQs.length > 0 ? `已免费生成 ${newQs.length} 道题目。` : "资料已发布。"));
+      setSuccess("上传成功！" + (newQs.length > 0 ? `已免费生成 ${newQs.length} 道题目，可在题库练习中选择该资料进行练习。` : "资料已发布到资料库。"));
       setTitle(""); setDesc(""); setFile(null); setChapter("全部");
     } catch (e) { setError("上传失败：" + e.message); }
     setUploading(false); setStep("");
