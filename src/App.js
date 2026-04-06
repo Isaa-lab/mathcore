@@ -56,6 +56,54 @@ const splitTextIntoChunks = (text, maxLen = 700) => {
   return out.slice(0, 30);
 };
 
+const buildFallbackQuestions = (text, chapter, count = 6) => {
+  const src = String(text || "").replace(/\s+/g, " ").trim();
+  if (!src) return [];
+  const sents = src.split(/[。！？.!?]/).map(s => s.trim()).filter(s => s.length > 14).slice(0, count * 4);
+  const qs = [];
+  for (let i = 0; i < sents.length && qs.length < count; i++) {
+    const sent = sents[i];
+    if (i % 2 === 0) {
+      qs.push({
+        question: `以下说法是否正确：「${sent.slice(0, 58)}」`,
+        options: null,
+        answer: "正确",
+        explanation: sent.slice(0, 120),
+        type: "判断题",
+        chapter: chapter || "资料专题",
+      });
+    } else {
+      const words = sent.split(/[，,\s]/).filter(w => w.length > 1);
+      const key = words[0] || "该知识点";
+      qs.push({
+        question: `关于「${key}」，下列描述最恰当的是：`,
+        options: [
+          `A.${sent.slice(0, 30)}`,
+          `B.${key}与原文结论相反`,
+          `C.${key}在资料中未出现`,
+          "D.以上都不正确",
+        ],
+        answer: "A",
+        explanation: sent.slice(0, 120),
+        type: "单选题",
+        chapter: chapter || "资料专题",
+      });
+    }
+  }
+  return qs;
+};
+
+const buildFallbackTopics = (text, chapter, count = 4) => {
+  const src = String(text || "").replace(/\s+/g, " ").trim();
+  if (!src) return [];
+  const sents = src.split(/[。！？.!?]/).map(s => s.trim()).filter(s => s.length > 12).slice(0, count);
+  return sents.map((s, i) => ({
+    name: `知识点 ${i + 1}`,
+    summary: s.slice(0, 80),
+    chapter: chapter || null,
+  }));
+};
+
 const ensurePdfJs = async () => {
   if (window.pdfjsLib) return;
   await new Promise((res, rej) => {
@@ -146,8 +194,10 @@ const processMaterialWithAI = async ({
     });
     const result = await res.json();
     if (result?.error) throw new Error(result.error);
-    const topics = Array.isArray(result?.topics) ? result.topics : [];
-    const questions = Array.isArray(result?.questions) ? result.questions : [];
+    let topics = Array.isArray(result?.topics) ? result.topics : [];
+    let questions = Array.isArray(result?.questions) ? result.questions : [];
+    if (topics.length === 0) topics = buildFallbackTopics(text, material?.chapter, 4);
+    if (questions.length === 0) questions = buildFallbackQuestions(text, material?.chapter || material?.course, genCount);
 
     if (chunks.length > 0) {
       try {
@@ -200,7 +250,46 @@ const processMaterialWithAI = async ({
     await finishJob(true);
     return { topics, questions, chunks, ext, actorName };
   } catch (err) {
-    await finishJob(false, err?.message || "unknown");
+    // Hard fallback: AI failure still guarantees question availability.
+    const topics = buildFallbackTopics(text, material?.chapter, 4);
+    const questions = buildFallbackQuestions(text, material?.chapter || material?.course, genCount);
+    try {
+      if (chunks.length > 0) {
+        await supabase.from("material_chunks").delete().eq("material_id", materialId);
+        await supabase.from("material_chunks").insert(chunks.map((c, idx) => ({
+          material_id: materialId,
+          chunk_index: idx,
+          chunk_text: c,
+          token_estimate: Math.round(c.length / 2),
+        })));
+      }
+      if (topics.length > 0) {
+        await supabase.from("material_topics").delete().eq("material_id", materialId);
+        await supabase.from("material_topics").insert(topics.map((t) => ({
+          material_id: materialId,
+          name: t?.name || "未命名知识点",
+          summary: t?.summary || "",
+          chapter: material?.chapter || null,
+          viz_key: null,
+          example_question: null,
+          solution_hint: null,
+        })));
+      }
+      if (questions.length > 0) {
+        await supabase.from("questions").insert(questions.map((q) => ({
+          chapter: q.chapter || material?.chapter || material?.course || "资料专题",
+          course: material?.course || "数学",
+          type: q.type || "单选题",
+          question: q.question,
+          options: q.options || null,
+          answer: q.answer || "A",
+          explanation: q.explanation || "",
+          material_id: materialId,
+        })));
+      }
+    } catch (e) {}
+    await finishJob(questions.length > 0, err?.message || "unknown");
+    if (questions.length > 0) return { topics, questions, chunks, ext, actorName };
     throw err;
   }
 };
