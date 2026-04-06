@@ -767,18 +767,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [wrongList, setWrongList] = useState([]);
   const [finished, setFinished] = useState(false);
   const [quizMode, setQuizMode] = useState(initialQuestion ? "single" : null);
-  const [timer, setTimer] = useState(0);
   const [timerOn, setTimerOn] = useState(false);
+  const [timer, setTimer] = useState(0);
   const timerRef = useRef(null);
-
-  useEffect(() => {
-    if (timerOn && quizMode && !finished) {
-      timerRef.current = setInterval(() => setTimer(t => t + 1), 1000);
-      return () => clearInterval(timerRef.current);
-    }
-  }, [timerOn, quizMode, finished, current]);
-
-  useEffect(() => { setTimer(0); }, [current]);
 
   useEffect(() => {
     supabase.from("questions").select("*").then(({ data }) => {
@@ -786,7 +777,6 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       const dbTexts = new Set(dbQs.map(q => q.question));
       const uniqueSamples = ALL_QUESTIONS.filter(q => !dbTexts.has(q.question));
       let pool = [...dbQs, ...uniqueSamples];
-      // filter by chapter if set
       if (chapterFilter) {
         const filtered = pool.filter(q => q.chapter && q.chapter.startsWith(chapterFilter));
         pool = filtered.length > 0 ? filtered : pool;
@@ -801,7 +791,58 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     });
   }, []);
 
-  if (!quizMode && !loading) return (
+  // Timer
+  useEffect(() => {
+    if (timerOn && quizMode && !finished) {
+      timerRef.current = setInterval(() => setTimer(t => t + 1), 1000);
+      return () => clearInterval(timerRef.current);
+    } else {
+      clearInterval(timerRef.current);
+    }
+  }, [timerOn, quizMode, finished]);
+
+  useEffect(() => { setTimer(0); }, [current]);
+
+  const displayQ = quizMode === "daily" ? questions.slice(0, 5) : questions;
+  const q = displayQ[current];
+  const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
+  const letters = ["A", "B", "C", "D"];
+
+  const handleSubmit = () => {
+    if (selected === null) return;
+    setAnswered(true);
+    const correct = opts
+      ? letters[selected] === q.answer
+      : (selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误");
+    if (correct) setScore(s => s + 1);
+    else setWrongList(w => [...w, q]);
+    if (onAnswer && q) onAnswer(q.id || q.question, correct, q.chapter || "Unknown");
+  };
+
+  const handleNext = () => {
+    if (current >= displayQ.length - 1) { setFinished(true); return; }
+    setCurrent(c => c + 1); setSelected(null); setAnswered(false); setShowHint(false);
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (!quizMode || finished || !q) return;
+    const handler = (e) => {
+      if (answered) { if (e.key === "Enter" || e.key === "ArrowRight") handleNext(); return; }
+      if (e.key === "1") setSelected(0);
+      if (e.key === "2") setSelected(1);
+      if (e.key === "3") setSelected(2);
+      if (e.key === "4") setSelected(3);
+      if (e.key === "Enter") handleSubmit();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [quizMode, finished, q, answered, selected, handleSubmit, handleNext]);
+
+  if (loading) return <div style={{ padding: "4rem", textAlign: "center", color: "#888", fontSize: 16 }}>加载题目中…</div>;
+
+  // Mode selection screen
+  if (!quizMode) return (
     <div style={{ padding: "2rem", maxWidth: 640, margin: "0 auto" }}>
       <Btn size="sm" onClick={() => setPage("首页")} style={{ marginBottom: 20 }}>← 返回</Btn>
       <div style={{ ...s.card, textAlign: "center", padding: "3rem" }}>
@@ -813,7 +854,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           </div>
         )}
         <div style={{ fontSize: 15, color: "#888", marginBottom: 28 }}>
-          共 {questions.length} 道题目可用{chapterFilter ? `（已筛选 ${chapterFilter} 章节）` : "（全部章节）"}
+          共 {questions.length} 道题目{chapterFilter ? `（${chapterFilter} 章节）` : "（全部）"}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
           {[
@@ -838,43 +879,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     </div>
   );
 
-    const displayQ = quizMode === "daily" ? questions.slice(0, 5) : questions;
-  const q = displayQ[current];
-  const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
-  const letters = ["A", "B", "C", "D"];
-
-  const handleSubmit = () => {
-    if (selected === null) return;
-    setAnswered(true);
-    const correct = opts
-      ? letters[selected] === q.answer
-      : (selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误");
-    if (correct) setScore(s => s + 1);
-    else setWrongList(w => [...w, q]);
-    if (onAnswer && q) onAnswer(q.id || q.question, correct, q.chapter || "Unknown");
-  };
-
-  useEffect(() => {
-    if (!quizMode || finished || !q) return;
-    const handler = (e) => {
-      if (answered) { if (e.key === "Enter" || e.key === "ArrowRight") handleNext(); return; }
-      if (e.key === "1" || e.key === "a") setSelected(0);
-      if (e.key === "2" || e.key === "b") setSelected(1);
-      if (e.key === "3" || e.key === "c") setSelected(2);
-      if (e.key === "4" || e.key === "d") setSelected(3);
-      if (e.key === "Enter") handleSubmit();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [quizMode, finished, q, answered, selected]);
-
-  const handleNext = () => {
-    if (current >= displayQ.length - 1) { setFinished(true); return; }
-    setCurrent(c => c + 1); setSelected(null); setAnswered(false); setShowHint(false);
-  };
-
-  if (loading) return <div style={{ padding: "4rem", textAlign: "center", color: "#888", fontSize: 16 }}>加载题目中…</div>;
-
+  // Finished screen
   if (finished) {
     const pct = Math.round(score / displayQ.length * 100);
     const cwrong = {};
@@ -886,7 +891,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             <div style={{ fontSize: 52, marginBottom: 14 }}>{pct >= 80 ? "🎉" : pct >= 60 ? "👍" : "💪"}</div>
             <div style={{ fontSize: 26, fontWeight: 700, color: "#111", marginBottom: 8 }}>练习完成！</div>
             <div style={{ fontSize: 52, fontWeight: 800, color: pct >= 80 ? G.teal : pct >= 60 ? G.amber : G.red, marginBottom: 6 }}>{pct}%</div>
-            <div style={{ fontSize: 16, color: "#888", marginBottom: 20 }}>答对 {score} / {displayQ.length} 题</div>
+            <div style={{ fontSize: 16, color: "#888", marginBottom: 8 }}>答对 {score} / {displayQ.length} 题</div>
+            {timerOn && timer > 0 && <div style={{ fontSize: 14, color: "#aaa", marginBottom: 12 }}>⏱ 用时 {Math.floor(timer/60)}分{timer%60}秒 · 平均每题 {Math.round(timer/displayQ.length)} 秒</div>}
             <ProgressBar value={score} max={displayQ.length} color={pct >= 80 ? G.teal : pct >= 60 ? G.amber : G.red} height={10} />
           </div>
           {wrongList.length > 0 && (
@@ -900,17 +906,16 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                   </div>
                 ))}
               </div>
-              <div style={{ fontSize: 14, color: "#888", marginBottom: 14 }}>答错的题目：</div>
               {wrongList.map((w, i) => (
                 <div key={i} style={{ padding: "14px 16px", background: "#fafafa", borderRadius: 12, marginBottom: 10, border: "1px solid #f0f0f0" }}>
                   <div style={{ fontSize: 15, color: "#111", marginBottom: 6 }}>{w.question}</div>
-                  <div style={{ fontSize: 13, color: G.tealDark }}>✓ 正确答案：{w.answer} · {w.explanation}</div>
+                  <div style={{ fontSize: 13, color: G.tealDark }}>✓ {w.answer} · {w.explanation}</div>
                 </div>
               ))}
             </div>
           )}
           <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 20 }}>
-            <Btn onClick={() => { setCurrent(0); setSelected(null); setAnswered(false); setFinished(false); setScore(0); setWrongList([]); setQuizMode(null); }}>再练一次</Btn>
+            <Btn onClick={() => { setCurrent(0); setSelected(null); setAnswered(false); setFinished(false); setScore(0); setWrongList([]); setQuizMode(null); if (setChapterFilter) setChapterFilter(null); }}>再练一次</Btn>
             <Btn variant="primary" onClick={() => setPage("学习报告")}>查看完整报告</Btn>
           </div>
         </div>
@@ -920,47 +925,46 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   if (!q) return null;
 
+  // Quiz screen
   return (
     <div style={{ padding: "2rem", maxWidth: 820, margin: "0 auto" }}>
-      {/* Progress header */}
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
-        <Btn size="sm" onClick={() => { setQuizMode(null); setCurrent(0); setScore(0); setWrongList([]); setAnswered(false); setSelected(null); }}>← 返回</Btn>
+        <Btn size="sm" onClick={() => { setQuizMode(null); setCurrent(0); setScore(0); setWrongList([]); setAnswered(false); setSelected(null); if (setChapterFilter) setChapterFilter(null); }}>← 返回</Btn>
         <div style={{ ...s.card, flex: 1, padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 600, color: "#111" }}>{quizMode === "daily" ? "⚡ 每日练习" : "📚 完整练习"} · 第 {current + 1} / {displayQ.length} 题</div>
             <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{q.chapter} · {q.type}</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            {timerOn && <div style={{ fontSize: 14, color: "#888", background: "#f5f5f5", padding: "4px 12px", borderRadius: 20 }}>⏱ {Math.floor(timer/60).toString().padStart(2,"0")}:{(timer%60).toString().padStart(2,"0")}</div>}
             <div style={{ fontSize: 14, color: "#666" }}>得分 <strong style={{ color: G.teal, fontSize: 18 }}>{score}</strong>/{current}</div>
-            <div style={{ width: 120, height: 6, background: "#f0f0f0", borderRadius: 3 }}>
-              <div style={{ height: 6, background: G.teal, borderRadius: 3, width: `${((current + 1) / displayQ.length) * 100}%` }} />
+            <div style={{ width: 100, height: 6, background: "#f0f0f0", borderRadius: 3 }}>
+              <div style={{ height: 6, background: G.teal, borderRadius: 3, width: ((current + 1) / displayQ.length * 100) + "%" }} />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Keyboard hint */}
-      <div style={{ fontSize: 12, color: "#ccc", textAlign: "right", marginBottom: 6 }}>按 1-4 选择答案 · Enter 提交</div>
+      <div style={{ fontSize: 12, color: "#ccc", textAlign: "right", marginBottom: 6 }}>键盘：1-4 选择 · Enter 提交</div>
 
-      {/* Question card */}
       <div style={{ ...s.card, marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
           <Badge color="blue">{q.type}</Badge>
           <Badge color="amber">{q.chapter}</Badge>
         </div>
-        <div style={{ fontSize: 18, color: "#111", lineHeight: 1.75, marginBottom: 24, fontWeight: 400 }}>{q.question}</div>
+        <div style={{ fontSize: 18, color: "#111", lineHeight: 1.75, marginBottom: 24 }}>{q.question}</div>
 
         {opts && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {opts.map((opt, i) => {
               let border = "2px solid #eee", bg = "#fafafa", col = "#333";
               if (answered) {
-                if (letters[i] === q.answer) { bg = G.tealLight; border = `2px solid ${G.teal}`; col = G.tealDark; }
-                else if (i === selected && letters[i] !== q.answer) { bg = G.redLight; border = `2px solid ${G.red}`; col = G.red; }
-              } else if (selected === i) { bg = G.tealLight; border = `2px solid ${G.teal}`; col = G.tealDark; }
+                if (letters[i] === q.answer) { bg = G.tealLight; border = "2px solid " + G.teal; col = G.tealDark; }
+                else if (i === selected && letters[i] !== q.answer) { bg = G.redLight; border = "2px solid " + G.red; col = G.red; }
+              } else if (selected === i) { bg = G.tealLight; border = "2px solid " + G.teal; col = G.tealDark; }
               return (
-                <div key={i} onClick={() => !answered && setSelected(i)} style={{ padding: "14px 18px", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 14, alignItems: "center", transition: "all .15s" }}>
-                  <div style={{ width: 30, height: 30, borderRadius: "50%", border: `2px solid ${col}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, background: selected === i ? G.teal : "transparent", color: selected === i ? "#fff" : col }}>{letters[i]}</div>
+                <div key={i} onClick={() => !answered && setSelected(i)} style={{ padding: "14px 18px", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 14, alignItems: "center" }}>
+                  <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid " + col + "44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, background: selected === i ? G.teal : "transparent", color: selected === i ? "#fff" : col }}>{letters[i]}</div>
                   <span style={{ fontSize: 15, color: col }}>{opt}</span>
                   {answered && letters[i] === q.answer && <span style={{ marginLeft: "auto", color: G.teal, fontSize: 18 }}>✓</span>}
                 </div>
@@ -974,26 +978,23 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             {["正确", "错误"].map((opt, i) => {
               let border = "2px solid #eee", bg = "#fafafa";
               if (answered) {
-                if (opt === q.answer) { bg = G.tealLight; border = `2px solid ${G.teal}`; }
-                else if (i === selected && opt !== q.answer) { bg = G.redLight; border = `2px solid ${G.red}`; }
-              } else if (selected === i) { bg = G.tealLight; border = `2px solid ${G.teal}`; }
-              return (
-                <div key={i} onClick={() => !answered && setSelected(i)} style={{ flex: 1, padding: "16px 0", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, textAlign: "center", fontSize: 17, fontWeight: 600, color: "#333" }}>{opt}</div>
-              );
+                if (opt === q.answer) { bg = G.tealLight; border = "2px solid " + G.teal; }
+                else if (i === selected && opt !== q.answer) { bg = G.redLight; border = "2px solid " + G.red; }
+              } else if (selected === i) { bg = G.tealLight; border = "2px solid " + G.teal; }
+              return <div key={i} onClick={() => !answered && setSelected(i)} style={{ flex: 1, padding: "16px 0", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, textAlign: "center", fontSize: 17, fontWeight: 600 }}>{opt}</div>;
             })}
           </div>
         )}
       </div>
 
-      {/* Hint */}
       {(showHint || answered) && (
-        <div style={{ ...s.card, marginBottom: 14, background: "#fafffe", borderLeft: `4px solid ${G.teal}` }}>
+        <div style={{ ...s.card, marginBottom: 14, borderLeft: "4px solid " + G.teal, background: "#fafffe" }}>
           <div style={{ display: "flex", gap: 14 }}>
             <div style={{ width: 34, height: 34, borderRadius: "50%", background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
               <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>AI</span>
             </div>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#111", marginBottom: 6 }}>{answered ? `正确答案：${q.answer}` : "解题提示"}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#111", marginBottom: 6 }}>{answered ? "正确答案：" + q.answer : "解题提示"}</div>
               <div style={{ fontSize: 15, color: "#444", lineHeight: 1.7 }}>{q.explanation}</div>
             </div>
           </div>
@@ -1014,7 +1015,6 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   );
 }
 
-// ── Flashcard Page ────────────────────────────────────────────────────────────
 function FlashcardPage({ setPage }) {
   const [idx, setIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
