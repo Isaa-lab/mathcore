@@ -38,7 +38,7 @@ ${truncated}
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: process.env.ANTHROPIC_MODEL || "claude-3-5-sonnet-20241022",
         max_tokens: 2000,
         messages: [{ role: "user", content: prompt }],
       }),

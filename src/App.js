@@ -57,6 +57,18 @@ const getFileExt = (name = "") => {
   return idx >= 0 ? name.slice(idx).toLowerCase() : "";
 };
 
+const withTimeout = async (promise, ms = 12000) => {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error("请求超时")), ms);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
 const normalizeMaterialText = (input) => {
   const raw = String(input || "");
   if (!raw) return "";
@@ -124,11 +136,11 @@ const buildSeedClaimsFromText = (text, chapter, course, count = 12) => {
 const fetchChapterFallbackQuestions = async (chapter, count = 6) => {
   if (!count || count <= 0) return [];
   try {
-    const res = await fetch("/api/generate", {
+    const res = await withTimeout(fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chapter: chapter || "资料专题", type: "单选题", count }),
-    });
+    }), 9000);
     const data = await res.json();
     if (data?.error) return [];
     const arr = Array.isArray(data?.questions) ? data.questions : [];
@@ -140,7 +152,7 @@ const fetchChapterFallbackQuestions = async (chapter, count = 6) => {
       source_chunk_id: Number.isFinite(Number(q?.source_chunk_id)) ? Number(q.source_chunk_id) : null,
     }));
   } catch (e) {
-    return [];
+    return buildMinimalChapterQuestions(chapter || "资料专题", Math.min(count, 4));
   }
 };
 
@@ -183,13 +195,55 @@ const buildFallbackQuestions = (text, chapter, count = 6) => {
 
 const buildFallbackTopics = (text, chapter, count = 4) => {
   const src = String(text || "").replace(/\s+/g, " ").trim();
-  if (!src) return [];
+  if (!src) {
+    return Array.from({ length: Math.max(2, Math.min(count, 4)) }).map((_, i) => ({
+      name: `${chapter || "资料专题"} 知识点 ${i + 1}`,
+      summary: "基于资料自动生成的核心要点，建议先阅读原文再练习。",
+      chapter: chapter || null,
+    }));
+  }
   const sents = src.split(/[。！？.!?]/).map(s => s.trim()).filter(s => s.length > 12).slice(0, count);
   return sents.map((s, i) => ({
     name: `知识点 ${i + 1}`,
     summary: s.slice(0, 80),
     chapter: chapter || null,
   }));
+};
+
+const buildMinimalChapterQuestions = (chapter = "资料专题", count = 4) => {
+  const n = Math.max(2, Math.min(Number(count) || 4, 8));
+  const templates = [
+    {
+      question: `关于「${chapter}」，下列说法最合理的是：`,
+      options: [
+        "A.应从定义、条件和结论三层理解知识点",
+        "B.只记结论，不必关注适用条件",
+        "C.任何方法都可直接套用，无需判断前提",
+        "D.学习时不需要和例题对应验证",
+      ],
+      answer: "A",
+      explanation: "有效学习应同时掌握定义、前提与结论，并通过例题验证。",
+      type: "单选题",
+      chapter,
+      source_quote: `章节「${chapter}」通用保底题`,
+      quality_score: 72,
+      source_chunk_id: null,
+    },
+    {
+      question: `在学习「${chapter}」时，先明确概念再做题通常更有效。`,
+      options: null,
+      answer: "正确",
+      explanation: "先理解概念与适用条件，可以减少机械套题造成的错误。",
+      type: "判断题",
+      chapter,
+      source_quote: `章节「${chapter}」通用保底题`,
+      quality_score: 72,
+      source_chunk_id: null,
+    },
+  ];
+  const out = [];
+  while (out.length < n) out.push(templates[out.length % templates.length]);
+  return out;
 };
 
 const ensurePdfJs = async () => {
@@ -377,7 +431,7 @@ const processMaterialWithAI = async ({
     let topics = [];
     let claims = [];
     if (fallbackChunks.length > 0) {
-      const claimRes = await fetch("/api/extract-claims", {
+      const claimRes = await withTimeout(fetch("/api/extract-claims", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -386,7 +440,7 @@ const processMaterialWithAI = async ({
           chapter: material?.chapter || "未知章节",
           maxClaims: Math.max(genCount * 2, 10),
         }),
-      });
+      }), 12000);
       const claimResult = await claimRes.json();
       if (!claimResult?.error) {
         topics = Array.isArray(claimResult?.topics) ? claimResult.topics : [];
@@ -406,7 +460,7 @@ const processMaterialWithAI = async ({
 
     let questions = [];
     if (claims.length > 0) {
-      const genRes = await fetch("/api/generate-from-claims", {
+      const genRes = await withTimeout(fetch("/api/generate-from-claims", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -415,7 +469,7 @@ const processMaterialWithAI = async ({
           chapter: material?.chapter || "未知章节",
           count: genCount,
         }),
-      });
+      }), 12000);
       const genResult = await genRes.json();
       if (!genResult?.error) questions = Array.isArray(genResult?.questions) ? genResult.questions : [];
     }
@@ -432,6 +486,7 @@ const processMaterialWithAI = async ({
       seen.add(key);
       return true;
     }).slice(0, genCount);
+    if (questions.length === 0) questions = buildMinimalChapterQuestions(chapterKey, Math.min(genCount, 4));
 
     if (chunks.length > 0) {
       try {
@@ -1344,7 +1399,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const tryGenerateQuestionsForMaterial = async (mid) => {
     if (!mid) return { ok: false, inserted: 0 };
     setMaterialGenerating(true);
-    setMaterialGenerateMsg("正在为该资料生成题目…");
+    setMaterialGenerateMsg("正在为该资料生成题目（约 10-20 秒）…");
     try {
       const { data: material, error: matErr } = await supabase
         .from("materials")
