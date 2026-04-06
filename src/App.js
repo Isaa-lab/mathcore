@@ -18,6 +18,18 @@ const G = {
 
 const MATERIAL_ALLOWED_EXTS = [".pdf", ".ppt", ".pptx", ".doc", ".docx"];
 
+/** materials 表尚未执行审核迁移（无 status 列）时，PostgREST 会报 PGRST204 */
+const isMissingMaterialsStatusColumn = (err) => {
+  const msg = String(err?.message || "");
+  const code = String(err?.code || "");
+  if (/Could not find the ['"]status['"] column of ['"]materials['"]/i.test(msg)) return true;
+  if (/column\s+.*\bstatus\b.*does not exist/i.test(msg)) return true;
+  if ((code === "PGRST204" || msg.includes("PGRST204")) && /\bstatus\b/i.test(msg) && /\bmaterials\b/i.test(msg)) {
+    return true;
+  }
+  return false;
+};
+
 const getFileExt = (name = "") => {
   const idx = name.lastIndexOf(".");
   return idx >= 0 ? name.slice(idx).toLowerCase() : "";
@@ -1542,8 +1554,8 @@ function UploadPage({ setPage, profile }) {
         ...basePayload,
         status: statusValue,
       }).select().single();
-      // Backward compatible: older schema may not have status column yet.
-      if (dbErr && /column .*status.* does not exist/i.test(dbErr.message || "")) {
+      // Backward compatible: older schema may not have status column yet (incl. PGRST204).
+      if (dbErr && isMissingMaterialsStatusColumn(dbErr)) {
         const retry = await supabase.from("materials").insert(basePayload).select().single();
         dbErr = retry.error;
         insertedMaterial = retry.data || null;
@@ -2218,8 +2230,27 @@ function TeacherPage({ setPage, profile }) {
       reviewed_by: profile?.id || null,
       reviewed_at: new Date().toISOString(),
     };
-    const { error } = await supabase.from("materials").update(payload).eq("id", material.id);
-    if (error) {
+    let { error } = await supabase.from("materials").update(payload).eq("id", material.id);
+    if (error && isMissingMaterialsStatusColumn(error)) {
+      error = null;
+      if (status === "approved") {
+        try {
+          await processMaterialWithAI({
+            material: { ...material, status: "approved" },
+            file: null,
+            fallbackText: `${material?.title || ""} ${material?.description || ""}`,
+            genCount: 6,
+            actorName: profile?.name || "教师",
+          });
+        } catch (e) {}
+      }
+      setReviewMsg(
+        status === "approved"
+          ? "已触发资料解析。若需在后台区分「待审核」，请在 Supabase 执行 sql/materials_review_workflow.sql 添加 status 列。"
+          : "数据库暂无 status 列，无法写入驳回状态；请执行 sql/materials_review_workflow.sql 后重试。"
+      );
+      await refreshMaterials();
+    } else if (error) {
       setReviewMsg("审核失败：" + error.message);
     } else {
       if (status === "approved") {
@@ -2848,87 +2879,4 @@ export default function App() {
       {renderPage()}
     </div>
   );
-}  const extractAndGenerate = async (f, ch, count) => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        try {
-          if (!window.pdfjsLib) {
-            await new Promise((res, rej) => {
-              const sc = document.createElement("script");
-              sc.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-              sc.onload = res; sc.onerror = rej;
-              document.head.appendChild(sc);
-            });
-            window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-          }
-          const pdf = await window.pdfjsLib.getDocument({ data: e.target.result }).promise;
-          let text = "";
-          for (let i = 1; i <= Math.min(pdf.numPages, 15); i++) {
-            const page = await pdf.getPage(i);
-            const content = await page.getTextContent();
-            text += content.items.map(item => item.str).join(" ") + " ";
-          }
-          // Generate questions from text
-          const sents = text.replace(/  +/g, " ").split(/[。.!？]/).map(s => s.trim()).filter(s => s.length > 15 && s.length < 160);
-          const qs = [];
-          sents.slice(0, count * 3).forEach((sent, idx) => {
-            if (qs.length >= count) return;
-            if (idx % 2 === 0) {
-              qs.push({ question: "以下说法是否正确：「" + sent.slice(0, 55) + "」", options: null, answer: "正确", explanation: sent, chapter: ch, type: "判断题" });
-            } else {
-              const words = sent.split(/[，,\s]+/).filter(w => w.length > 1);
-              const key = words[0] || "该内容";
-              qs.push({ question: "关于「" + key + "」，以下哪个描述最正确？", options: ["A." + sent.slice(0, 35), "B.与" + key + "定义相反", "C.该概念不存在", "D.以上都不对"], answer: "A", explanation: sent, chapter: ch, type: "单选题" });
-            }
-          });
-          resolve(qs.slice(0, count));
-        } catch (err) { resolve([]); }
-      };
-      reader.onerror = () => resolve([]);
-      reader.readAsArrayBuffer(f);
-    });
-  };
-
-  const handleUpload = async () => {
-    if (!title.trim()) { setError("请填写资料名称"); return; }
-    if (!file) { setError("请选择 PDF 文件"); return; }
-    if (file.size > 50 * 1024 * 1024) { setError("文件超过 50MB"); return; }
-    setUploading(true); setError(""); setSuccess(""); setExtractedQs([]);
-    try {
-      setStep("上传文件…");
-      const filePath = (profile?.id || "anon") + "/" + Date.now() + "_" + file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-      let publicUrl = "";
-      const { error: storageErr } = await supabase.storage.from("materials").upload(filePath, file, { upsert: false });
-      if (!storageErr) {
-        const { data: { publicUrl: u } } = supabase.storage.from("materials").getPublicUrl(filePath);
-        publicUrl = u;
-      }
-      const chLabel = chapter === "全部" ? course : chapter;
-      let newQs = [];
-      if (genCount > 0) {
-        setStep("提取文字并生成题目（免费）…");
-        newQs = await extractAndGenerate(file, chLabel, genCount);
-        setExtractedQs(newQs);
-      }
-      setStep("保存到资料库…");
-      const { data: matData, error: dbErr } = await supabase.from("materials").insert({
-        title: title.trim(), course, chapter: chapter === "全部" ? null : chapter,
-        description: desc.trim() || null, file_name: file.name,
-        file_size: file.size > 1024*1024 ? (file.size/1024/1024).toFixed(1)+" MB" : (file.size/1024).toFixed(0)+" KB",
-        file_data: publicUrl || "", uploader_name: profile?.name || "用户", uploaded_by: profile?.id || null,
-      }).select().single();
-      if (dbErr) throw new Error(dbErr.message);
-      if (newQs.length > 0 && matData) {
-        await supabase.from("questions").insert(newQs.map(q => ({
-          chapter: q.chapter, course, type: q.type,
-          question: q.question, options: q.options,
-          answer: q.answer, explanation: q.explanation,
-          material_id: matData.id,
-        })));
-      }
-      setSuccess("上传成功！" + (newQs.length > 0 ? `已免费生成 ${newQs.length} 道题目，可在题库练习中选择该资料进行练习。` : "资料已发布到资料库。"));
-      setTitle(""); setDesc(""); setFile(null); setChapter("全部");
-    } catch (e) { setError("上传失败：" + e.message); }
-    setUploading(false); setStep("");
-  };
+}
