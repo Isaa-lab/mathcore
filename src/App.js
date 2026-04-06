@@ -471,20 +471,6 @@ const fetchFileAsBrowserFile = async (url, fallbackName = "material.pdf") => {
   }
 };
 
-// ── Clean PDF extraction + question generation ────────────────────────────────
-
-const ensurePdfJs = async () => {
-  if (window.pdfjsLib) return;
-  await new Promise((res, rej) => {
-    const sc = document.createElement("script");
-    sc.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
-    sc.onload = res; sc.onerror = rej;
-    document.head.appendChild(sc);
-  });
-  window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-};
-
 const extractPdfText = async (file) => {
   if (!file) return "";
   try {
@@ -532,7 +518,6 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
   if (!materialId) return { topics: [], questions: [], insertedCount: 0 };
   const chapter = (material?.chapter && material.chapter !== "全部") ? material.chapter : material?.course || material?.title || "本资料";
 
-  // Extract text
   let text = "";
   if (file) text = await extractPdfText(file);
   if (!text && material?.file_data) {
@@ -548,7 +533,6 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
   const hasText = text.trim().length > 50;
   let topics = [], questions = [], usedApi = false;
 
-  // Try API
   if (hasText) {
     try {
       const res = await fetch("/api/extract", {
@@ -560,11 +544,9 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
     } catch (e) {}
   }
 
-  // Free fallback
   if (questions.length === 0 && hasText) questions = buildFallbackQuestionsFromText(text, chapter, genCount);
   if (questions.length === 0) questions = [{ question: `关于「${chapter}」，先理解定义再做题通常更有效。`, options: null, answer: "正确", explanation: "先掌握概念与适用条件，可减少机械套题错误。", type: "判断题", chapter }];
 
-  // Save to DB
   let insertedCount = 0;
   try {
     const rows = questions.map(q => ({ chapter: q.chapter || chapter, course: material?.course || "数学", type: q.type || (q.options ? "单选题" : "判断题"), question: q.question, options: q.options || null, answer: q.answer, explanation: q.explanation || "", material_id: materialId }));
@@ -1791,7 +1773,7 @@ function MaterialChatPage({ setPage, profile }) {
     try {
       let chunks = [];
       try {
-        const { data } = await supabase.from("material_chunks").select("chunk_text,chunk_index").eq("material_id", materialId).order("chunk_index", { ascending: true }).limit(20);
+        const { data } = await supabase.from("questions").select("chunk_text,chunk_index").eq("material_id", materialId).order("chunk_index", { ascending: true }).limit(20);
         chunks = data || [];
       } catch (e) {}
       const res = await fetch("/api/material-chat", {
