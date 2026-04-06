@@ -83,7 +83,7 @@ const normalizeMaterialText = (input) => {
   const alphaCount = (cleaned.match(/[A-Za-z]/g) || []).length;
   const junkLike = /PK\u0003\u0004|word\/|ppt\/|_rels|Content_Types\.xml|Image Manager/i.test(cleaned);
   if (junkLike) return "";
-  if (alphaCount > 120 && chineseCount < 12 && cleaned.length > 400) return "";
+  if (alphaCount > 600 && chineseCount < 3 && cleaned.length > 1200) return "";
   return cleaned;
 };
 
@@ -343,7 +343,8 @@ const isLowQualityQuestion = (q) => {
   if (/Image Manager|Neelakantan|_rels|Content_Types\.xml|PK\u0003\u0004/i.test(text)) return true;
   const chineseCount = (text.match(/[\u4e00-\u9fff]/g) || []).length;
   const alphaCount = (text.match(/[A-Za-z]/g) || []).length;
-  if (alphaCount > 50 && chineseCount < 3 && text.length > 40) return true;
+  // Keep English math materials available; only block obvious software/file artifacts.
+  if (alphaCount > 120 && chineseCount < 2 && /_rels|Content_Types\.xml|Image Manager|PK\u0003\u0004/i.test(text)) return true;
   // 占位模板（全角/半角数字、多空格）
   if (/第[ \t\u3000]*[\d０-９]+[ \t\u3000]*个理解点/.test(text)) return true;
   if (/关于本资料内容/.test(text)) return true;
@@ -1337,29 +1338,33 @@ function HomePage({ setPage, profile }) {
 }
 
 // ── Knowledge Page ────────────────────────────────────────────────────────────
-function KnowledgePage({ setPage, setChapterFilter, sessionAnswers = {} }) {
-  const [sel, setSel] = useState(CHAPTERS[0]);
-  const [filter, setFilter] = useState("全部");
-  const [openTopic, setOpenTopic] = useState(null);
+function KnowledgePage({ setPage, setChapterFilter }) {
+  const [materials, setMaterials] = useState([]);
+  const [selectedMaterialId, setSelectedMaterialId] = useState(null);
   const [aiTopics, setAiTopics] = useState([]);
   const [topicMastery, setTopicMastery] = useState({});
-  const chapterStats = getChapterStats(sessionAnswers);
-  const filtered = filter === "全部" ? CHAPTERS : CHAPTERS.filter(c => c.course === filter);
 
   useEffect(() => {
-    supabase.from("material_topics").select("*").order("created_at", { ascending: false }).limit(80).then(({ data }) => {
-      setAiTopics(data || []);
-    });
-    supabase.auth.getUser().then(async ({ data }) => {
-      const uid = data?.user?.id;
+    const load = async () => {
+      const mRes = await supabase.from("materials").select("id,title,course,chapter,created_at").order("created_at", { ascending: false }).limit(80);
+      const list = mRes.data || [];
+      setMaterials(list);
+      if (!selectedMaterialId && list.length > 0) setSelectedMaterialId(list[0].id);
+
+      const tRes = await supabase.from("material_topics").select("*").order("created_at", { ascending: false }).limit(300);
+      setAiTopics(tRes.data || []);
+
+      const uid = (await supabase.auth.getUser())?.data?.user?.id;
       if (!uid) return;
-      try {
-        const { data: mdata } = await supabase.from("topic_mastery").select("topic_id,status,correct_count,wrong_count").eq("user_id", uid);
-        const map = {};
-        (mdata || []).forEach(r => { map[r.topic_id] = r; });
-        setTopicMastery(map);
-      } catch (e) {}
-    });
+      const { data: mdata } = await supabase
+        .from("topic_mastery")
+        .select("topic_id,status,correct_count,wrong_count")
+        .eq("user_id", uid);
+      const map = {};
+      (mdata || []).forEach((r) => { map[r.topic_id] = r; });
+      setTopicMastery(map);
+    };
+    load();
   }, []);
 
   const markTopicMastery = async (topic, status) => {
@@ -1371,113 +1376,104 @@ function KnowledgePage({ setPage, setChapterFilter, sessionAnswers = {} }) {
       status,
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id,topic_id" });
-    setTopicMastery(prev => ({ ...prev, [topic.id]: { ...(prev[topic.id] || {}), status } }));
+    setTopicMastery((prev) => ({ ...prev, [topic.id]: { ...(prev[topic.id] || {}), status } }));
   };
+
+  const selectedMaterial = materials.find((m) => m.id === selectedMaterialId) || null;
+  const topicsForMaterial = aiTopics.filter((t) => t.material_id === selectedMaterialId);
+
   return (
-    <>
-      {openTopic && <TopicModal topic={openTopic} onClose={() => setOpenTopic(null)} setPage={setPage} setChapterFilter={setChapterFilter} />}
-      <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, padding: "2rem", maxWidth: 1140, margin: "0 auto" }}>
-        {/* Sidebar */}
-        <div style={{ ...s.card, padding: "1.25rem 0", height: "fit-content" }}>
-          <div style={{ padding: "12px 14px", borderBottom: "1px solid #f0f0f0", marginBottom: 8 }}>
-            <div style={{ fontSize: 12, color: "#aaa", marginBottom: 8, fontWeight: 500 }}>课程筛选</div>
-            <div style={{ display: "flex", gap: 4 }}>
-              {["全部", "数值分析", "最优化"].map(c => (
-                <button key={c} onClick={() => setFilter(c)} style={{ flex: 1, fontSize: 12, padding: "6px 0", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: filter === c ? 600 : 400, background: filter === c ? G.teal : "#f5f5f5", color: filter === c ? "#fff" : "#666" }}>{c}</button>
-              ))}
+    <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16, padding: "2rem", maxWidth: 1200, margin: "0 auto" }}>
+      <div style={{ ...s.card, padding: "1rem 0", height: "fit-content" }}>
+        <div style={{ padding: "8px 14px 12px", borderBottom: "1px solid #f0f0f0", marginBottom: 8 }}>
+          <div style={{ fontSize: 13, color: "#666", fontWeight: 700 }}>上传资料知识库</div>
+          <div style={{ fontSize: 12, color: "#999", marginTop: 4 }}>所有上传资料都会在这里沉淀为知识点</div>
+        </div>
+        {materials.map((m) => {
+          const active = selectedMaterialId === m.id;
+          const cnt = aiTopics.filter((t) => t.material_id === m.id).length;
+          return (
+            <div
+              key={m.id}
+              onClick={() => setSelectedMaterialId(m.id)}
+              style={{
+                padding: "10px 14px",
+                cursor: "pointer",
+                borderLeft: `3px solid ${active ? G.teal : "transparent"}`,
+                background: active ? G.tealLight : "transparent",
+              }}
+            >
+              <div style={{ fontSize: 14, fontWeight: active ? 700 : 500, color: active ? G.tealDark : "#222" }}>{m.title}</div>
+              <div style={{ fontSize: 11, color: "#888", marginTop: 3 }}>{m.course || "未分类"} · {m.chapter || "未分章"} · {cnt} 知识点</div>
             </div>
-            {Object.keys(chapterStats || {}).length > 0 && (
-              <div style={{ marginTop: 10, fontSize: 12, color: "#888" }}>
-                已练习 <strong style={{ color: G.teal }}>{Object.keys(chapterStats).length}</strong> 个章节
-              </div>
-            )}
+          );
+        })}
+        {materials.length === 0 && <div style={{ padding: "12px 14px", color: "#999", fontSize: 13 }}>暂无资料，请先上传 PDF</div>}
+      </div>
+
+      <div style={{ ...s.card }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18, paddingBottom: 14, borderBottom: "1px solid #f0f0f0" }}>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>{selectedMaterial?.title || "请选择资料"}</div>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <Badge color="teal">{selectedMaterial?.course || "未分类"}</Badge>
+              <Badge color="blue">{selectedMaterial?.chapter || "未分章"}</Badge>
+              <Badge color="purple">{topicsForMaterial.length} 个知识点</Badge>
+            </div>
           </div>
-          {filtered.map(ch => (
-            <div key={ch.id} onClick={() => setSel(ch)} style={{ padding: "10px 16px", cursor: "pointer", fontSize: 14, borderLeft: `3px solid ${sel.id === ch.id ? G.teal : "transparent"}`, background: sel.id === ch.id ? G.tealLight : "transparent", color: sel.id === ch.id ? G.tealDark : "#555", fontWeight: sel.id === ch.id ? 600 : 400, display: "flex", gap: 8, alignItems: "center" }}>
-              <span style={{ fontSize: 11, color: sel.id === ch.id ? G.teal : "#bbb", minWidth: 32, fontWeight: 500 }}>{ch.num}</span>
-              {ch.name}
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn size="sm" onClick={() => setPage("上传资料")}>上传新资料</Btn>
+            <Btn
+              size="sm"
+              variant="primary"
+              onClick={() => {
+                if (!selectedMaterial) return;
+                setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
+              }}
+              disabled={!selectedMaterial}
+            >
+              进入该资料练习 →
+            </Btn>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {topicsForMaterial.map((t) => (
+            <div key={t.id} style={{ border: "1.5px solid " + G.purple + "33", borderRadius: 14, padding: "14px 16px", background: "#fcfbff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>{t.name}</div>
+                  {t.chapter ? <div style={{ fontSize: 12, color: "#999", marginTop: 2 }}>大纲：{t.chapter}</div> : null}
+                  <div style={{ fontSize: 13, color: "#666", marginTop: 4, lineHeight: 1.6 }}>{t.summary || "暂无简介"}</div>
+                </div>
+                <Badge color="purple">AI提取</Badge>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Btn size="sm" onClick={() => markTopicMastery(t, "doing")}>学习中</Btn>
+                <Btn size="sm" variant="primary" onClick={() => markTopicMastery(t, "done")}>标记已掌握</Btn>
+                <Btn
+                  size="sm"
+                  onClick={() => {
+                    setChapterFilter(t.name);
+                    setPage("题库练习");
+                  }}
+                >
+                  练这个知识点 →
+                </Btn>
+                <Badge color={(topicMastery[t.id]?.status || "todo") === "done" ? "teal" : (topicMastery[t.id]?.status || "todo") === "doing" ? "amber" : "red"}>
+                  {(topicMastery[t.id]?.status || "todo") === "done" ? "已掌握" : (topicMastery[t.id]?.status || "todo") === "doing" ? "学习中" : "未开始"}
+                </Badge>
+              </div>
             </div>
           ))}
-        </div>
-
-        {/* Content */}
-        <div style={{ ...s.card }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid #f0f0f0" }}>
-            <div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: "#111", marginBottom: 8 }}>{sel.num} · {sel.name}</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Badge color={sel.course === "数值分析" ? "teal" : "blue"}>{sel.course}</Badge>
-                <Badge color="red">{sel.topics.length} 个知识点</Badge>
-              </div>
+          {selectedMaterial && topicsForMaterial.length === 0 && (
+            <div style={{ color: "#999", padding: "1rem", border: "1px dashed #ddd", borderRadius: 12 }}>
+              该资料暂未提取到知识点，点击「进入该资料练习」可触发自动补题与再提取。
             </div>
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              {chapterStats[sel.num] && chapterStats[sel.num].total > 0 && (
-                <div style={{ fontSize: 13, color: "#888", padding: "4px 10px", background: G.tealLight, borderRadius: 8 }}>
-                  本章已答 <strong style={{ color: G.teal }}>{chapterStats[sel.num].total}</strong> 题 · 正确率 <strong style={{ color: G.teal }}>{Math.round((chapterStats[sel.num].correct || 0) / chapterStats[sel.num].total * 100)}%</strong>
-                </div>
-              )}
-              <Btn size="sm" onClick={() => setPage("记忆卡片")}>🃏 记忆卡片</Btn>
-              <Btn size="sm" variant="primary" onClick={() => { setChapterFilter(sel.num); setPage("题库练习"); }}>章节练习 →</Btn>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {(aiTopics.filter(t => (t.chapter || "").startsWith(sel.num) || (t.chapter || "") === sel.name).length > 0
-              ? aiTopics.filter(t => (t.chapter || "").startsWith(sel.num) || (t.chapter || "") === sel.name)
-              : aiTopics.slice(0, 6)
-            ).slice(0, 6).map((t) => (
-              <div key={t.id} style={{ border: "1.5px solid " + G.purple + "33", borderRadius: 14, padding: "14px 16px", background: "#fcfbff" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                  <div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>{t.name}</div>
-                    {t.chapter ? <div style={{ fontSize: 12, color: "#999", marginTop: 2 }}>大纲：{t.chapter}</div> : null}
-                    <div style={{ fontSize: 13, color: "#666", marginTop: 4, lineHeight: 1.6 }}>{t.summary || "暂无简介"}</div>
-                  </div>
-                  <Badge color="purple">AI提取</Badge>
-                </div>
-                {t.viz_key && VIZ_MAP[t.viz_key] && <div style={{ margin: "8px 0 12px" }}>{VIZ_MAP[t.viz_key]}</div>}
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Btn size="sm" onClick={() => markTopicMastery(t, "doing")}>学习中</Btn>
-                  <Btn size="sm" variant="primary" onClick={() => markTopicMastery(t, "done")}>标记已掌握</Btn>
-                  <Badge color={(topicMastery[t.id]?.status || "todo") === "done" ? "teal" : (topicMastery[t.id]?.status || "todo") === "doing" ? "amber" : "red"}>
-                    {(topicMastery[t.id]?.status || "todo") === "done" ? "已掌握" : (topicMastery[t.id]?.status || "todo") === "doing" ? "学习中" : "未开始"}
-                  </Badge>
-                </div>
-              </div>
-            ))}
-            {sel.topics.map((t, i) => {
-              const hasContent = !!KNOWLEDGE_CONTENT[t];
-              const accuracy = getTopicAccuracy(t, chapterStats);
-              const status = getTopicStatus(t, chapterStats);
-              const statusColor = status === "done" ? G.teal : status === "doing" ? G.amber : "#ddd";
-              const statusLabel = status === "done" ? "✓ 已完成" : status === "doing" ? "进行中" : "未开始";
-              const statusBg = status === "done" ? G.tealLight : status === "doing" ? G.amberLight + "44" : "#f9f9f9";
-              return (
-                <div key={i} onClick={() => setOpenTopic(t)} style={{ border: `1.5px solid ${hasContent ? statusColor + "55" : "#eee"}`, borderRadius: 14, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", background: statusBg, transition: "all .15s" }}>
-                  <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-                    <div style={{ width: 32, height: 32, borderRadius: "50%", background: status === "done" ? G.teal : "#e8e8e8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: status === "done" ? "#fff" : "#aaa", flexShrink: 0 }}>{i + 1}</div>
-                    <div>
-                      <div style={{ fontSize: 16, fontWeight: 600, color: "#111", marginBottom: 3 }}>{t}</div>
-                      <div style={{ fontSize: 12, color: "#888" }}>{hasContent ? "点击查看公式与可视化" : "内容整理中…"}</div>
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-                    {accuracy && accuracy.total > 0 && (
-                      <div style={{ textAlign: "right", minWidth: 52 }}>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: (accuracy.pct || 0) >= 80 ? G.teal : (accuracy.pct || 0) >= 60 ? G.amber : G.red }}>{accuracy.pct || 0}%</div>
-                        <div style={{ fontSize: 11, color: "#aaa" }}>{accuracy.correct || 0}/{accuracy.total}题</div>
-                      </div>
-                    )}
-                    {hasContent && <span style={{ fontSize: 18 }}>📐</span>}
-                    <Badge color={status === "done" ? "teal" : status === "doing" ? "amber" : "red"}>{statusLabel}</Badge>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          )}
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
