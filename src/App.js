@@ -41,9 +41,38 @@ const isMissingQuestionsMaterialIdColumn = (err) => {
   return false;
 };
 
+const isMissingQuestionsQualityColumns = (err) => {
+  const msg = String(err?.message || "");
+  const code = String(err?.code || "");
+  if (/Could not find the ['"](source_chunk_id|source_quote|quality_score)['"] column of ['"]questions['"]/i.test(msg)) return true;
+  if (/column\s+.*\b(source_chunk_id|source_quote|quality_score)\b.*does not exist/i.test(msg)) return true;
+  if ((code === "PGRST204" || msg.includes("PGRST204")) && /\bquestions\b/i.test(msg) && /\b(source_chunk_id|source_quote|quality_score)\b/i.test(msg)) {
+    return true;
+  }
+  return false;
+};
+
 const getFileExt = (name = "") => {
   const idx = name.lastIndexOf(".");
   return idx >= 0 ? name.slice(idx).toLowerCase() : "";
+};
+
+const normalizeMaterialText = (input) => {
+  const raw = String(input || "");
+  if (!raw) return "";
+  // Remove control chars and compress spaces
+  const cleaned = raw
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  // If text is mostly Latin junk from binary decoding, treat as invalid extraction
+  const chineseCount = (cleaned.match(/[\u4e00-\u9fff]/g) || []).length;
+  const alphaCount = (cleaned.match(/[A-Za-z]/g) || []).length;
+  const junkLike = /PK\u0003\u0004|word\/|ppt\/|_rels|Content_Types\.xml|Image Manager/i.test(cleaned);
+  if (junkLike) return "";
+  if (alphaCount > 120 && chineseCount < 12 && cleaned.length > 400) return "";
+  return cleaned;
 };
 
 const splitTextIntoChunks = (text, maxLen = 700) => {
@@ -141,15 +170,19 @@ const extractMaterialText = async (file) => {
         const content = await page.getTextContent();
         text += content.items.map(item => item.str).join(" ") + " ";
       }
-      return text.trim();
+      return normalizeMaterialText(text);
     } catch (e) {
       return "";
     }
   }
+  // NOTE: .docx/.pptx are zip binaries; direct text() often becomes garbage.
+  if (ext === ".docx" || ext === ".pptx" || ext === ".ppt" || ext === ".doc") {
+    return "";
+  }
   try {
-    // DOCX/PPTX fallback extraction (best effort for MVP)
+    // Plain-text fallback for txt-like files
     const t = await file.text();
-    return (t || "").slice(0, 12000);
+    return normalizeMaterialText((t || "").slice(0, 12000));
   } catch (e) {
     return "";
   }
@@ -158,26 +191,43 @@ const extractMaterialText = async (file) => {
 const isLowQualityQuestion = (q) => {
   const text = String(q?.question || "");
   const exp = String(q?.explanation || "");
+  const opts = q?.options;
+  const sourceQuote = String(q?.source_quote || "");
+  const qualityScore = Number(q?.quality_score || 0);
+  const hasOptions = Array.isArray(opts) ? opts.length >= 2 : typeof opts === "string" && String(opts).trim().length > 8;
+
   if (!text || text.length < 10) return true;
-  if (/第\s*\d+\s*个理解点/.test(text)) return true;
+  // Obvious noisy/irrelevant artifacts
+  if (/Image Manager|Neelakantan|_rels|Content_Types\.xml|PK\u0003\u0004/i.test(text)) return true;
+  const chineseCount = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  const alphaCount = (text.match(/[A-Za-z]/g) || []).length;
+  if (alphaCount > 50 && chineseCount < 3 && text.length > 40) return true;
+  // 占位模板（全角/半角数字、多空格）
+  if (/第[ \t\u3000]*[\d０-９]+[ \t\u3000]*个理解点/.test(text)) return true;
+  if (/关于本资料内容/.test(text)) return true;
+  if (/理解点/.test(text) && /以下判断是否正确|是否正确[？?]/.test(text)) return true;
   if (/请结合资料原文和课堂笔记/.test(exp)) return true;
+  // extract 约定单选题却缺选项 → 常被误判成判断题
+  if (!hasOptions && /下列|哪项|哪个|最恰当|选择的是/.test(text)) return true;
+  // 判断题模板：只否定「以下判断是否正确」但无引号命题且含占位用语
+  const hasQuotedClaim = /「[^」]{4,}」|『[^』]{4,}』/.test(text);
+  if (/以下判断是否正确|如下判断是否正确/.test(text) && !hasQuotedClaim) {
+    if (/理解点|本资料|知识点\s*\d|第\s*[\d０-９]+\s*个/.test(text)) return true;
+  }
+  if (sourceQuote && sourceQuote.length < 6) return true;
+  if (qualityScore > 0 && qualityScore < 70) return true;
+
   return false;
 };
 
-const fetchChapterSupplementQuestions = async (chapter, count) => {
-  if (!count || count <= 0) return [];
-  try {
-    const res = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chapter: chapter || "资料专题", type: "单选题", count }),
-    });
-    const data = await res.json();
-    if (data?.error) return [];
-    return Array.isArray(data?.questions) ? data.questions : [];
-  } catch (e) {
-    return [];
-  }
+const isLikelyRelevantClaim = (claimText = "") => {
+  const t = String(claimText || "").trim();
+  if (t.length < 8) return false;
+  if (/Image Manager|Neelakantan|_rels|Content_Types\.xml|PK\u0003\u0004/i.test(t)) return false;
+  const chineseCount = (t.match(/[\u4e00-\u9fff]/g) || []).length;
+  const mathHint = /(矩阵|范数|收敛|迭代|导数|积分|微分|误差|牛顿|最小二乘|优化|特征值|条件数|插值|方程|算法|线性|非线性|梯度|hessian|newton|gauss|qr|lu|svd)/i.test(t);
+  if (chineseCount < 3 && !mathHint) return false;
+  return true;
 };
 
 const fetchFileAsBrowserFile = async (url, fallbackName = "material.pdf") => {
@@ -212,7 +262,8 @@ const processMaterialWithAI = async ({
   if (!materialId) return { topics: [], questions: [], chunks: [] };
   const ext = getFileExt(material?.file_name || file?.name || "");
   const fromFile = file ? await extractMaterialText(file) : "";
-  const text = (fromFile || fallbackText || `${material?.title || ""} ${material?.description || ""}`).slice(0, 30000);
+  const safeFallback = normalizeMaterialText(fallbackText || `${material?.title || ""} ${material?.description || ""}`);
+  const text = normalizeMaterialText((fromFile || safeFallback).slice(0, 30000));
   const chunks = splitTextIntoChunks(text, 650);
 
   const startJob = async () => {
@@ -239,8 +290,9 @@ const processMaterialWithAI = async ({
 
   await startJob();
   const insertQuestionsForMaterial = async (questions) => {
-    if (!questions.length) return { insertedCount: 0, materialLinked: true };
-    const withMaterial = questions.map((q) => ({
+    const filtered = (questions || []).filter((q) => !isLowQualityQuestion(q));
+    if (!filtered.length) return { insertedCount: 0, materialLinked: true };
+    const withTraceability = filtered.map((q) => ({
       chapter: q.chapter || material?.chapter || material?.course || "资料专题",
       course: material?.course || "数学",
       type: q.type || (q.options ? "单选题" : "判断题"),
@@ -249,44 +301,65 @@ const processMaterialWithAI = async ({
       answer: q.answer || (q.options ? "A" : "正确"),
       explanation: q.explanation || "",
       material_id: materialId,
+      source_chunk_id: Number.isFinite(Number(q.source_chunk_id)) ? Number(q.source_chunk_id) : null,
+      source_quote: q.source_quote || "",
+      quality_score: Number(q.quality_score || 0),
     }));
-    let { error } = await supabase.from("questions").insert(withMaterial);
-    if (!error) return { insertedCount: withMaterial.length, materialLinked: true };
+    let { error } = await supabase.from("questions").insert(withTraceability);
+    if (!error) return { insertedCount: withTraceability.length, materialLinked: true };
+
+    if (isMissingQuestionsQualityColumns(error)) {
+      const withoutQualityCols = withTraceability.map(({ source_chunk_id, source_quote, quality_score, ...rest }) => rest);
+      const retryQuality = await supabase.from("questions").insert(withoutQualityCols);
+      if (!retryQuality.error) return { insertedCount: withoutQualityCols.length, materialLinked: true };
+      error = retryQuality.error;
+    }
+
     if (!isMissingQuestionsMaterialIdColumn(error)) throw error;
-    const withoutMaterial = withMaterial.map(({ material_id, ...rest }) => rest);
+    const withoutMaterial = withTraceability.map(({ material_id, source_chunk_id, source_quote, quality_score, ...rest }) => rest);
     const retry = await supabase.from("questions").insert(withoutMaterial);
     if (retry.error) throw retry.error;
     return { insertedCount: withoutMaterial.length, materialLinked: false };
   };
   try {
-    const res = await fetch("/api/extract", {
+    const claimRes = await fetch("/api/extract-claims", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        text: text || `${material?.title || ""} ${material?.description || ""}`,
+        chunks,
+        course: material?.course || "数学",
+        chapter: material?.chapter || "未知章节",
+        maxClaims: Math.max(genCount * 2, 10),
+      }),
+    });
+    const claimResult = await claimRes.json();
+    if (claimResult?.error) throw new Error(claimResult.error);
+    let topics = Array.isArray(claimResult?.topics) ? claimResult.topics : [];
+    let claims = Array.isArray(claimResult?.claims) ? claimResult.claims : [];
+    claims = claims.filter((c) => isLikelyRelevantClaim(c?.claim_text));
+
+    const genRes = await fetch("/api/generate-from-claims", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        claims,
         course: material?.course || "数学",
         chapter: material?.chapter || "未知章节",
         count: genCount,
       }),
     });
-    const result = await res.json();
-    if (result?.error) throw new Error(result.error);
-    let topics = Array.isArray(result?.topics) ? result.topics : [];
-    let questions = Array.isArray(result?.questions) ? result.questions : [];
+    const genResult = await genRes.json();
+    if (genResult?.error) throw new Error(genResult.error);
+    let questions = Array.isArray(genResult?.questions) ? genResult.questions : [];
     questions = questions.filter((q) => !isLowQualityQuestion(q));
     if (topics.length === 0) topics = buildFallbackTopics(text, material?.chapter, 4);
-    if (questions.length === 0) questions = buildFallbackQuestions(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter || material?.course, genCount);
-    if (questions.length < Math.min(genCount, 5)) {
-      const supplement = await fetchChapterSupplementQuestions(material?.chapter || material?.course, Math.min(genCount - questions.length, 5));
-      const merged = [...questions, ...supplement];
-      const seen = new Set();
-      questions = merged.filter((q) => {
-        const key = String(q?.question || "").trim();
-        if (!key || seen.has(key)) return false;
-        seen.add(key);
-        return !isLowQualityQuestion(q);
-      }).slice(0, genCount);
-    }
+    const seen = new Set();
+    questions = questions.filter((q) => {
+      const key = String(q?.question || "").trim();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, genCount);
 
     if (chunks.length > 0) {
       try {
@@ -320,18 +393,37 @@ const processMaterialWithAI = async ({
       } catch (e) {}
     }
 
+    if (claims.length > 0) {
+      try {
+        await supabase.from("material_claims").delete().eq("material_id", materialId);
+        await supabase.from("material_claims").insert(claims.slice(0, 36).map((c) => ({
+          material_id: materialId,
+          chunk_index: Number.isFinite(Number(c?.chunk_index)) ? Number(c.chunk_index) : null,
+          claim_text: String(c?.claim_text || "").trim(),
+          claim_type: String(c?.claim_type || "fact"),
+          difficulty: Math.min(5, Math.max(1, Number(c?.difficulty || 2))),
+          source_quote: String(c?.source_quote || "").slice(0, 160),
+        })).filter((r) => r.claim_text.length >= 8));
+      } catch (e) {}
+    }
+
     const qResult = await insertQuestionsForMaterial(questions);
 
     await finishJob(true);
-    return { topics, questions, chunks, ext, actorName, insertedCount: qResult.insertedCount, materialLinked: qResult.materialLinked };
+    return {
+      topics,
+      questions,
+      chunks,
+      claims,
+      ext,
+      actorName,
+      insertedCount: qResult.insertedCount,
+      materialLinked: qResult.materialLinked,
+    };
   } catch (err) {
-    // Hard fallback: AI failure still guarantees question availability.
+    // AI failure fallback: keep topics/chunks, but do not inject generic noisy questions.
     const topics = buildFallbackTopics(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter, 4);
-    let questions = buildFallbackQuestions(text || `${material?.title || ""} ${material?.description || ""}`, material?.chapter || material?.course, genCount);
-    if (questions.length < Math.min(genCount, 5)) {
-      const supplement = await fetchChapterSupplementQuestions(material?.chapter || material?.course, Math.min(genCount - questions.length, 5));
-      questions = [...questions, ...supplement].filter((q) => !isLowQualityQuestion(q)).slice(0, genCount);
-    }
+    const questions = [];
     try {
       if (chunks.length > 0) {
         await supabase.from("material_chunks").delete().eq("material_id", materialId);
@@ -354,9 +446,8 @@ const processMaterialWithAI = async ({
           solution_hint: null,
         })));
       }
-      const qResult = await insertQuestionsForMaterial(questions);
-      await finishJob(questions.length > 0, err?.message || "unknown");
-      if (questions.length > 0) return { topics, questions, chunks, ext, actorName, insertedCount: qResult.insertedCount, materialLinked: qResult.materialLinked };
+      await finishJob(false, err?.message || "unknown");
+      return { topics, questions, chunks, ext, actorName, insertedCount: 0, materialLinked: true };
     } catch (e) {}
     await finishJob(false, err?.message || "unknown");
     throw err;
@@ -1249,6 +1340,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           }
         }
       }
+      pool = pool.filter((q) => !isLowQualityQuestion(q));
       setAllQuestions(pool.sort(() => Math.random() - 0.5));
       setLoading(false);
     };
@@ -1551,6 +1643,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             <div>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#111", marginBottom: 6 }}>{answered ? "正确答案："+q.answer : "解题提示"}</div>
               <div style={{ fontSize: 15, color: "#444", lineHeight: 1.7 }}>{q.explanation}</div>
+              {q.source_quote ? (
+                <div style={{ marginTop: 8, fontSize: 12, color: "#666", lineHeight: 1.6 }}>
+                  资料依据：{String(q.source_quote).slice(0, 140)}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
