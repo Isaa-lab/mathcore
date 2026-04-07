@@ -801,11 +801,160 @@ const VizSimpson = () => (
   </svg>
 );
 
+// ── New Visualizations ────────────────────────────────────────────────────────
+const VizEigenvalue = () => (
+  <svg viewBox="0 0 320 150" style={{ width: "100%", maxWidth: 320, display: "block", margin: "0 auto" }}>
+    <rect x="0" y="0" width="320" height="150" fill={G.purpleLight} rx="8"/>
+    <line x1="160" y1="140" x2="160" y2="10" stroke="#ccc" strokeWidth="1"/>
+    <line x1="20" y1="75" x2="300" y2="75" stroke="#ccc" strokeWidth="1"/>
+    {/* Original vector */}
+    <line x1="160" y1="75" x2="220" y2="35" stroke={G.blue} strokeWidth="2.5" markerEnd="url(#arrowB)"/>
+    <text x="228" y="30" fontSize="11" fill={G.blue}>v</text>
+    {/* Scaled eigenvector */}
+    <line x1="160" y1="75" x2="260" y2="75" stroke={G.purple} strokeWidth="2.5" strokeDasharray="5"/>
+    <text x="265" y="78" fontSize="11" fill={G.purple}>λv</text>
+    {/* Small vector */}
+    <line x1="160" y1="75" x2="200" y2="55" stroke={G.teal} strokeWidth="2" opacity="0.7"/>
+    <text x="202" y="50" fontSize="10" fill={G.teal}>Av=λv</text>
+    <defs>
+      <marker id="arrowB" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill={G.blue}/>
+      </marker>
+    </defs>
+    <text x="160" y="14" fontSize="11" fill={G.purple} textAnchor="middle" fontWeight="600">特征向量方向不变，长度缩放 λ 倍</text>
+  </svg>
+);
+
+const VizNormal = () => (
+  <svg viewBox="0 0 320 150" style={{ width: "100%", maxWidth: 320, display: "block", margin: "0 auto" }}>
+    <rect x="0" y="0" width="320" height="150" fill="#f0f9ff" rx="8"/>
+    <defs>
+      <linearGradient id="normGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor={G.blue} stopOpacity="0.4"/>
+        <stop offset="100%" stopColor={G.blue} stopOpacity="0.05"/>
+      </linearGradient>
+    </defs>
+    {/* Bell curve filled ±2σ */}
+    <path d="M60,125 C80,125 90,30 160,25 C230,30 240,125 260,125 Z" fill="url(#normGrad)"/>
+    {/* Bell curve outline */}
+    <path d="M30,125 C60,125 80,15 160,12 C240,15 260,125 290,125" stroke={G.blue} strokeWidth="2.5" fill="none"/>
+    <line x1="30" y1="125" x2="290" y2="125" stroke="#aaa" strokeWidth="1"/>
+    {/* μ line */}
+    <line x1="160" y1="12" x2="160" y2="125" stroke={G.red} strokeWidth="1.5" strokeDasharray="4"/>
+    <text x="160" y="138" fontSize="10" fill={G.red} textAnchor="middle">μ</text>
+    <text x="105" y="138" fontSize="10" fill={G.blue} textAnchor="middle">μ-2σ</text>
+    <text x="215" y="138" fontSize="10" fill={G.blue} textAnchor="middle">μ+2σ</text>
+    <text x="160" y="75" fontSize="10" fill={G.blue} textAnchor="middle">≈95%</text>
+    <text x="160" y="14" fontSize="11" fill={G.blue} textAnchor="middle" fontWeight="600">正态分布 N(μ,σ²) 密度函数</text>
+  </svg>
+);
+
+const VizBayes = () => (
+  <svg viewBox="0 0 320 160" style={{ width: "100%", maxWidth: 320, display: "block", margin: "0 auto" }}>
+    <rect x="0" y="0" width="320" height="160" fill="#fffbf0" rx="8"/>
+    {/* Root */}
+    <circle cx="60" cy="80" r="16" fill={G.amber} opacity="0.8"/>
+    <text x="60" y="84" fontSize="10" fill="#fff" textAnchor="middle" fontWeight="700">Ω</text>
+    {/* B1, B2 branches */}
+    <line x1="76" y1="70" x2="150" y2="40" stroke={G.amber} strokeWidth="1.5"/>
+    <line x1="76" y1="90" x2="150" y2="120" stroke={G.amber} strokeWidth="1.5"/>
+    <circle cx="165" cy="40" r="14" fill={G.blue} opacity="0.8"/>
+    <text x="165" y="44" fontSize="10" fill="#fff" textAnchor="middle">B₁</text>
+    <circle cx="165" cy="120" r="14" fill={G.purple} opacity="0.8"/>
+    <text x="165" y="124" fontSize="10" fill="#fff" textAnchor="middle">B₂</text>
+    {/* A|B branches */}
+    <line x1="179" y1="35" x2="245" y2="20" stroke={G.teal} strokeWidth="1.5"/>
+    <line x1="179" y1="115" x2="245" y2="130" stroke={G.teal} strokeWidth="1.5"/>
+    <rect x="245" y="10" width="52" height="20" rx="5" fill={G.tealLight}/>
+    <text x="271" y="23" fontSize="9" fill={G.tealDark} textAnchor="middle">P(A|B₁)</text>
+    <rect x="245" y="120" width="52" height="20" rx="5" fill={G.tealLight}/>
+    <text x="271" y="133" fontSize="9" fill={G.tealDark} textAnchor="middle">P(A|B₂)</text>
+    <text x="110" y="30" fontSize="9" fill={G.amber}>P(B₁)</text>
+    <text x="110" y="125" fontSize="9" fill={G.amber}>P(B₂)</text>
+    <text x="160" y="10" fontSize="11" fill={G.amber} textAnchor="middle" fontWeight="600">全概率公式与 Bayes 推断</text>
+  </svg>
+);
+
+const VizCI = () => (
+  <svg viewBox="0 0 320 130" style={{ width: "100%", maxWidth: 320, display: "block", margin: "0 auto" }}>
+    <rect x="0" y="0" width="320" height="130" fill="#f0f9f5" rx="8"/>
+    {/* Number line */}
+    <line x1="30" y1="65" x2="290" y2="65" stroke="#ccc" strokeWidth="1.5"/>
+    {/* True parameter */}
+    <line x1="160" y1="50" x2="160" y2="80" stroke={G.red} strokeWidth="2.5"/>
+    <text x="160" y="45" fontSize="10" fill={G.red} textAnchor="middle">θ (真值)</text>
+    {/* CI 1 - covers */}
+    <rect x="110" y="75" width="110" height="10" rx="3" fill={G.teal} opacity="0.6"/>
+    <text x="165" y="83" fontSize="8" fill="#fff" textAnchor="middle">样本1区间 ✓</text>
+    {/* CI 2 - covers */}
+    <rect x="120" y="88" width="90" height="10" rx="3" fill={G.teal} opacity="0.6"/>
+    <text x="165" y="96" fontSize="8" fill="#fff" textAnchor="middle">样本2区间 ✓</text>
+    {/* CI 3 - misses */}
+    <rect x="170" y="101" width="80" height="10" rx="3" fill={G.red} opacity="0.6"/>
+    <text x="210" y="109" fontSize="8" fill="#fff" textAnchor="middle">样本3区间 ✗</text>
+    <text x="160" y="125" fontSize="9" fill="#888" textAnchor="middle">95% 的区间覆盖真实 θ</text>
+    <text x="160" y="14" fontSize="11" fill={G.tealDark} textAnchor="middle" fontWeight="600">置信区间的频率解释</text>
+  </svg>
+);
+
+const VizODE = () => (
+  <svg viewBox="0 0 320 150" style={{ width: "100%", maxWidth: 320, display: "block", margin: "0 auto" }}>
+    <rect x="0" y="0" width="320" height="150" fill="#f5f0ff" rx="8"/>
+    <line x1="30" y1="125" x2="290" y2="125" stroke="#aaa" strokeWidth="1"/>
+    <line x1="30" y1="125" x2="30" y2="15" stroke="#aaa" strokeWidth="1"/>
+    {/* True solution */}
+    <path d="M40,115 C80,100 120,75 160,55 C200,38 240,28 280,22" stroke={G.teal} strokeWidth="2.5" fill="none"/>
+    {/* Euler steps */}
+    <polyline points="40,115 80,105 120,90 160,75 200,62 240,52 280,44" stroke={G.amber} strokeWidth="1.8" fill="none" strokeDasharray="5"/>
+    <circle cx="40" cy="115" r="4" fill={G.red}/>
+    <text x="40" y="140" fontSize="9" fill="#888" textAnchor="middle">t₀</text>
+    <text x="200" y="140" fontSize="9" fill="#888" textAnchor="middle">t</text>
+    <text x="100" y="55" fontSize="10" fill={G.teal}>精确解</text>
+    <text x="210" y="38" fontSize="10" fill={G.amber}>Euler近似</text>
+    <text x="160" y="14" fontSize="11" fill={G.purple} textAnchor="middle" fontWeight="600">Euler 法与精确解的误差积累</text>
+  </svg>
+);
+
+const VizLaplace = () => (
+  <svg viewBox="0 0 320 130" style={{ width: "100%", maxWidth: 320, display: "block", margin: "0 auto" }}>
+    <rect x="0" y="0" width="320" height="130" fill="#fff8f0" rx="8"/>
+    {/* Time domain box */}
+    <rect x="15" y="35" width="90" height="55" rx="8" fill={G.amberLight} stroke={G.amber} strokeWidth="1.5"/>
+    <text x="60" y="58" fontSize="11" fill={G.amber} textAnchor="middle" fontWeight="700">y(t)</text>
+    <text x="60" y="72" fontSize="9" fill="#888" textAnchor="middle">时域 ODE</text>
+    <text x="60" y="22" fontSize="10" fill={G.amber} textAnchor="middle">困难：微分方程</text>
+    {/* Arrow right */}
+    <path d="M108,62 L148,62" stroke={G.purple} strokeWidth="2" markerEnd="url(#arrowP)"/>
+    <text x="128" y="55" fontSize="9" fill={G.purple} textAnchor="middle">L{}</text>
+    {/* s domain box */}
+    <rect x="152" y="35" width="90" height="55" rx="8" fill={G.purpleLight} stroke={G.purple} strokeWidth="1.5"/>
+    <text x="197" y="58" fontSize="11" fill={G.purple} textAnchor="middle" fontWeight="700">Y(s)</text>
+    <text x="197" y="72" fontSize="9" fill="#888" textAnchor="middle">s 域代数</text>
+    <text x="197" y="22" fontSize="10" fill={G.purple} textAnchor="middle">容易：代数方程</text>
+    {/* Arrow down left */}
+    <path d="M197,93 L197,118 L60,118 L60,93" stroke={G.teal} strokeWidth="1.5" fill="none" strokeDasharray="4"/>
+    <text x="130" y="115" fontSize="9" fill={G.teal} textAnchor="middle">L⁻¹{} 逆变换</text>
+    <defs>
+      <marker id="arrowP" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill={G.purple}/>
+      </marker>
+    </defs>
+    <text x="160" y="14" fontSize="11" fill={G.amber} textAnchor="middle" fontWeight="600">Laplace 变换：时域→s 域→时域</text>
+  </svg>
+);
+
 const VIZ_MAP = {
   "二分法": <VizBisection />,
   "Newton 法": <VizNewton />,
   "LU 分解": <VizLU />,
   "梯形法 / Simpson 法": <VizSimpson />,
+  "特征值与对角化": <VizEigenvalue />,
+  "常见概率分布": <VizNormal />,
+  "条件概率与 Bayes 定理": <VizBayes />,
+  "置信区间": <VizCI />,
+  "Euler 法": <VizODE />,
+  "Runge-Kutta 法": <VizODE />,
+  "Laplace 变换": <VizLaplace />,
 };
 
 // ── Knowledge Content ─────────────────────────────────────────────────────────
@@ -819,6 +968,9 @@ const KNOWLEDGE_CONTENT = {
     steps: ["验证 f(a)·f(b) < 0（有根）", "计算中点 c = (a+b)/2", "若 f(a)·f(c) < 0 则令 b=c，否则令 a=c", "重复直到 |b-a| < ε"],
     note: "一定收敛，但速度慢（线性）。每步误差缩小 1/2。",
     viz: "二分法",
+    examples: [
+      { problem: "用二分法求 f(x)=x³−x−2=0 在 [1,2] 上的根，迭代 3 次。", steps: ["f(1)=−2<0，f(2)=4>0，有根 ✓", "c₁=1.5，f(1.5)=−0.125<0 → 新区间 [1.5, 2]", "c₂=1.75，f(1.75)≈1.359>0 → 新区间 [1.5, 1.75]", "c₃=1.625，f(1.625)≈0.566>0 → 新区间 [1.5, 1.625]"], answer: "3次迭代后根的近似值 ≈ 1.5625，误差 ≤ (2−1)/2⁴=0.0625" },
+    ],
   },
   "Newton 法": {
     intro: "Newton 法（牛顿迭代法）用函数在当前点的切线交 x 轴的点作为下一步近似，二阶收敛，非常快速。",
@@ -829,6 +981,9 @@ const KNOWLEDGE_CONTENT = {
     steps: ["取初始近似 x₀ 在根附近", "计算 x₁ = x₀ - f(x₀)/f'(x₀)", "重复直到 |xₙ₊₁ - xₙ| < ε"],
     note: "每步有效数字大约翻倍，但需要 f'(x)≠0 且初始值足够近。",
     viz: "Newton 法",
+    examples: [
+      { problem: "用 Newton 法求 √2，即求 f(x)=x²−2=0，取 x₀=1。", steps: ["f(x)=x²−2，f'(x)=2x", "x₁=1−(1−2)/(2)=1.5，误差=0.0858", "x₂=1.5−(2.25−2)/3=1.4167，误差=0.0025", "x₃≈1.4142，误差≈7×10⁻⁷"], answer: "x₃≈1.41421，已达 6 位有效数字（体现二阶收敛速度）" },
+    ],
   },
   "不动点迭代": {
     intro: "将 f(x)=0 改写为 x=g(x)，然后迭代 x_{n+1}=g(x_n) 求根。收敛性由 |g'(x*)| 决定。",
@@ -839,6 +994,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["将 f(x)=0 改写为 x=g(x)", "验证 |g'(x)| < 1 在根附近成立", "从 x₀ 出发迭代"],
     note: "|g'(x*)| 越小，收敛越快。当 g'(x*)=0 时达到超线性收敛。",
+    examples: [
+      { problem: "求 cos(x)=x 的根（x=g(x)=cos(x)），从 x₀=1 出发迭代。", steps: ["g'(x)=−sin(x)，在根附近 |g'|≈0.68<1，收敛 ✓", "x₁=cos(1)≈0.5403", "x₂=cos(0.5403)≈0.8576", "x₃=cos(0.8576)≈0.6543，…，收敛到 x*≈0.7391"], answer: "不动点 x*≈0.7391（即 Dottie number），约 50 步达到机器精度" },
+    ],
   },
   "Gauss 消去法": {
     intro: "高斯消去法是解线性方程组 Ax=b 的标准算法，分前向消元（化为上三角）和回代两步。",
@@ -848,6 +1006,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["对每列 k，计算消元乘子 mₖₗ", "用第 k 行消去下面各行的第 k 列元素", "回代从最后一行求解各未知数"],
     note: "必须选主元（Pivoting）避免数值不稳定。部分主元法选每列最大元素。",
+    examples: [
+      { problem: "用 Gauss 消去法解：2x+y=5，4x+3y=11。", steps: ["m₂₁=4/2=2，R₂←R₂−2R₁：0x+y=1", "回代：y=1，2x=5−1=4，x=2"], answer: "x=2，y=1" },
+    ],
   },
   "LU 分解": {
     intro: "LU 分解把矩阵 A 写成 A=LU，L 是下三角、U 是上三角，一次分解可高效求解多个右端项。",
@@ -858,6 +1019,9 @@ const KNOWLEDGE_CONTENT = {
     steps: ["对 A 做 LU 分解（O(n³)，只做一次）", "前代求解 Ly=b（O(n²)）", "回代求解 Ux=y（O(n²)）"],
     note: "对每个新的 b 只需 O(n²)，适合多右端项。带行交换的 PA=LU 更稳定。",
     viz: "LU 分解",
+    examples: [
+      { problem: "对 A=[[2,1],[6,4]] 做 LU 分解，再解 Ax=[5,18]ᵀ。", steps: ["m₂₁=6/2=3，L=[[1,0],[3,1]]，U=[[2,1],[0,1]]", "前代 Ly=b：y₁=5，3×5+y₂=18→y₂=3", "回代 Ux=y：x₂=3，2x₁+3=5→x₁=1"], answer: "x₁=1，x₂=3" },
+    ],
   },
   "Lagrange 插值": {
     intro: "给定 n+1 个节点，Lagrange 插值构造唯一的次数 ≤n 的多项式经过所有节点。",
@@ -868,6 +1032,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["选取 n+1 个节点", "计算每个基函数 Lₖ(x)", "加权求和得到 Pₙ(x)"],
     note: "等距节点高次插值会在端点附近振荡（Runge 现象）。建议使用 Chebyshev 节点。",
+    examples: [
+      { problem: "已知 f(0)=1，f(1)=3，f(2)=7，用 Lagrange 插值求 f(1.5)。", steps: ["L₀(x)=(x−1)(x−2)/[(0−1)(0−2)]=(x−1)(x−2)/2", "L₁(x)=(x−0)(x−2)/[(1−0)(1−2)]=−x(x−2)", "L₂(x)=x(x−1)/2", "P(1.5)=1×(0.5)(−0.5)/2+3×(−1.5)(−0.5)+7×1.5×0.5/2", "=−0.125+2.25+2.625=4.75"], answer: "f(1.5)≈4.75（实际函数若为 2x²+1，真值=4.5，误差来自多项式次数限制）" },
+    ],
   },
   "法方程": {
     intro: "线性最小二乘求 x 使 ‖b-Ax‖₂ 最小，对目标函数求导置零得到法方程（正规方程）。",
@@ -877,6 +1044,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["建立超定方程组 Ax≈b（方程数 > 未知数）", "构造法方程 AᵀAx=Aᵀb", "求解得到最优参数"],
     note: "AᵀA 的条件数是 A 的平方，数值稳定性差。实践中用 QR 分解更好。",
+    examples: [
+      { problem: "已知数据点 (0,1),(1,2),(2,3.5)，用最小二乘拟合直线 y=a+bx。", steps: ["A=[[1,0],[1,1],[1,2]]，b=[1,2,3.5]ᵀ", "AᵀA=[[3,3],[3,5]]，Aᵀb=[6.5,9]", "解法方程：a=0.833，b=1.25（不是精确过点）"], answer: "拟合直线 y≈0.833+1.25x，最小化所有点到直线的残差平方和" },
+    ],
   },
   "梯形法 / Simpson 法": {
     intro: "数值积分方法用多项式近似被积函数，再精确积分该多项式，从而近似原来的定积分。",
@@ -887,6 +1057,9 @@ const KNOWLEDGE_CONTENT = {
     steps: ["将 [a,b] 分成 n 个子区间", "在每个子区间用梯形或 Simpson 公式", "累加各子区间结果"],
     note: "Simpson 法对次数 ≤3 的多项式精确，误差比梯形法高两阶。",
     viz: "梯形法 / Simpson 法",
+    examples: [
+      { problem: "用梯形法和 Simpson 法计算 ∫₀¹ x² dx（精确值=1/3≈0.3333）。", steps: ["梯形法：(1−0)/2×[f(0)+f(1)]=(1/2)×(0+1)=0.5，误差=0.167", "Simpson 法：(1−0)/6×[f(0)+4f(0.5)+f(1)]=(1/6)×(0+1+1)=0.3333"], answer: "Simpson 法精确（x² 是 2 次多项式，≤3 次，Simpson 精确积分）；梯形法误差较大" },
+    ],
   },
   "Euler 法": {
     intro: "Euler 法是求解 ODE 初值问题 y'=f(t,y) 最简单的方法：用当前斜率直接预测下一步。",
@@ -896,6 +1069,10 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["从初始值 w₀=y₀ 出发", "依次计算 wᵢ₊₁=wᵢ+h·f(tᵢ,wᵢ)", "推进到目标时间"],
     note: "一阶方法，精度低，步长需很小。仅用于理论分析和教学示例，实践用 RK4。",
+    viz: "Euler 法",
+    examples: [
+      { problem: "用 Euler 法解 y'=y，y(0)=1，步长 h=0.5，求 y(1) 的近似值（精确值 e≈2.718）。", steps: ["w₀=1，t₀=0", "w₁=w₀+0.5×f(0,1)=1+0.5×1=1.5，t₁=0.5", "w₂=1.5+0.5×f(0.5,1.5)=1.5+0.5×1.5=2.25，t₂=1.0"], answer: "Euler 近似 y(1)≈2.25，误差≈0.47（约 17%），减小步长可改善精度" },
+    ],
   },
   "Runge-Kutta 法": {
     intro: "RK4 在一个步长内取四个斜率采样点加权平均，得到四阶精度，是最常用的 ODE 求解器。",
@@ -905,6 +1082,10 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["计算 k₁=f(tᵢ,wᵢ)", "计算 k₂=f(tᵢ+h/2, wᵢ+hk₁/2)", "计算 k₃=f(tᵢ+h/2, wᵢ+hk₂/2)", "计算 k₄=f(tᵢ+h, wᵢ+hk₃)", "更新 wᵢ₊₁"],
     note: "每步 4 次函数求值，精度与计算量均衡。自适应步长版本（RK45）更实用。",
+    viz: "Runge-Kutta 法",
+    examples: [
+      { problem: "用 RK4 解 y'=y，y(0)=1，步长 h=0.5，求 y(0.5)（精确值 e^0.5≈1.6487）。", steps: ["k₁=f(0,1)=1", "k₂=f(0.25, 1+0.5×0.5)=f(0.25,1.25)=1.25", "k₃=f(0.25, 1+0.5×1.25/2)=f(0.25,1.3125)=1.3125", "k₄=f(0.5, 1+0.5×1.3125)=f(0.5,1.6563)=1.6563", "w₁=1+(0.5/6)×(1+2.5+2.625+1.6563)≈1.6484"], answer: "RK4 近似 1.6484，误差仅 0.0003，远优于 Euler 法（误差 0.15）" },
+    ],
   },
   "最小二乘数据拟合": {
     intro: "给定 m 个数据点，寻找参数 x 使模型与观测值的残差平方和最小，是数据科学的核心方法。",
@@ -914,6 +1095,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["收集数据点 (tᵢ,bᵢ)", "建立矩阵方程 Ax≈b", "用法方程或 QR 分解求 x*"],
     note: "线性最小二乘：参数线性出现，有解析解。非线性：需要 Gauss-Newton 迭代。",
+    examples: [
+      { problem: "3 个实验数据：(1,2.1),(2,3.9),(3,6.2)，用 y=ax 拟合（过原点直线）。", steps: ["A=[1;2;3]（列向量），b=[2.1,3.9,6.2]ᵀ", "AᵀA=1+4+9=14，Aᵀb=2.1+7.8+18.6=28.5", "a=28.5/14≈2.036"], answer: "最优拟合 y≈2.036x，残差 ‖r‖≈0.18（比任何其他斜率都小）" },
+    ],
   },
   "投资组合选择 (Markowitz)": {
     intro: "Markowitz 1959 年提出均值-方差框架，在期望收益和风险之间寻求最优平衡，获 1990 年诺贝尔经济学奖。",
@@ -924,6 +1108,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["估计各证券期望收益 μ 和协方差矩阵 V", "设定收益下界 p 和预算 B", "求解二次规划得最优配置 x*"],
     note: "三种等价建模：最大化收益-α风险 / 最小化风险约束收益 / 最大化收益约束风险。",
+    examples: [
+      { problem: "两只股票 μ=[0.10,0.15]，V=[[0.04,0.01],[0.01,0.09]]，预算=1。求最小方差组合。", steps: ["min xᵀVx s.t. x₁+x₂=1，KKT：2Vx=λ1", "解得 x₁≈0.62，x₂≈0.38", "σ²_P=0.62²×0.04+2×0.62×0.38×0.01+0.38²×0.09≈0.029"], answer: "最优配置：62% 配低风险股，38% 配高收益股；组合收益 11.9%，方差 0.029" },
+    ],
   },
   "SVM 分类": {
     intro: "支持向量机通过最大化两类数据之间的间隔超平面来分类，是数据挖掘的核心算法。",
@@ -934,6 +1121,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["整理训练数据 {(xⁱ,yᵢ)}，yᵢ∈{±1}", "求解二次规划得到最优 ŵ 和 b̂", "新样本 y=sign((ŵ,x)+b̂)"],
     note: "C 控制惩罚力度：C 大→不允许误分；C 小→允许误分但间隔宽。",
+    examples: [
+      { problem: "两类点：正类 (1,1),(2,2)，负类 (0,0),(1,0)。求最大间隔超平面。", steps: ["支持向量（最近点）约为 (1,0) 和 (1,1)", "分界面为 x₁+x₂=1.5（中间面），w=(1,1)/‖(1,1)‖", "间隔 margin=2/‖w‖=√2≈1.414"], answer: "超平面：x₁+x₂=1.5（即 w·x+b=0），间隔宽度 √2" },
+    ],
   },
 
   // ════════════════════════════════════════════════════════════════
@@ -948,6 +1138,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["对 2×2 矩阵：ad-bc", "对 n×n：沿任意行/列按余子式展开（递归）", "利用初等行变换化为三角形，连乘对角元"],
     note: "行交换改变符号；行倍乘乘以常数 k；行加法不变。三角矩阵的行列式等于对角线之积。",
+    examples: [
+      { problem: "计算 3×3 矩阵 A=[[1,2,3],[0,4,5],[1,0,6]] 的行列式。", steps: ["沿第 1 列展开：det=1×M₁₁−0×M₂₁+1×M₃₁", "M₁₁=det[[4,5],[0,6]]=24−0=24", "M₃₁=det[[2,3],[4,5]]=10−12=−2", "det(A)=1×24+1×(−1)³⁺¹×(−2)=24−2=22"], answer: "det(A)=22，A 可逆（行列式非零）" },
+    ],
   },
   "特征值与对角化": {
     intro: "方阵 A 的特征值 λ 使得存在非零向量 v 满足 Av=λv。对角化将 A 变换为对角矩阵，大大简化矩阵幂的计算。",
@@ -958,6 +1151,10 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["计算特征多项式 det(A-λI)=0，求出 λ₁,…,λₙ", "对每个 λᵢ 求解 (A-λᵢI)v=0 得特征向量 vᵢ", "若 n 个特征向量线性无关，令 P=[v₁…vₙ]，则 A=PΛP⁻¹"],
     note: "实对称矩阵一定可对角化，且特征向量两两正交（谱定理）。n 个不同特征值保证可对角化。",
+    viz: "特征值与对角化",
+    examples: [
+      { problem: "求 A=[[3,1],[0,2]] 的特征值和特征向量，并对角化。", steps: ["特征多项式：(3−λ)(2−λ)=0，λ₁=3，λ₂=2", "λ₁=3：(A−3I)v=[[0,1],[0,−1]]v=0 → v₁=[1,0]ᵀ", "λ₂=2：(A−2I)v=[[1,1],[0,0]]v=0 → v₂=[−1,1]ᵀ", "P=[[1,−1],[0,1]]，Λ=[[3,0],[0,2]]"], answer: "A=PΛP⁻¹，A¹⁰=PΛ¹⁰P⁻¹=diag(3¹⁰,2¹⁰) 变换后再变换回" },
+    ],
   },
   "SVD 奇异值分解": {
     intro: "SVD 将任意矩阵分解为 A=UΣVᵀ，U、V 为正交矩阵，Σ 为非负对角矩阵，是数据降维、伪逆和图像压缩的核心工具。",
@@ -968,6 +1165,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["计算 AᵀA 的特征值（即 σᵢ²）和特征向量（V 的列）", "计算 AAᵀ 的特征向量（U 的列）", "奇异值 σᵢ=√λᵢ 组成 Σ"],
     note: "奇异值的大小反映各方向的拉伸强度；截断 SVD（保留前 k 个奇异值）是最优低秩近似（Eckart-Young 定理）。",
+    examples: [
+      { problem: "求 A=[[1,0],[0,2],[0,0]] 的 SVD（3×2 矩阵）。", steps: ["AᵀA=[[1,0],[0,4]]，特征值 σ₁²=4，σ₂²=1，故 σ₁=2，σ₂=1", "V=I₂（已是标准正交），Σ=[[2,0],[0,1],[0,0]]", "U 的前两列：u₁=Av₁/σ₁=[0,1,0]ᵀ，u₂=Av₂/σ₂=[1,0,0]ᵀ"], answer: "A=UΣVᵀ，U 的列是数据空间方向，σ₁=2 表示 y 方向拉伸更大" },
+    ],
   },
   "Gram-Schmidt 正交化": {
     intro: "Gram-Schmidt 过程将一组线性无关向量转化为标准正交基，是 QR 分解的理论基础。",
@@ -978,6 +1178,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["令 u₁=v₁", "令 u₂=v₂ - proj_{u₁}(v₂)", "一般步：减去前面所有方向的投影", "归一化：qₖ=uₖ/‖uₖ‖"],
     note: "数值实现用修正 Gram-Schmidt（Modified GS）或 Householder 变换，稳定性更好。",
+    examples: [
+      { problem: "对 v₁=[1,1,0]ᵀ，v₂=[1,0,1]ᵀ 做 Gram-Schmidt 正交化。", steps: ["u₁=v₁=[1,1,0]ᵀ，q₁=u₁/‖u₁‖=[1,1,0]/√2", "proj_{u₁}(v₂)=(v₂·u₁)/(u₁·u₁)×u₁=(1/2)[1,1,0]ᵀ=[0.5,0.5,0]ᵀ", "u₂=v₂−proj=[1,0,1]−[0.5,0.5,0]=[0.5,−0.5,1]ᵀ", "q₂=u₂/‖u₂‖=[0.5,−0.5,1]/√1.5"], answer: "正交基 {q₁,q₂}，两者点积 q₁·q₂=0.5/√2−0.5/√2+0=0 ✓" },
+    ],
   },
   "列空间与零空间": {
     intro: "矩阵的四个基本子空间（列空间、行空间、零空间、左零空间）刻画了线性方程组的解结构。",
@@ -988,6 +1191,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["对 A 进行行化简得到 RREF", "主列对应列空间的基", "自由变量对应零空间的基向量"],
     note: "Ax=b 有解 ⟺ b∈C(A)。若解存在，通解=特解+零空间中任意向量。",
+    examples: [
+      { problem: "求 A=[[1,2,3],[2,4,6]] 的零空间和列空间维数。", steps: ["行化简：R₂−2R₁→[[1,2,3],[0,0,0]]，rank(A)=1", "零空间维数=3−1=2（2个自由变量 x₂,x₃）", "零空间基：v₁=[−2,1,0]ᵀ，v₂=[−3,0,1]ᵀ（令 x₂=1,x₃=0 或 x₂=0,x₃=1）"], answer: "列空间=span{[1,2]ᵀ}，维数 1；零空间维数 2；验证：1+2=3=n ✓" },
+    ],
   },
 
   // ════════════════════════════════════════════════════════════════
@@ -995,6 +1201,7 @@ const KNOWLEDGE_CONTENT = {
   // ════════════════════════════════════════════════════════════════
   "条件概率与 Bayes 定理": {
     intro: "条件概率 P(A|B) 衡量在 B 已发生的前提下 A 发生的概率，Bayes 定理实现「从结果推原因」的反向推断。",
+    viz: "条件概率与 Bayes 定理",
     formulas: [
       { label: "条件概率定义", tex: "P(A|B) = \\frac{P(A \\cap B)}{P(B)},\\quad P(B)>0" },
       { label: "全概率公式", tex: "P(A) = \\sum_{i=1}^n P(A|B_i)P(B_i)" },
@@ -1002,6 +1209,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["确定划分 {B₁,…,Bₙ}（互斥且穷举）", "用全概率公式计算 P(A)", "代入 Bayes 公式得后验概率 P(Bᵢ|A)"],
     note: "P(B) 称先验概率，P(B|A) 称后验概率。独立性条件：P(A∩B)=P(A)P(B)。",
+    examples: [
+      { problem: "某疾病患病率 1%，检测阳性率：患病者 99%，健康者 5%。已知检测阳性，求真正患病概率。", steps: ["设 B₁=患病，B₂=健康，A=阳性", "P(A)=P(A|B₁)P(B₁)+P(A|B₂)P(B₂)=0.99×0.01+0.05×0.99=0.0099+0.0495=0.0594", "P(B₁|A)=0.99×0.01/0.0594≈0.167"], answer: "即使检测阳性，真正患病概率只有约 16.7%（低患病率的影响），这说明稀有疾病的检测需多次确认" },
+    ],
   },
   "常见概率分布": {
     intro: "数学中几种基础分布（Bernoulli、Poisson、正态、指数）描述了自然界中最常见的随机现象。",
@@ -1012,6 +1222,10 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["根据实际场景选择合适分布", "确定参数（μ/σ 或 λ 等）", "计算概率或分位数"],
     note: "正态分布：68-95-99.7 法则。Poisson 是二项分布当 n→∞,np=λ 时的极限。指数分布具有无记忆性。",
+    viz: "常见概率分布",
+    examples: [
+      { problem: "某网站每分钟平均收到 3 个请求（Poisson(3)），求 1 分钟内收到 0 个请求的概率，以及收到至少 1 个的概率。", steps: ["P(X=0)=e⁻³×3⁰/0!=e⁻³≈0.0498", "P(X≥1)=1−P(X=0)=1−0.0498≈0.9502"], answer: "0 请求的概率≈5%，至少 1 个请求的概率≈95%。实际中常用此计算 SLA（服务水平协议）" },
+    ],
   },
   "期望与方差": {
     intro: "期望 E[X] 是随机变量的加权平均，方差 Var(X) 衡量其散布程度，两者是描述分布最核心的数字特征。",
@@ -1022,6 +1236,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["计算 E[X]（加权和或积分）", "计算 E[X²]", "方差 = E[X²] - (E[X])²"],
     note: "线性性：E[aX+b]=aE[X]+b；Var(aX+b)=a²Var(X)。独立时 Var(X+Y)=Var(X)+Var(Y)。",
+    examples: [
+      { problem: "X 取 1,2,3 各以概率 0.2,0.5,0.3，求 E[X]，Var(X)，以及 Y=2X+1 的方差。", steps: ["E[X]=1×0.2+2×0.5+3×0.3=0.2+1.0+0.9=2.1", "E[X²]=1×0.2+4×0.5+9×0.3=0.2+2.0+2.7=4.9", "Var(X)=4.9−2.1²=4.9−4.41=0.49", "Var(Y)=Var(2X+1)=4Var(X)=4×0.49=1.96"], answer: "E[X]=2.1，Var(X)=0.49，σ=0.7；Y=2X+1 的 Var=1.96" },
+    ],
   },
   "中心极限定理": {
     intro: "中心极限定理（CLT）是概率论最重要的结果：无论总体分布如何，足够多 i.i.d. 样本的均值趋向正态分布。",
@@ -1031,11 +1248,12 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["确认样本 i.i.d.，有有限均值 μ 和方差 σ²", "标准化：减均值除以标准误 σ/√n", "当 n≥30（经验），用标准正态计算概率"],
     note: "CLT 是统计推断的基石：解释了为何正态分布无处不在，也是大样本置信区间和假设检验的理论依据。",
+    examples: [
+      { problem: "掷均匀骰子（μ=3.5，σ²=35/12），掷 36 次，求样本均值超过 3.8 的概率。", steps: ["样本均值 X̄ ≈ N(3.5, 35/(12×36))=N(3.5, 0.0810)", "标准误 σ/√n=√(35/12)/6≈0.285", "P(X̄>3.8)=P(Z>(3.8−3.5)/0.285)=P(Z>1.053)≈1−0.854=0.146"], answer: "约 14.6% 的概率样本均值超过 3.8，CLT 使我们可以用正态分布近似这一非正态总体的问题" },
+    ],
   },
 
-  // ════════════════════════════════════════════════════════════════
-  // 数理统计 (Bijma 2016)
-  // ════════════════════════════════════════════════════════════════
+  // 数理统计
   "最大似然估计 MLE": {
     intro: "MLE 选取使观测数据出现概率最大的参数值作为估计，是最常用的参数估计方法，具有渐近正态性和有效性。",
     formulas: [
@@ -1045,6 +1263,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["写出似然函数 L(θ)", "取对数得 ℓ(θ)（便于求导）", "对 θ 求偏导置零，解方程组", "验证是最大值（Hessian 负定）"],
     note: "MLE 的渐近性质：n→∞ 时，θ̂_MLE 是无偏且有效的，且 √n(θ̂-θ₀)→N(0, I(θ₀)⁻¹)，I 为 Fisher 信息量。",
+    examples: [
+      { problem: "X～Exp(λ)，观测到样本 x₁=1.2, x₂=0.8, x₃=2.0，求 λ 的 MLE。", steps: ["似然 L(λ)=λ³e^{−λ(1.2+0.8+2.0)}=λ³e^{−4λ}", "对数似然 ℓ=3ln(λ)−4λ", "ℓ'=3/λ−4=0 → λ̂=3/4=0.75"], answer: "λ̂_MLE=n/Σxᵢ=3/4=0.75（样本均值的倒数），这是指数分布 MLE 的通用结论" },
+    ],
   },
   "置信区间": {
     intro: "置信区间 [L, U] 以 1-α 的概率包含真实参数 θ，是区间估计的标准方法，比点估计提供更多不确定性信息。",
@@ -1055,6 +1276,10 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["选择枢轴量（含 θ 的已知分布的统计量）", "根据分布确定临界值（z 或 t）", "反解出 θ 的区间 [L, U]"],
     note: "置信度 1-α 不是「θ 落在区间内的概率」，而是「该方法构造的区间有 1-α 的概率包含 θ」（频率解释）。",
+    viz: "置信区间",
+    examples: [
+      { problem: "n=25 名学生考试均值 X̄=75，样本标准差 S=10，σ 未知，构造 μ 的 95% 置信区间。", steps: ["σ 未知用 t 分布，自由度 n−1=24", "t₀.₀₂₅,₂₄≈2.064（查表）", "误差边界：2.064×10/√25=2.064×2=4.13"], answer: "95% CI: [75−4.13, 75+4.13]=[70.87, 79.13]，即有 95% 置信度真实均值在此区间" },
+    ],
   },
   "假设检验框架": {
     intro: "假设检验用样本数据对总体参数做出统计决策：在 H₀ 为真的前提下，判断观测结果是否足够极端以拒绝 H₀。",
@@ -1065,11 +1290,12 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["建立 H₀ 和 H₁（单/双侧）", "选择检验统计量及其分布", "计算 p 值或查临界值", "p<α 则拒绝 H₀"],
     note: "p 值越小，拒绝 H₀ 的证据越强，但不代表效应量大。增大样本量 n 可减少两类错误。",
+    examples: [
+      { problem: "声称新药平均降压 10mmHg，实验 n=16 人，X̄=8，S=4，α=0.05，检验 H₀:μ=10 vs H₁:μ<10。", steps: ["T=(8−10)/(4/√16)=(−2)/(1)=−2，自由度 15", "单侧临界值 t₀.₀₅,₁₅=−1.753（查表左尾）", "t_obs=−2 < −1.753，落入拒绝域"], answer: "p≈0.032<0.05，拒绝 H₀，统计显著地认为新药效果低于声称的 10mmHg" },
+    ],
   },
 
-  // ════════════════════════════════════════════════════════════════
   // ODE
-  // ════════════════════════════════════════════════════════════════
   "分离变量法": {
     intro: "将 ODE dy/dx=f(x)g(y) 的两个变量分别移到等式两边后积分，是求解可分离一阶方程最直接的方法。",
     formulas: [
@@ -1078,6 +1304,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["验证方程可写成 dy/g(y)=f(x)dx 的形式", "两边分别积分", "解出 y（若可能）代入初始条件确定 C"],
     note: "注意 g(y)=0 时的奇解（常数解）。解的存在区间取决于 g(y) 的零点和 f(x) 的奇点。",
+    examples: [
+      { problem: "求解 IVP：dy/dx = 2xy，y(0)=3。", steps: ["分离变量：dy/y=2x dx", "两边积分：ln|y|=x²+C", "y=Ae^{x²}（A=e^C）", "代入 y(0)=3：A=3"], answer: "y=3e^{x²}，定义在 (−∞,+∞) 上，随 |x| 增大迅速增长" },
+    ],
   },
   "特征方程法（常系数线性 ODE）": {
     intro: "常系数线性齐次 ODE aₙy⁽ⁿ⁾+…+a₀y=0 通过代入 y=eʳˣ 化为代数方程（特征方程），其根决定通解形式。",
@@ -1089,6 +1318,9 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["写出特征方程，求所有根", "根据根的类型写出基本解组", "线性组合得通解，用初始条件定系数"],
     note: "非齐次方程 ay''+by'+cy=g(x) 的通解=齐次通解+特解。特解用待定系数法或常数变易法求。",
+    examples: [
+      { problem: "求解 IVP：y''−3y'+2y=0，y(0)=1，y'(0)=0。", steps: ["特征方程：r²−3r+2=0，(r−1)(r−2)=0，r₁=1，r₂=2", "通解：y=C₁eˣ+C₂e²ˣ", "y(0)=C₁+C₂=1，y'(0)=C₁+2C₂=0", "解得 C₁=2，C₂=−1"], answer: "y=2eˣ−e²ˣ，当 x→+∞ 时 y→−∞（e²ˣ 增长主导）" },
+    ],
   },
   "Laplace 变换": {
     intro: "Laplace 变换把时域 ODE 化为 s 域的代数方程，特别适合求解含初始条件的线性常系数 ODE（IVP）。",
@@ -1099,76 +1331,150 @@ const KNOWLEDGE_CONTENT = {
     ],
     steps: ["对 ODE 两边取 Laplace 变换，代入初始条件", "解出 Y(s)（代数方程）", "对 Y(s) 做部分分式分解", "查变换表或用卷积定理求逆变换 y(t)"],
     note: "Laplace 变换只适用于 t≥0，且要求函数为指数阶。阶跃函数 u(t-a) 和 δ 函数在 Laplace 域有简洁形式。",
+    viz: "Laplace 变换",
+    examples: [
+      { problem: "用 Laplace 变换解 y''+4y=0，y(0)=1，y'(0)=0。", steps: ["变换：s²Y−sy(0)−y'(0)+4Y=0 → (s²+4)Y=s+0=s", "Y(s)=s/(s²+4)", "查表：L⁻¹{s/(s²+4)}=cos(2t)"], answer: "y(t)=cos(2t)，即频率为 2 的简谐振动（对应特征根 ±2i）" },
+    ],
   },
 };
+
+// ── Section Header helper ────────────────────────────────────────────────────
+function SectionHeader({ icon, label, color }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+      <div style={{ width: 3, height: 18, borderRadius: 2, background: color || G.teal }} />
+      <span style={{ fontSize: 11, fontWeight: 700, color: color || G.teal, textTransform: "uppercase", letterSpacing: "0.1em" }}>{icon} {label}</span>
+    </div>
+  );
+}
 
 // ── Topic Modal ───────────────────────────────────────────────────────────────
 function TopicModal({ topic, onClose, setPage, setChapterFilter }) {
   const content = KNOWLEDGE_CONTENT[topic];
   const vizKey = content?.viz;
+  const [activeTab, setActiveTab] = React.useState("learn");
+
+  const tabs = [
+    { id: "learn", label: "知识讲解", icon: "📖" },
+    { id: "viz", label: "可视化", icon: "🎨", disabled: !(vizKey && VIZ_MAP[vizKey]) },
+    { id: "examples", label: "例题讲解", icon: "✏️", disabled: !(content?.examples?.length) },
+  ];
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: "1rem" }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, padding: "2rem", maxWidth: 660, width: "100%", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 24px 60px rgba(0,0,0,0.18)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, paddingBottom: 14, borderBottom: `2px solid ${G.tealLight}` }}>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 600, color: "#111", marginBottom: 4 }}>{topic}</div>
-            <div style={{ fontSize: 12, color: G.teal, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.08em" }}>知识点详解</div>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, padding: 0, maxWidth: 680, width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,0.22)" }}>
+
+        {/* Header */}
+        <div style={{ padding: "1.5rem 1.8rem 0", borderBottom: `2px solid ${G.tealLight}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#111", marginBottom: 4 }}>{topic}</div>
+              <div style={{ fontSize: 12, color: G.teal, fontWeight: 500, letterSpacing: "0.08em" }}>KNOWLEDGE POINT</div>
+            </div>
+            <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: "50%", border: "none", background: "#f5f5f5", cursor: "pointer", fontSize: 15, color: "#666", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
           </div>
-          <button onClick={onClose} style={{ width: 36, height: 36, borderRadius: "50%", border: "none", background: "#f5f5f5", cursor: "pointer", fontSize: 16, color: "#666", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
-        </div>
-
-        {!content ? (
-          <div style={{ padding: "2rem", textAlign: "center", color: "#888", fontSize: 15 }}>该知识点内容正在整理中，敬请期待 📚</div>
-        ) : (
-          <>
-            {/* Visualization */}
-            {vizKey && VIZ_MAP[vizKey] && (
-              <div style={{ marginBottom: 20, borderRadius: 12, overflow: "hidden" }}>{VIZ_MAP[vizKey]}</div>
-            )}
-
-            {/* Intro */}
-            <div style={{ fontSize: 15, color: "#444", lineHeight: 1.8, marginBottom: 20, padding: "14px 18px", background: G.tealLight, borderRadius: 12, borderLeft: `4px solid ${G.teal}` }}>{content.intro}</div>
-
-            {/* Formulas */}
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#111", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>核心公式</div>
-              {content.formulas.map((f, i) => (
-                <div key={i} style={{ marginBottom: 10, padding: "14px 18px", background: "#fafafa", borderRadius: 10, border: "1px solid #eee" }}>
-                  <div style={{ fontSize: 12, color: G.teal, fontWeight: 500, marginBottom: 8 }}>{f.label}</div>
-                  <M tex={f.tex} block />
-                </div>
+          {/* Tabs */}
+          {content && (
+            <div style={{ display: "flex", gap: 4 }}>
+              {tabs.map(t => (
+                <button key={t.id} disabled={t.disabled} onClick={() => !t.disabled && setActiveTab(t.id)}
+                  style={{ padding: "8px 16px", border: "none", borderRadius: "8px 8px 0 0", cursor: t.disabled ? "default" : "pointer", fontSize: 13, fontWeight: activeTab === t.id ? 700 : 400, background: activeTab === t.id ? G.teal : t.disabled ? "#f0f0f0" : "#f5f5f5", color: activeTab === t.id ? "#fff" : t.disabled ? "#ccc" : "#555", transition: "all 0.15s" }}>
+                  {t.icon} {t.label}
+                </button>
               ))}
             </div>
+          )}
+        </div>
 
-            {/* Steps */}
-            {content.steps && (
+        {/* Body */}
+        <div style={{ overflowY: "auto", padding: "1.5rem 1.8rem", flex: 1 }}>
+          {!content ? (
+            <div style={{ padding: "3rem", textAlign: "center", color: "#888", fontSize: 15 }}>该知识点内容正在整理中，敬请期待 📚</div>
+          ) : activeTab === "learn" ? (
+            <>
+              {/* Intro */}
+              <div style={{ fontSize: 14.5, color: "#444", lineHeight: 1.85, marginBottom: 20, padding: "14px 18px", background: G.tealLight, borderRadius: 12, borderLeft: `4px solid ${G.teal}` }}>{content.intro}</div>
+
+              {/* Formulas */}
               <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#111", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>算法步骤</div>
-                {content.steps.map((s, i) => (
-                  <div key={i} style={{ display: "flex", gap: 12, marginBottom: 10 }}>
-                    <div style={{ width: 26, height: 26, borderRadius: "50%", background: G.teal, color: "#fff", fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</div>
-                    <div style={{ fontSize: 14, color: "#333", lineHeight: 1.65, paddingTop: 2 }}>{s}</div>
+                <SectionHeader icon="📐" label="核心公式" color={G.purple} />
+                {content.formulas.map((f, i) => (
+                  <div key={i} style={{ marginBottom: 10, padding: "14px 18px", background: G.purpleLight, borderRadius: 10, border: `1px solid ${G.purple}22` }}>
+                    <div style={{ fontSize: 11, color: G.purple, fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>{f.label}</div>
+                    <M tex={f.tex} block />
                   </div>
                 ))}
               </div>
-            )}
 
-            {/* Note */}
-            {content.note && (
-              <div style={{ padding: "14px 18px", background: G.amberLight, borderRadius: 10, borderLeft: `4px solid ${G.amber}`, fontSize: 14, color: "#5a3a00", lineHeight: 1.7 }}>
-                <strong>💡 注意：</strong>{content.note}
+              {/* Steps */}
+              {content.steps && (
+                <div style={{ marginBottom: 20 }}>
+                  <SectionHeader icon="🔢" label="解题步骤" color={G.blue} />
+                  {content.steps.map((s, i) => (
+                    <div key={i} style={{ display: "flex", gap: 12, marginBottom: 10 }}>
+                      <div style={{ width: 26, height: 26, borderRadius: "50%", background: G.blue, color: "#fff", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</div>
+                      <div style={{ fontSize: 14, color: "#333", lineHeight: 1.7, paddingTop: 3 }}>{s}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Note */}
+              {content.note && (
+                <div style={{ padding: "14px 18px", background: G.amberLight, borderRadius: 10, borderLeft: `4px solid ${G.amber}`, fontSize: 14, color: "#5a3a00", lineHeight: 1.75 }}>
+                  <strong>💡 重点提示：</strong>{content.note}
+                </div>
+              )}
+            </>
+          ) : activeTab === "viz" ? (
+            <>
+              <SectionHeader icon="🎨" label="可视化交互" color={G.teal} />
+              <div style={{ padding: "1.5rem", background: "#fafafa", borderRadius: 14, border: "1px solid #eee", marginBottom: 16 }}>
+                {VIZ_MAP[vizKey]}
               </div>
-            )}
-          </>
-        )}
+              <div style={{ fontSize: 13, color: "#666", lineHeight: 1.7, padding: "12px 16px", background: G.blueLight, borderRadius: 10 }}>
+                上图展示了 <strong>{topic}</strong> 的核心几何直觉。结合图形理解公式中各变量的含义，有助于更直观地掌握算法原理。
+              </div>
+            </>
+          ) : activeTab === "examples" ? (
+            <>
+              <SectionHeader icon="✏️" label="例题讲解" color={G.amber} />
+              {content.examples.map((ex, idx) => (
+                <div key={idx} style={{ marginBottom: 24, borderRadius: 14, border: `1px solid ${G.amber}44`, overflow: "hidden" }}>
+                  {/* Problem */}
+                  <div style={{ padding: "14px 18px", background: G.amberLight, borderLeft: `4px solid ${G.amber}` }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: G.amber, letterSpacing: "0.1em", marginBottom: 6 }}>PROBLEM {idx + 1}</div>
+                    <div style={{ fontSize: 14.5, color: "#3a2800", lineHeight: 1.75, fontWeight: 500 }}>{ex.problem}</div>
+                  </div>
+                  {/* Steps */}
+                  <div style={{ padding: "14px 18px", background: "#fff" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: G.blue, letterSpacing: "0.1em", marginBottom: 10 }}>解题过程</div>
+                    {ex.steps.map((s, si) => (
+                      <div key={si} style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "flex-start" }}>
+                        <div style={{ width: 22, height: 22, borderRadius: "50%", background: G.blueLight, color: G.blue, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>{si + 1}</div>
+                        <div style={{ fontSize: 13.5, color: "#333", lineHeight: 1.7 }}>{s}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Answer */}
+                  <div style={{ padding: "12px 18px", background: "#f0faf5", borderTop: "1px solid #e0f0e8" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: G.tealDark, letterSpacing: "0.1em", marginBottom: 5 }}>最终答案</div>
+                    <div style={{ fontSize: 13.5, color: "#1a4a35", lineHeight: 1.7 }}>{ex.answer}</div>
+                  </div>
+                </div>
+              ))}
+            </>
+          ) : null}
+        </div>
 
-        <div style={{ marginTop: 20, display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center" }}>
+        {/* Footer */}
+        <div style={{ padding: "1rem 1.8rem", borderTop: "1px solid #f0f0f0", display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center" }}>
           {setPage && setChapterFilter && TOPIC_CHAPTER[topic] && (
-            <button onClick={() => { const ch = TOPIC_CHAPTER[topic]; setChapterFilter(ch); onClose(); setPage("题库练习"); }} style={{ padding: "10px 20px", background: G.blueLight, color: G.blue, border: `1px solid ${G.blue}44`, borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+            <button onClick={() => { const ch = TOPIC_CHAPTER[topic]; setChapterFilter(ch); onClose(); setPage("题库练习"); }} style={{ padding: "9px 18px", background: G.blueLight, color: G.blue, border: `1px solid ${G.blue}44`, borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
               ✏️ 做相关题目 →
             </button>
           )}
-          <button onClick={onClose} style={{ padding: "10px 24px", background: G.teal, color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 500, cursor: "pointer" }}>关闭</button>
+          <button onClick={onClose} style={{ padding: "9px 22px", background: G.teal, color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 500, cursor: "pointer" }}>关闭</button>
         </div>
       </div>
     </div>
