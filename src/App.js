@@ -1339,9 +1339,22 @@ const KNOWLEDGE_CONTENT = {
 };
 
 // ── Topic Detail Panel (replaces modal, renders inline or as overlay) ─────────
-function TopicModal({ topic, onClose, setPage, setChapterFilter }) {
+function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, course }) {
   const content = KNOWLEDGE_CONTENT[topic];
   const vizKey = content?.viz;
+
+  // Build course-aware chapter string (e.g. "线性代数 Ch.2" or "Ch.1" for 数值分析)
+  const chapterStr = (course && course !== "数值分析") ? `${course} ${chapterNum}` : chapterNum;
+
+  // Find related questions: match by chapter string
+  const relatedQs = React.useMemo(() => {
+    if (!chapterStr) return [];
+    const matched = ALL_QUESTIONS.filter(q => q.chapter && q.chapter === chapterStr);
+    if (matched.length > 0) return matched.slice(0, 4);
+    // fallback: contains chapterNum
+    const fallback = ALL_QUESTIONS.filter(q => q.chapter && q.chapter.includes(chapterNum || ""));
+    return fallback.slice(0, 4);
+  }, [chapterStr, chapterNum]);
 
   return (
     <div
@@ -1447,16 +1460,54 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter }) {
               )}
             </>
           )}
+
+          {/* ── 相关练习题（嵌入，所有知识点都显示） ── */}
+          {relatedQs.length > 0 && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "28px 0 14px" }}>
+                <div style={{ width: 4, height: 20, borderRadius: 2, background: G.blue }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: G.blue }}>相关练习题</span>
+                <span style={{ fontSize: 12, color: "#aaa", marginLeft: 4 }}>（来自 {chapterStr} 章节）</span>
+              </div>
+              {relatedQs.map((q, qi) => (
+                <div key={q.id} style={{ marginBottom: 14, borderRadius: 12, border: "1px solid #e8edf5", overflow: "hidden" }}>
+                  <div style={{ padding: "12px 16px", background: G.blueLight }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: G.blue, marginBottom: 5 }}>Q{qi + 1} · {q.type}</div>
+                    <div style={{ fontSize: 13.5, color: "#1a2a4a", lineHeight: 1.7, fontWeight: 500 }}>{q.question}</div>
+                  </div>
+                  {q.options && (
+                    <div style={{ padding: "10px 16px", background: "#fff", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 16px" }}>
+                      {(typeof q.options === "string" ? JSON.parse(q.options) : q.options).map((opt, oi) => (
+                        <div key={oi} style={{ fontSize: 12.5, color: ["A","B","C","D"][oi] === q.answer ? G.teal : "#555", fontWeight: ["A","B","C","D"][oi] === q.answer ? 700 : 400 }}>
+                          {["A","B","C","D"][oi]}. {opt}{["A","B","C","D"][oi] === q.answer ? " ✓" : ""}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {!q.options && (
+                    <div style={{ padding: "8px 16px", background: "#fff", fontSize: 12.5, color: G.teal, fontWeight: 600 }}>
+                      答案：{q.answer}
+                    </div>
+                  )}
+                  {q.explanation && (
+                    <div style={{ padding: "8px 16px", background: "#f8fafb", borderTop: "1px solid #eee", fontSize: 12, color: "#555", lineHeight: 1.6 }}>
+                      💡 {q.explanation}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
         </div>
 
         {/* ── Footer ── */}
         <div style={{ padding: "1rem 1.8rem", borderTop: "1px solid #f0f0f0", display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center" }}>
-          {setPage && setChapterFilter && TOPIC_CHAPTER[topic] && (
+          {setPage && setChapterFilter && chapterStr && (
             <button
-              onClick={() => { const ch = TOPIC_CHAPTER[topic]; setChapterFilter(ch); onClose(); setPage("题库练习"); }}
+              onClick={() => { setChapterFilter(chapterStr); onClose(); setPage("题库练习"); }}
               style={{ padding: "9px 20px", background: G.blueLight, color: G.blue, border: `1px solid ${G.blue}44`, borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
             >
-              ✏️ 做相关题目 →
+              ✏️ 查看全章节题目 →
             </button>
           )}
           <button onClick={onClose} style={{ padding: "9px 22px", background: G.teal, color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 500, cursor: "pointer" }}>关闭</button>
@@ -1990,6 +2041,12 @@ function KnowledgePage({ setPage, setChapterFilter }) {
   };
 
   const [selectedTopic, setSelectedTopic] = useState(null);
+  const [selectedTopicMeta, setSelectedTopicMeta] = useState(null);
+
+  const openTopic = (t, mat) => {
+    setSelectedTopic(t.name);
+    setSelectedTopicMeta({ chapterNum: t.chapterNum, course: mat?.course });
+  };
 
   const selectedMaterial = materials.find((m) => m.id === selectedMaterialId) || null;
 
@@ -2018,9 +2075,11 @@ function KnowledgePage({ setPage, setChapterFilter }) {
       {selectedTopic && (
         <TopicModal
           topic={selectedTopic}
-          onClose={() => setSelectedTopic(null)}
+          onClose={() => { setSelectedTopic(null); setSelectedTopicMeta(null); }}
           setPage={setPage}
           setChapterFilter={setChapterFilter}
+          chapterNum={selectedTopicMeta?.chapterNum}
+          course={selectedTopicMeta?.course}
         />
       )}
       <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16, padding: "2rem", maxWidth: 1200, margin: "0 auto" }}>
@@ -2091,52 +2150,56 @@ function KnowledgePage({ setPage, setChapterFilter }) {
                     <span style={{ background: getCourseBorderColor(selectedMaterial?.course), color: "#fff", borderRadius: 6, padding: "2px 8px", fontSize: 11 }}>{ch.num}</span>
                     {ch.name}
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
                     {chTopics.map(t => {
                       const mastery = topicMastery[t.id]?.status || "todo";
+                      // Build correct chapter string for QuizPage filter
+                      const chapterStr = (selectedMaterial?.course && selectedMaterial.course !== "数值分析")
+                        ? `${selectedMaterial.course} ${t.chapterNum}`
+                        : t.chapterNum;
                       return (
                         <div
                           key={t.id}
-                          onClick={() => t.hasDetail && setSelectedTopic(t.name)}
+                          onClick={() => openTopic(t, selectedMaterial)}
                           style={{
-                            border: `1.5px solid ${t.hasDetail ? G.purple + "44" : "#eee"}`,
+                            border: `1.5px solid ${t.hasDetail ? G.purple + "44" : "#e8edf5"}`,
                             borderRadius: 14,
                             padding: "16px 18px",
-                            background: t.hasDetail ? "#fcfbff" : "#fafafa",
+                            background: t.hasDetail ? "#fcfbff" : "#f8faff",
                             display: "flex",
                             flexDirection: "column",
                             gap: 10,
-                            cursor: t.hasDetail ? "pointer" : "default",
+                            cursor: "pointer",
                             transition: "box-shadow 0.15s, transform 0.1s",
                           }}
-                          onMouseEnter={e => { if (t.hasDetail) { e.currentTarget.style.boxShadow = "0 4px 20px rgba(124,58,237,0.15)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
+                          onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 4px 18px rgba(80,80,200,0.12)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
                           onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
                         >
                           {/* Title row */}
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                            <div style={{ fontSize: 15, fontWeight: 700, color: "#111", lineHeight: 1.4 }}>{t.name}</div>
+                            <div style={{ fontSize: 14.5, fontWeight: 700, color: "#111", lineHeight: 1.4 }}>{t.name}</div>
                             {mastery === "done" && (
                               <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, color: G.teal, background: G.tealLight, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap" }}>已掌握 ✓</span>
                             )}
                           </div>
                           {/* Intro snippet */}
-                          {t.intro && (
+                          {t.intro ? (
                             <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
                               {t.intro}
                             </div>
+                          ) : (
+                            <div style={{ fontSize: 12, color: "#aaa", fontStyle: "italic" }}>点击查看知识点内容</div>
                           )}
-                          {/* Action row */}
+                          {/* Action row — stopPropagation so card click doesn't double-fire */}
                           <div style={{ display: "flex", gap: 8, marginTop: 2 }} onClick={e => e.stopPropagation()}>
-                            {t.hasDetail && (
-                              <button
-                                onClick={() => setSelectedTopic(t.name)}
-                                style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 600, background: G.purple, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
-                              >
-                                📖 查看详解
-                              </button>
-                            )}
                             <button
-                              onClick={() => { setChapterFilter(t.chapterNum); setPage("题库练习"); }}
+                              onClick={() => openTopic(t, selectedMaterial)}
+                              style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 600, background: t.hasDetail ? G.purple : G.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
+                            >
+                              📖 {t.hasDetail ? "查看详解" : "查看内容"}
+                            </button>
+                            <button
+                              onClick={() => { setChapterFilter(chapterStr); setPage("题库练习"); }}
                               style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 500, background: G.blueLight, color: G.blue, border: `1px solid ${G.blue}33`, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
                             >
                               ✏️ 练习题目
@@ -2301,7 +2364,17 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   const buildPool = (chapters, types) => {
     let pool = allQuestions;
-    if (chapters.length > 0) pool = pool.filter(q => chapters.some(c => q.chapter && q.chapter.startsWith(c)));
+    if (chapters.length > 0) pool = pool.filter(q => {
+      if (!q.chapter) return false;
+      return chapters.some(c => {
+        // Exact match or direct startsWith (e.g. "Ch.1" → "Ch.1" or "Ch.10")
+        if (q.chapter === c) return true;
+        if (q.chapter.startsWith(c + " ")) return true;
+        // Full prefix match for "线性代数 Ch.2" filter
+        if (q.chapter.startsWith(c)) return true;
+        return false;
+      });
+    });
     if (types.length > 0) pool = pool.filter(q => types.includes(q.type));
     return pool;
   };
