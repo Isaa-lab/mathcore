@@ -16,6 +16,21 @@ const G = {
   purple: "#534AB7", purpleLight: "#EEEDFE",
 };
 
+// Course → color mapping for consistent UI theming
+const COURSE_COLOR = {
+  "数值分析": "teal",
+  "最优化": "purple",
+  "线性代数": "blue",
+  "概率论": "amber",
+  "数理统计": "red",
+  "ODE": "teal",
+};
+const getCourseColor = (course = "") => COURSE_COLOR[course] || "blue";
+const COURSE_BORDER = {
+  teal: G.teal, blue: G.blue, amber: G.amber, red: G.red, purple: G.purple,
+};
+const getCourseBorderColor = (course = "") => COURSE_BORDER[getCourseColor(course)] || G.blue;
+
 const MATERIAL_ALLOWED_EXTS = [".pdf", ".ppt", ".pptx", ".doc", ".docx"];
 
 /** materials 表尚未执行审核迁移（无 status 列）时，PostgREST 会报 PGRST204 */
@@ -920,6 +935,171 @@ const KNOWLEDGE_CONTENT = {
     steps: ["整理训练数据 {(xⁱ,yᵢ)}，yᵢ∈{±1}", "求解二次规划得到最优 ŵ 和 b̂", "新样本 y=sign((ŵ,x)+b̂)"],
     note: "C 控制惩罚力度：C 大→不允许误分；C 小→允许误分但间隔宽。",
   },
+
+  // ════════════════════════════════════════════════════════════════
+  // 线性代数 (Leon 9th)
+  // ════════════════════════════════════════════════════════════════
+  "行列式定义与性质": {
+    intro: "n 阶行列式是 n×n 方阵的一个标量函数，几何上表示列向量张成的超平行体的有向体积。",
+    formulas: [
+      { label: "余子式展开（按第 i 行）", tex: "\\det(A) = \\sum_{j=1}^n (-1)^{i+j} a_{ij} M_{ij}" },
+      { label: "乘积法则", tex: "\\det(AB) = \\det(A)\\det(B)" },
+      { label: "可逆条件", tex: "A \\text{ 可逆} \\iff \\det(A) \\neq 0" },
+    ],
+    steps: ["对 2×2 矩阵：ad-bc", "对 n×n：沿任意行/列按余子式展开（递归）", "利用初等行变换化为三角形，连乘对角元"],
+    note: "行交换改变符号；行倍乘乘以常数 k；行加法不变。三角矩阵的行列式等于对角线之积。",
+  },
+  "特征值与对角化": {
+    intro: "方阵 A 的特征值 λ 使得存在非零向量 v 满足 Av=λv。对角化将 A 变换为对角矩阵，大大简化矩阵幂的计算。",
+    formulas: [
+      { label: "特征方程", tex: "\\det(A - \\lambda I) = 0" },
+      { label: "对角化分解", tex: "A = P\\Lambda P^{-1},\\quad \\Lambda = \\operatorname{diag}(\\lambda_1,\\ldots,\\lambda_n)" },
+      { label: "矩阵幂", tex: "A^k = P\\Lambda^k P^{-1}" },
+    ],
+    steps: ["计算特征多项式 det(A-λI)=0，求出 λ₁,…,λₙ", "对每个 λᵢ 求解 (A-λᵢI)v=0 得特征向量 vᵢ", "若 n 个特征向量线性无关，令 P=[v₁…vₙ]，则 A=PΛP⁻¹"],
+    note: "实对称矩阵一定可对角化，且特征向量两两正交（谱定理）。n 个不同特征值保证可对角化。",
+  },
+  "SVD 奇异值分解": {
+    intro: "SVD 将任意矩阵分解为 A=UΣVᵀ，U、V 为正交矩阵，Σ 为非负对角矩阵，是数据降维、伪逆和图像压缩的核心工具。",
+    formulas: [
+      { label: "SVD 分解", tex: "A = U\\Sigma V^\\top,\\quad A \\in \\mathbb{R}^{m\\times n}" },
+      { label: "奇异值定义", tex: "\\sigma_i = \\sqrt{\\lambda_i(A^\\top A)},\\quad \\sigma_1 \\geq \\sigma_2 \\geq \\cdots \\geq 0" },
+      { label: "伪逆（Moore-Penrose）", tex: "A^+ = V\\Sigma^+ U^\\top" },
+    ],
+    steps: ["计算 AᵀA 的特征值（即 σᵢ²）和特征向量（V 的列）", "计算 AAᵀ 的特征向量（U 的列）", "奇异值 σᵢ=√λᵢ 组成 Σ"],
+    note: "奇异值的大小反映各方向的拉伸强度；截断 SVD（保留前 k 个奇异值）是最优低秩近似（Eckart-Young 定理）。",
+  },
+  "Gram-Schmidt 正交化": {
+    intro: "Gram-Schmidt 过程将一组线性无关向量转化为标准正交基，是 QR 分解的理论基础。",
+    formulas: [
+      { label: "正交投影", tex: "\\text{proj}_u v = \\frac{v \\cdot u}{u \\cdot u}\\, u" },
+      { label: "Gram-Schmidt 迭代", tex: "u_k = v_k - \\sum_{j=1}^{k-1}\\frac{v_k \\cdot u_j}{u_j \\cdot u_j}u_j" },
+      { label: "QR 分解结果", tex: "A = QR,\\quad Q^\\top Q = I,\\; R \\text{ 上三角}" },
+    ],
+    steps: ["令 u₁=v₁", "令 u₂=v₂ - proj_{u₁}(v₂)", "一般步：减去前面所有方向的投影", "归一化：qₖ=uₖ/‖uₖ‖"],
+    note: "数值实现用修正 Gram-Schmidt（Modified GS）或 Householder 变换，稳定性更好。",
+  },
+  "列空间与零空间": {
+    intro: "矩阵的四个基本子空间（列空间、行空间、零空间、左零空间）刻画了线性方程组的解结构。",
+    formulas: [
+      { label: "秩-零化度定理", tex: "\\text{rank}(A) + \\text{nullity}(A) = n \\quad (A \\in \\mathbb{R}^{m\\times n})" },
+      { label: "列空间（值域）", tex: "\\mathcal{C}(A) = \\{Ax : x \\in \\mathbb{R}^n\\}" },
+      { label: "零空间（核）", tex: "\\mathcal{N}(A) = \\{x : Ax = 0\\}" },
+    ],
+    steps: ["对 A 进行行化简得到 RREF", "主列对应列空间的基", "自由变量对应零空间的基向量"],
+    note: "Ax=b 有解 ⟺ b∈C(A)。若解存在，通解=特解+零空间中任意向量。",
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // 概率论
+  // ════════════════════════════════════════════════════════════════
+  "条件概率与 Bayes 定理": {
+    intro: "条件概率 P(A|B) 衡量在 B 已发生的前提下 A 发生的概率，Bayes 定理实现「从结果推原因」的反向推断。",
+    formulas: [
+      { label: "条件概率定义", tex: "P(A|B) = \\frac{P(A \\cap B)}{P(B)},\\quad P(B)>0" },
+      { label: "全概率公式", tex: "P(A) = \\sum_{i=1}^n P(A|B_i)P(B_i)" },
+      { label: "Bayes 定理", tex: "P(B_i|A) = \\frac{P(A|B_i)P(B_i)}{\\sum_j P(A|B_j)P(B_j)}" },
+    ],
+    steps: ["确定划分 {B₁,…,Bₙ}（互斥且穷举）", "用全概率公式计算 P(A)", "代入 Bayes 公式得后验概率 P(Bᵢ|A)"],
+    note: "P(B) 称先验概率，P(B|A) 称后验概率。独立性条件：P(A∩B)=P(A)P(B)。",
+  },
+  "常见概率分布": {
+    intro: "数学中几种基础分布（Bernoulli、Poisson、正态、指数）描述了自然界中最常见的随机现象。",
+    formulas: [
+      { label: "正态分布密度", tex: "f(x)=\\frac{1}{\\sigma\\sqrt{2\\pi}}e^{-\\frac{(x-\\mu)^2}{2\\sigma^2}}" },
+      { label: "Poisson 分布", tex: "P(X=k)=\\frac{\\lambda^k e^{-\\lambda}}{k!},\\quad k=0,1,2,\\ldots" },
+      { label: "指数分布 CDF", tex: "F(x)=1-e^{-\\lambda x},\\quad x\\geq 0" },
+    ],
+    steps: ["根据实际场景选择合适分布", "确定参数（μ/σ 或 λ 等）", "计算概率或分位数"],
+    note: "正态分布：68-95-99.7 法则。Poisson 是二项分布当 n→∞,np=λ 时的极限。指数分布具有无记忆性。",
+  },
+  "期望与方差": {
+    intro: "期望 E[X] 是随机变量的加权平均，方差 Var(X) 衡量其散布程度，两者是描述分布最核心的数字特征。",
+    formulas: [
+      { label: "离散期望", tex: "E[X] = \\sum_k x_k P(X=x_k)" },
+      { label: "方差分解", tex: "\\text{Var}(X) = E[X^2] - (E[X])^2" },
+      { label: "协方差", tex: "\\text{Cov}(X,Y) = E[XY] - E[X]E[Y]" },
+    ],
+    steps: ["计算 E[X]（加权和或积分）", "计算 E[X²]", "方差 = E[X²] - (E[X])²"],
+    note: "线性性：E[aX+b]=aE[X]+b；Var(aX+b)=a²Var(X)。独立时 Var(X+Y)=Var(X)+Var(Y)。",
+  },
+  "中心极限定理": {
+    intro: "中心极限定理（CLT）是概率论最重要的结果：无论总体分布如何，足够多 i.i.d. 样本的均值趋向正态分布。",
+    formulas: [
+      { label: "CLT（Lindeberg-Lévy）", tex: "\\frac{\\bar{X}_n - \\mu}{\\sigma/\\sqrt{n}} \\xrightarrow{d} N(0,1)" },
+      { label: "样本均值分布", tex: "\\bar{X}_n \\approx N\\!\\left(\\mu,\\frac{\\sigma^2}{n}\\right) \\text{ 当 } n \\text{ 大}" },
+    ],
+    steps: ["确认样本 i.i.d.，有有限均值 μ 和方差 σ²", "标准化：减均值除以标准误 σ/√n", "当 n≥30（经验），用标准正态计算概率"],
+    note: "CLT 是统计推断的基石：解释了为何正态分布无处不在，也是大样本置信区间和假设检验的理论依据。",
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // 数理统计 (Bijma 2016)
+  // ════════════════════════════════════════════════════════════════
+  "最大似然估计 MLE": {
+    intro: "MLE 选取使观测数据出现概率最大的参数值作为估计，是最常用的参数估计方法，具有渐近正态性和有效性。",
+    formulas: [
+      { label: "似然函数", tex: "L(\\theta) = \\prod_{i=1}^n f(x_i;\\theta)" },
+      { label: "对数似然", tex: "\\ell(\\theta) = \\sum_{i=1}^n \\ln f(x_i;\\theta)" },
+      { label: "MLE 方程", tex: "\\frac{\\partial \\ell}{\\partial \\theta} = 0" },
+    ],
+    steps: ["写出似然函数 L(θ)", "取对数得 ℓ(θ)（便于求导）", "对 θ 求偏导置零，解方程组", "验证是最大值（Hessian 负定）"],
+    note: "MLE 的渐近性质：n→∞ 时，θ̂_MLE 是无偏且有效的，且 √n(θ̂-θ₀)→N(0, I(θ₀)⁻¹)，I 为 Fisher 信息量。",
+  },
+  "置信区间": {
+    intro: "置信区间 [L, U] 以 1-α 的概率包含真实参数 θ，是区间估计的标准方法，比点估计提供更多不确定性信息。",
+    formulas: [
+      { label: "正态均值（σ 已知）", tex: "\\bar{X} \\pm z_{\\alpha/2}\\frac{\\sigma}{\\sqrt{n}}" },
+      { label: "正态均值（σ 未知）", tex: "\\bar{X} \\pm t_{\\alpha/2,n-1}\\frac{S}{\\sqrt{n}}" },
+      { label: "比例的置信区间", tex: "\\hat{p} \\pm z_{\\alpha/2}\\sqrt{\\frac{\\hat{p}(1-\\hat{p})}{n}}" },
+    ],
+    steps: ["选择枢轴量（含 θ 的已知分布的统计量）", "根据分布确定临界值（z 或 t）", "反解出 θ 的区间 [L, U]"],
+    note: "置信度 1-α 不是「θ 落在区间内的概率」，而是「该方法构造的区间有 1-α 的概率包含 θ」（频率解释）。",
+  },
+  "假设检验框架": {
+    intro: "假设检验用样本数据对总体参数做出统计决策：在 H₀ 为真的前提下，判断观测结果是否足够极端以拒绝 H₀。",
+    formulas: [
+      { label: "t 检验统计量", tex: "T = \\frac{\\bar{X} - \\mu_0}{S/\\sqrt{n}} \\sim t_{n-1} \\text{ under } H_0" },
+      { label: "I 类错误（弃真）", tex: "\\alpha = P(\\text{拒绝 }H_0 \\mid H_0\\text{ 真})" },
+      { label: "p 值", tex: "p = P(\\text{检验统计量} \\geq t_{obs} \\mid H_0)" },
+    ],
+    steps: ["建立 H₀ 和 H₁（单/双侧）", "选择检验统计量及其分布", "计算 p 值或查临界值", "p<α 则拒绝 H₀"],
+    note: "p 值越小，拒绝 H₀ 的证据越强，但不代表效应量大。增大样本量 n 可减少两类错误。",
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // ODE
+  // ════════════════════════════════════════════════════════════════
+  "分离变量法": {
+    intro: "将 ODE dy/dx=f(x)g(y) 的两个变量分别移到等式两边后积分，是求解可分离一阶方程最直接的方法。",
+    formulas: [
+      { label: "可分离形式", tex: "\\frac{dy}{dx} = f(x)g(y)" },
+      { label: "分离后积分", tex: "\\int \\frac{dy}{g(y)} = \\int f(x)\\,dx + C" },
+    ],
+    steps: ["验证方程可写成 dy/g(y)=f(x)dx 的形式", "两边分别积分", "解出 y（若可能）代入初始条件确定 C"],
+    note: "注意 g(y)=0 时的奇解（常数解）。解的存在区间取决于 g(y) 的零点和 f(x) 的奇点。",
+  },
+  "特征方程法（常系数线性 ODE）": {
+    intro: "常系数线性齐次 ODE aₙy⁽ⁿ⁾+…+a₀y=0 通过代入 y=eʳˣ 化为代数方程（特征方程），其根决定通解形式。",
+    formulas: [
+      { label: "特征方程（二阶）", tex: "ar^2 + br + c = 0" },
+      { label: "实不等根", tex: "y = C_1 e^{r_1 x} + C_2 e^{r_2 x}" },
+      { label: "复根 r=α±βi", tex: "y = e^{\\alpha x}(C_1\\cos\\beta x + C_2\\sin\\beta x)" },
+      { label: "重根 r（k重）", tex: "y = (C_1+C_2 x+\\cdots+C_k x^{k-1})e^{rx}" },
+    ],
+    steps: ["写出特征方程，求所有根", "根据根的类型写出基本解组", "线性组合得通解，用初始条件定系数"],
+    note: "非齐次方程 ay''+by'+cy=g(x) 的通解=齐次通解+特解。特解用待定系数法或常数变易法求。",
+  },
+  "Laplace 变换": {
+    intro: "Laplace 变换把时域 ODE 化为 s 域的代数方程，特别适合求解含初始条件的线性常系数 ODE（IVP）。",
+    formulas: [
+      { label: "定义", tex: "\\mathcal{L}\\{f(t)\\} = F(s) = \\int_0^\\infty e^{-st}f(t)\\,dt" },
+      { label: "导数法则", tex: "\\mathcal{L}\\{f'\\} = sF(s) - f(0)" },
+      { label: "卷积定理", tex: "\\mathcal{L}\\{f*g\\} = F(s)G(s)" },
+    ],
+    steps: ["对 ODE 两边取 Laplace 变换，代入初始条件", "解出 Y(s)（代数方程）", "对 Y(s) 做部分分式分解", "查变换表或用卷积定理求逆变换 y(t)"],
+    note: "Laplace 变换只适用于 t≥0，且要求函数为指数阶。阶跃函数 u(t-a) 和 δ 函数在 Laplace 域有简洁形式。",
+  },
 };
 
 // ── Topic Modal ───────────────────────────────────────────────────────────────
@@ -1027,6 +1207,48 @@ const ALL_QUESTIONS = [
   { id: "28", chapter: "Ch.2", type: "单选题", question: "求解线性方程组时，使用部分主元法（Partial Pivoting）的目的是：", options: ["减少计算量", "避免除以很小的主元导致数值不稳定", "使方程组有唯一解", "减少内存占用"], answer: "B", explanation: "部分主元法在每列中选绝对值最大的元素为主元，防止小主元引起的数值放大误差。" },
   { id: "29", chapter: "Ch.5", type: "单选题", question: "复合梯形法（Composite Trapezoid）在 n 个子区间上的截断误差阶为：", options: ["O(h)", "O(h²)", "O(h³)", "O(h⁴)"], answer: "B", explanation: "复合梯形法每个子区间误差 O(h³)，共 n 段后全局误差 O(h²)，其中 h=(b-a)/n。" },
   { id: "30", chapter: "Ch.6", type: "判断题", question: "Runge-Kutta 4 阶方法每步的全局误差为 O(h⁴)。", options: null, answer: "正确", explanation: "RK4 是四阶方法：局部截断误差 O(h⁵)，全局误差 O(h⁴)。" },
+
+  // ── 线性代数 (Leon 9th) ──────────────────────────────────────────
+  { id: "LA1", chapter: "线性代数 Ch.1", course: "线性代数", type: "单选题", question: "若矩阵 A 的秩为 r，则 n 元齐次方程组 Ax=0 的解空间维数为：", options: ["r", "n-r", "m-r（m为行数）", "n"], answer: "B", explanation: "由秩-零化度定理，nullity(A)=n-rank(A)=n-r，即自由变量数为 n-r。" },
+  { id: "LA2", chapter: "线性代数 Ch.1", course: "线性代数", type: "判断题", question: "若线性方程组 Ax=b 有两个不同的解，则它一定有无穷多个解。", options: null, answer: "正确", explanation: "两个解之差是 Ax=0 的非零解，零空间非平凡，从而 Ax=b 有无穷多解（特解+任意零空间向量）。" },
+  { id: "LA3", chapter: "线性代数 Ch.2", course: "线性代数", type: "单选题", question: "n 阶矩阵 A 可逆的充要条件是：", options: ["A 的所有元素非零", "det(A) ≠ 0", "A 的所有特征值为正", "A 是对称矩阵"], answer: "B", explanation: "A 可逆 ⟺ det(A)≠0 ⟺ rank(A)=n ⟺ Ax=0 只有零解，这是等价的四个充要条件之一。" },
+  { id: "LA4", chapter: "线性代数 Ch.2", course: "线性代数", type: "单选题", question: "行列式 det(kA) 与 det(A) 的关系（A 为 n×n 矩阵）：", options: ["k·det(A)", "k²·det(A)", "kⁿ·det(A)", "det(A)/k"], answer: "C", explanation: "每行都提出公因子 k，共 n 行，所以 det(kA)=kⁿdet(A)。" },
+  { id: "LA5", chapter: "线性代数 Ch.3", course: "线性代数", type: "单选题", question: "向量组 {v₁,v₂,v₃} 构成 ℝ³ 的一组基，则以下说法正确的是：", options: ["它们可以线性相关", "任意 ℝ³ 中的向量可唯一表示为它们的线性组合", "它们的长度必须为 1", "它们必须互相垂直"], answer: "B", explanation: "基的定义：线性无关且张成整个空间。任意向量可用基唯一表示（坐标唯一）。" },
+  { id: "LA6", chapter: "线性代数 Ch.4", course: "线性代数", type: "单选题", question: "Gram-Schmidt 正交化的目的是：", options: ["求矩阵的特征值", "将任意基变换为标准正交基", "对矩阵进行 LU 分解", "计算行列式"], answer: "B", explanation: "Gram-Schmidt 将线性无关向量组逐步转化为正交向量组，再单位化得到标准正交基。" },
+  { id: "LA7", chapter: "线性代数 Ch.5", course: "线性代数", type: "单选题", question: "实对称矩阵的特征值：", options: ["必须为正数", "必须为实数", "必须互不相同", "必须为整数"], answer: "B", explanation: "谱定理：实对称矩阵的特征值一定是实数，且对应不同特征值的特征向量相互正交。" },
+  { id: "LA8", chapter: "线性代数 Ch.5", course: "线性代数", type: "单选题", question: "矩阵 A 的奇异值（SVD 中的 σᵢ）等于：", options: ["A 的特征值", "AᵀA 特征值的平方根", "A 的行列式", "A 的迹"], answer: "B", explanation: "SVD：σᵢ=√λᵢ(AᵀA)，其中 λᵢ 为 AᵀA 的特征值（非负实数）。" },
+  { id: "LA9", chapter: "线性代数 Ch.4", course: "线性代数", type: "判断题", question: "若 A 为 m×n 矩阵且 m>n，则 AᵀA 一定是可逆矩阵。", options: null, answer: "错误", explanation: "AᵀA 可逆当且仅当 A 的列向量线性无关（rank(A)=n）。若 A 的列线性相关，AᵀA 不可逆。" },
+  { id: "LA10", chapter: "线性代数 Ch.5", course: "线性代数", type: "判断题", question: "n 阶矩阵有 n 个不同特征值，则一定可以对角化。", options: null, answer: "正确", explanation: "不同特征值对应的特征向量线性无关，n 个不同特征值保证 n 个线性无关特征向量，从而可对角化。" },
+
+  // ── 概率论 ────────────────────────────────────────────────────────
+  { id: "PT1", chapter: "概率论 Ch.1", course: "概率论", type: "单选题", question: "若事件 A 与 B 独立，则以下必然成立的是：", options: ["A 与 B 互斥", "P(A∩B)=P(A)P(B)", "P(A|B)=P(B|A)", "P(A∪B)=1"], answer: "B", explanation: "独立性定义：P(A∩B)=P(A)P(B)。独立与互斥是两个不同概念，非零概率事件不能同时独立且互斥。" },
+  { id: "PT2", chapter: "概率论 Ch.1", course: "概率论", type: "单选题", question: "全概率公式 P(A)=ΣP(A|Bᵢ)P(Bᵢ) 要求 {Bᵢ} 满足：", options: ["互斥", "互斥且穷举（构成样本空间划分）", "独立", "等概率"], answer: "B", explanation: "{Bᵢ} 必须构成样本空间的完备划分：两两互斥且并集为 Ω，确保每种情况恰好被计算一次。" },
+  { id: "PT3", chapter: "概率论 Ch.2", course: "概率论", type: "单选题", question: "若 X~N(μ,σ²)，则 P(μ-2σ < X < μ+2σ) 约等于：", options: ["68%", "95%", "99.7%", "50%"], answer: "B", explanation: "正态分布的 68-95-99.7 法则：μ±σ 内约 68%，μ±2σ 内约 95%，μ±3σ 内约 99.7%。" },
+  { id: "PT4", chapter: "概率论 Ch.2", course: "概率论", type: "单选题", question: "泊松分布 X~Poisson(λ) 中，E[X] 和 Var(X) 分别等于：", options: ["λ 和 λ²", "λ 和 λ", "λ² 和 λ", "1/λ 和 1/λ²"], answer: "B", explanation: "Poisson 分布的期望和方差相等，均等于参数 λ。" },
+  { id: "PT5", chapter: "概率论 Ch.3", course: "概率论", type: "单选题", question: "若 X,Y 独立，则 Var(X+Y) 等于：", options: ["Var(X)+Var(Y)+2Cov(X,Y)", "Var(X)+Var(Y)", "Var(X)·Var(Y)", "Var(X)-Var(Y)"], answer: "B", explanation: "独立时 Cov(X,Y)=0，所以 Var(X+Y)=Var(X)+Var(Y)+2Cov(X,Y)=Var(X)+Var(Y)。" },
+  { id: "PT6", chapter: "概率论 Ch.4", course: "概率论", type: "单选题", question: "中心极限定理（CLT）的标准化形式中，样本均值 X̄ᵥ 近似服从：", options: ["t 分布", "χ² 分布", "标准正态 N(0,1)", "均匀分布"], answer: "C", explanation: "CLT：(X̄-μ)/(σ/√n) 依分布收敛到 N(0,1)，这是大样本统计推断的基础。" },
+  { id: "PT7", chapter: "概率论 Ch.2", course: "概率论", type: "判断题", question: "指数分布具有无记忆性：已知等待时间超过 s 分钟，未来额外等待超过 t 分钟的概率等于从零开始等待超过 t 分钟的概率。", options: null, answer: "正确", explanation: "指数分布的无记忆性：P(X>s+t|X>s)=P(X>t)。这是指数分布在连续分布中唯一具有的性质。" },
+  { id: "PT8", chapter: "概率论 Ch.4", course: "概率论", type: "判断题", question: "大数定律说明：样本量 n→∞ 时，样本均值依概率收敛到总体均值。", options: null, answer: "正确", explanation: "弱大数定律（Khinchin）：i.i.d. 且 E[X]=μ，则 X̄ₙ →ᴾ μ；强大数定律则是几乎处处收敛。" },
+
+  // ── 数理统计 (Bijma 2016) ────────────────────────────────────────
+  { id: "MS1", chapter: "数理统计 Ch.1", course: "数理统计", type: "单选题", question: "设 X₁,…,Xₙ 是来自 N(μ,σ²) 的随机样本，则样本方差 S² 的分布为：", options: ["正态分布", "t 分布", "χ²(n-1)/（n-1）乘以 σ²", "F 分布"], answer: "C", explanation: "(n-1)S²/σ² ~ χ²(n-1)，即 S²=(σ²/(n-1))·χ²(n-1)，这是正态总体的基本抽样定理之一。" },
+  { id: "MS2", chapter: "数理统计 Ch.1", course: "数理统计", type: "单选题", question: "t 分布与标准正态分布相比，t 分布的尾部：", options: ["比正态分布细", "与正态分布相同", "比正态分布厚（重尾）", "没有尾部"], answer: "C", explanation: "t(n) 分布比 N(0,1) 有更厚的尾部（heavy tails），自由度 n→∞ 时趋向标准正态。" },
+  { id: "MS3", chapter: "数理统计 Ch.2", course: "数理统计", type: "单选题", question: "若 θ̂ 是 θ 的无偏估计量，则意味着：", options: ["θ̂=θ 总成立", "E[θ̂]=θ", "θ̂ 的方差最小", "θ̂ 是 θ 的函数"], answer: "B", explanation: "无偏性定义：E[θ̂]=θ，即估计量的期望等于真实参数值，没有系统性偏差。" },
+  { id: "MS4", chapter: "数理统计 Ch.2", course: "数理统计", type: "单选题", question: "正态总体 N(μ,σ²) 中，μ 的最大似然估计量是：", options: ["样本中位数", "样本众数", "样本均值 X̄", "样本方差 S²"], answer: "C", explanation: "对正态分布求似然函数对 μ 的导数并置零，得 μ̂_MLE=X̄（样本均值）。" },
+  { id: "MS5", chapter: "数理统计 Ch.2", course: "数理统计", type: "单选题", question: "95% 置信区间的正确解释是：", options: ["θ 有 95% 概率落在区间内", "该方法重复使用时约 95% 的区间包含真实 θ", "区间内有 95% 的样本", "拒绝 H₀ 的概率为 95%"], answer: "B", explanation: "频率解释：区间 [L,U] 是随机的，真实参数固定。重复抽样构造的区间中有 95% 会包含 θ。" },
+  { id: "MS6", chapter: "数理统计 Ch.3", course: "数理统计", type: "单选题", question: "在假设检验中，p 值的含义是：", options: ["H₀ 为真的概率", "犯第一类错误的概率 α", "在 H₀ 为真时，观测到至少如此极端结果的概率", "H₁ 为真的概率"], answer: "C", explanation: "p 值=P(观测统计量≥t_obs | H₀)，衡量数据与 H₀ 的相容程度；p 越小，越不支持 H₀。" },
+  { id: "MS7", chapter: "数理统计 Ch.3", course: "数理统计", type: "判断题", question: "假设检验中，不拒绝 H₀ 意味着 H₀ 一定为真。", options: null, answer: "错误", explanation: "不拒绝 H₀ 只表示样本证据不足以拒绝，并非证明 H₀ 为真。这可能是因为样本量不够大（功效不足）。" },
+  { id: "MS8", chapter: "数理统计 Ch.3", course: "数理统计", type: "判断题", question: "增大显著性水平 α 会降低第二类错误（漏判）的概率 β。", options: null, answer: "正确", explanation: "α 与 β 此消彼长：α 增大则拒绝域扩大，更容易拒绝 H₀，从而 β 减小；但同时犯第一类错误的风险增大。" },
+
+  // ── ODE ────────────────────────────────────────────────────────
+  { id: "ODE1", chapter: "ODE Ch.1", course: "ODE", type: "单选题", question: "一阶线性 ODE y'+P(x)y=Q(x) 的积分因子为：", options: ["e^{∫P dx}", "e^{-∫P dx}", "∫P dx", "P(x)"], answer: "A", explanation: "积分因子 μ=e^{∫P(x)dx}，乘以方程两边后左侧变为 (μy)' = μQ(x)，可直接积分。" },
+  { id: "ODE2", chapter: "ODE Ch.1", course: "ODE", type: "单选题", question: "初值问题 dy/dx=y²，y(0)=1 的解在哪个区间上存在？", options: ["(-∞,+∞)", "(-∞,1)", "(0,1)", "(-∞,∞) 上分段"], answer: "B", explanation: "解为 y=1/(1-x)，在 x=1 处有垂直渐近线（爆破）。解仅在 x<1 时存在，即 (-∞,1)。" },
+  { id: "ODE3", chapter: "ODE Ch.2", course: "ODE", type: "单选题", question: "常系数齐次 ODE y''-4y'+4y=0 的特征根为重根 r=2，其通解为：", options: ["C₁e^{2x}+C₂e^{-2x}", "(C₁+C₂x)e^{2x}", "C₁cos2x+C₂sin2x", "C₁e^{2x}"], answer: "B", explanation: "特征根 r=2（二重），重根情形通解为 (C₁+C₂x)eʳˣ，提供两个线性无关解。" },
+  { id: "ODE4", chapter: "ODE Ch.2", course: "ODE", type: "单选题", question: "二阶齐次 ODE 的特征根为 α±βi（复数），则通解包含：", options: ["e^{αx} 和 e^{βx}", "e^{αx}cosβx 和 e^{αx}sinβx", "cosαx 和 sinβx", "e^{iβx}"], answer: "B", explanation: "复特征根 α±βi 对应两个实值线性无关解：e^{αx}cosβx 和 e^{αx}sinβx（Euler 公式）。" },
+  { id: "ODE5", chapter: "ODE Ch.3", course: "ODE", type: "单选题", question: "L{eᵃᵗ} = F(s) 的值为（Laplace 变换）：", options: ["1/(s+a)", "1/(s-a)", "a/(s²+a²)", "s/(s²+a²)"], answer: "B", explanation: "由定义 ∫₀^∞ e^{-st}e^{at}dt=∫₀^∞ e^{-(s-a)t}dt=1/(s-a)，要求 s>a。" },
+  { id: "ODE6", chapter: "ODE Ch.3", course: "ODE", type: "单选题", question: "用 Laplace 变换求解 IVP 时，y'(0) 的初始条件在变换中体现为：", options: ["直接乘以 s", "F(s)-y(0)", "sF(s)-y(0)", "s²F(s)-sy(0)-y'(0)（二阶时）"], answer: "D", explanation: "L{y''}=s²F(s)-sy(0)-y'(0)，初始条件自动代入，这是 Laplace 变换处理 IVP 的优势。" },
+  { id: "ODE7", chapter: "ODE Ch.4", course: "ODE", type: "判断题", question: "若线性方程组 x'=Ax 的矩阵 A 的所有特征值实部均为负数，则原点是渐近稳定的平衡点。", options: null, answer: "正确", explanation: "所有特征值实部 Re(λᵢ)<0 时，基本解 e^{λᵢt}→0，所有解趋向原点，原点是渐近稳定的。" },
+  { id: "ODE8", chapter: "ODE Ch.1", course: "ODE", type: "判断题", question: "可分离变量的 ODE dy/dx=f(x)g(y) 在 g(y₀)=0 处，y≡y₀ 是一个奇解（常数解）。", options: null, answer: "正确", explanation: "将 y≡y₀ 代入方程：dy/dx=0=f(x)·0 恒成立，所以 y=y₀ 是满足 g(y₀)=0 的奇解（常数解）。" },
 ];
 
 const FLASHCARDS = [
@@ -1050,6 +1272,32 @@ const FLASHCARDS = [
   { front: "Markowitz 投资组合风险", back: "σ²_P = xᵀVx，V 协方差矩阵，x 持仓向量", chapter: "最优化 Ch.1" },
   { front: "SVM 间隔宽度", back: "margin = 2/‖w‖，最大化间隔 ⟺ 最小化 ‖w‖²", chapter: "最优化 Ch.1" },
   { front: "SVM 软间隔参数 C", back: "C 大→惩罚误分重；C 小→允许更多误分但间隔宽", chapter: "最优化 Ch.1" },
+  // 线性代数
+  { front: "秩-零化度定理", back: "rank(A) + nullity(A) = n（列数），即主元数+自由变量数=列数", chapter: "线性代数 Ch.1" },
+  { front: "行列式乘积法则", back: "det(AB) = det(A)·det(B)，det(kA) = kⁿdet(A)", chapter: "线性代数 Ch.2" },
+  { front: "A 可逆的充要条件", back: "det(A)≠0 ⟺ rank(A)=n ⟺ Ax=0 只有零解 ⟺ 列向量线性无关", chapter: "线性代数 Ch.2" },
+  { front: "谱定理（实对称矩阵）", back: "实对称矩阵特征值全为实数，不同特征值的特征向量正交，且一定可对角化", chapter: "线性代数 Ch.5" },
+  { front: "SVD 分解形式", back: "A = UΣVᵀ，σᵢ=√λᵢ(AᵀA)，截断 SVD 是最优低秩近似", chapter: "线性代数 Ch.5" },
+  { front: "Gram-Schmidt 正交化核心步", back: "uₖ = vₖ - Σproj_{uⱼ}(vₖ)，去掉前面方向的投影成分", chapter: "线性代数 Ch.4" },
+  // 概率论
+  { front: "Bayes 定理", back: "P(Bᵢ|A) = P(A|Bᵢ)P(Bᵢ) / ΣP(A|Bⱼ)P(Bⱼ)，从结果推原因", chapter: "概率论 Ch.1" },
+  { front: "正态分布 68-95-99.7 法则", back: "μ±1σ ≈68%，μ±2σ ≈95%，μ±3σ ≈99.7%", chapter: "概率论 Ch.2" },
+  { front: "Poisson 分布 E 和 Var", back: "E[X]=λ，Var(X)=λ（均等于参数 λ）", chapter: "概率论 Ch.2" },
+  { front: "方差的计算公式", back: "Var(X) = E[X²] - (E[X])²", chapter: "概率论 Ch.3" },
+  { front: "中心极限定理", back: "(X̄-μ)/(σ/√n) → N(0,1)，n 足够大（≥30）时成立", chapter: "概率论 Ch.4" },
+  { front: "指数分布无记忆性", back: "P(X>s+t | X>s) = P(X>t)，等待时间不受历史影响", chapter: "概率论 Ch.2" },
+  // 数理统计
+  { front: "MLE 核心思想", back: "最大化 ℓ(θ)=Σln f(xᵢ;θ)，用对数似然方程求解", chapter: "数理统计 Ch.2" },
+  { front: "无偏估计量定义", back: "E[θ̂]=θ，期望等于真实参数，无系统偏差", chapter: "数理统计 Ch.2" },
+  { front: "正态总体抽样分布", back: "(n-1)S²/σ² ~ χ²(n-1)；(X̄-μ)/(S/√n) ~ t(n-1)", chapter: "数理统计 Ch.1" },
+  { front: "置信区间覆盖含义", back: "1-α 是该方法覆盖真值的频率，不是「θ 落在区间内的概率」", chapter: "数理统计 Ch.2" },
+  { front: "p 值含义", back: "P(|T|≥t_obs | H₀)，p 越小越拒绝 H₀；p<α 则显著", chapter: "数理统计 Ch.3" },
+  // ODE
+  { front: "一阶线性 ODE 积分因子", back: "y'+P(x)y=Q(x) → μ=e^{∫P dx}，乘后化为 (μy)'=μQ", chapter: "ODE Ch.1" },
+  { front: "重特征根的通解", back: "r 为 k 重根 → (C₁+C₂x+…+Cₖxᵏ⁻¹)eʳˣ", chapter: "ODE Ch.2" },
+  { front: "复特征根的通解", back: "α±βi → e^{αx}(C₁cosβx + C₂sinβx)", chapter: "ODE Ch.2" },
+  { front: "Laplace 变换的导数公式", back: "L{y'}=sY-y(0)；L{y''}=s²Y-sy(0)-y'(0)", chapter: "ODE Ch.3" },
+  { front: "渐近稳定平衡点条件", back: "线性系统 x'=Ax 的所有特征值实部 Re(λᵢ)<0", chapter: "ODE Ch.4" },
 ];
 
 
@@ -1070,6 +1318,49 @@ const TOPIC_CHAPTER = {
   "设施选址问题": "最优化 Ch.1", "球缺体积最优化": "最优化 Ch.1",
   "投资组合选择 (Markowitz)": "最优化 Ch.1", "交通流最小化": "最优化 Ch.1",
   "最大似然估计": "最优化 Ch.1", "SVM 分类": "最优化 Ch.1",
+  // 线性代数
+  "矩阵运算与初等变换": "线性代数 Ch.1", "Gauss-Jordan 消去": "线性代数 Ch.1",
+  "向量的线性组合": "线性代数 Ch.1", "矩阵的秩": "线性代数 Ch.1",
+  "行列式定义与性质": "线性代数 Ch.2", "余子式与代数余子式": "线性代数 Ch.2",
+  "Cramer 法则": "线性代数 Ch.2", "行列式的几何意义": "线性代数 Ch.2",
+  "子空间": "线性代数 Ch.3", "基与维数": "线性代数 Ch.3",
+  "列空间与零空间": "线性代数 Ch.3", "坐标变换": "线性代数 Ch.3",
+  "内积与正交": "线性代数 Ch.4", "Gram-Schmidt 正交化": "线性代数 Ch.4",
+  "QR 分解": "线性代数 Ch.4", "正交投影与最小二乘": "线性代数 Ch.4",
+  "特征方程": "线性代数 Ch.5", "对角化": "线性代数 Ch.5",
+  "对称矩阵的谱定理": "线性代数 Ch.5", "SVD 奇异值分解": "线性代数 Ch.5",
+  "特征值与对角化": "线性代数 Ch.5",
+  // 概率论
+  "样本空间与事件": "概率论 Ch.1", "概率公理": "概率论 Ch.1",
+  "条件概率": "概率论 Ch.1", "全概率公式与 Bayes 定理": "概率论 Ch.1",
+  "条件概率与 Bayes 定理": "概率论 Ch.1",
+  "离散型随机变量": "概率论 Ch.2", "连续型随机变量": "概率论 Ch.2",
+  "分布函数": "概率论 Ch.2", "常见分布（Bernoulli/Poisson/正态/指数）": "概率论 Ch.2",
+  "常见概率分布": "概率论 Ch.2",
+  "数学期望": "概率论 Ch.3", "方差与标准差": "概率论 Ch.3",
+  "协方差与相关系数": "概率论 Ch.3", "矩母函数": "概率论 Ch.3",
+  "期望与方差": "概率论 Ch.3",
+  "大数定律（弱/强）": "概率论 Ch.4", "中心极限定理": "概率论 Ch.4",
+  "收敛性概念": "概率论 Ch.4", "正态近似应用": "概率论 Ch.4",
+  // 数理统计
+  "总体与样本": "数理统计 Ch.1", "统计量": "数理统计 Ch.1",
+  "χ² 分布 / t 分布 / F 分布": "数理统计 Ch.1", "正态总体抽样定理": "数理统计 Ch.1",
+  "矩估计法": "数理统计 Ch.2", "最大似然估计 MLE": "数理统计 Ch.2",
+  "估计量优良性（无偏/有效/相合）": "数理统计 Ch.2", "置信区间": "数理统计 Ch.2",
+  "检验框架（H₀/H₁/α/β）": "数理统计 Ch.3", "t 检验": "数理统计 Ch.3",
+  "χ² 拟合优度检验": "数理统计 Ch.3", "p 值与检验功效": "数理统计 Ch.3",
+  "假设检验框架": "数理统计 Ch.3",
+  // ODE
+  "分离变量法": "ODE Ch.1", "线性方程与积分因子": "ODE Ch.1",
+  "Bernoulli 方程": "ODE Ch.1", "存在唯一性定理": "ODE Ch.1",
+  "特征方程法": "ODE Ch.2", "叠加原理与 Wronskian": "ODE Ch.2",
+  "待定系数法": "ODE Ch.2", "常数变易法": "ODE Ch.2",
+  "特征方程法（常系数线性 ODE）": "ODE Ch.2",
+  "Laplace 变换定义与性质": "ODE Ch.3", "逆变换与部分分式": "ODE Ch.3",
+  "卷积定理": "ODE Ch.3", "用 Laplace 变换求解 IVP": "ODE Ch.3",
+  "Laplace 变换": "ODE Ch.3",
+  "线性方程组的矩阵解法": "ODE Ch.4", "相平面与轨迹": "ODE Ch.4",
+  "平衡点类型与稳定性": "ODE Ch.4", "Lyapunov 稳定性": "ODE Ch.4",
 };
 
 // Get chapter stats from sessionAnswers {questionId: {correct, chapter}}
@@ -1117,6 +1408,26 @@ const CHAPTERS = [
   { id: 9, course: "数值分析", num: "Ch.9", name: "随机数与 Monte Carlo", topics: ["伪随机数生成", "Monte Carlo 模拟", "方差缩减"] },
   { id: 10, course: "最优化", num: "Ch.1", name: "优化模型概论", topics: ["最小二乘数据拟合", "线性 vs 非线性模型", "残差向量与范数", "非线性规划定义"] },
   { id: 11, course: "最优化", num: "Ch.1b", name: "非线性规划应用", topics: ["设施选址问题", "球缺体积最优化", "投资组合选择 (Markowitz)", "交通流最小化", "最大似然估计", "SVM 分类"] },
+  // ── 线性代数 (Leon 9th) ──────────────────────────────────────────────────
+  { id: 12, course: "线性代数", num: "Ch.1", name: "矩阵与线性方程组", topics: ["矩阵运算与初等变换", "Gauss-Jordan 消去", "向量的线性组合", "矩阵的秩"] },
+  { id: 13, course: "线性代数", num: "Ch.2", name: "行列式", topics: ["行列式定义与性质", "余子式与代数余子式", "Cramer 法则", "行列式的几何意义"] },
+  { id: 14, course: "线性代数", num: "Ch.3", name: "向量空间", topics: ["子空间", "基与维数", "列空间与零空间", "坐标变换"] },
+  { id: 15, course: "线性代数", num: "Ch.4", name: "正交性与最小二乘", topics: ["内积与正交", "Gram-Schmidt 正交化", "QR 分解", "正交投影与最小二乘"] },
+  { id: 16, course: "线性代数", num: "Ch.5", name: "特征值与 SVD", topics: ["特征方程", "对角化", "对称矩阵的谱定理", "SVD 奇异值分解"] },
+  // ── 概率论 ───────────────────────────────────────────────────────────────
+  { id: 17, course: "概率论", num: "Ch.1", name: "概率基础", topics: ["样本空间与事件", "概率公理", "条件概率", "全概率公式与 Bayes 定理"] },
+  { id: 18, course: "概率论", num: "Ch.2", name: "随机变量与分布", topics: ["离散型随机变量", "连续型随机变量", "分布函数", "常见分布（Bernoulli/Poisson/正态/指数）"] },
+  { id: 19, course: "概率论", num: "Ch.3", name: "期望与矩", topics: ["数学期望", "方差与标准差", "协方差与相关系数", "矩母函数"] },
+  { id: 20, course: "概率论", num: "Ch.4", name: "极限定理", topics: ["大数定律（弱/强）", "中心极限定理", "收敛性概念", "正态近似应用"] },
+  // ── 数理统计 (Bijma 2016) ─────────────────────────────────────────────────
+  { id: 21, course: "数理统计", num: "Ch.1", name: "统计基础与抽样分布", topics: ["总体与样本", "统计量", "χ² 分布 / t 分布 / F 分布", "正态总体抽样定理"] },
+  { id: 22, course: "数理统计", num: "Ch.2", name: "参数估计", topics: ["矩估计法", "最大似然估计 MLE", "估计量优良性（无偏/有效/相合）", "置信区间"] },
+  { id: 23, course: "数理统计", num: "Ch.3", name: "假设检验", topics: ["检验框架（H₀/H₁/α/β）", "t 检验", "χ² 拟合优度检验", "p 值与检验功效"] },
+  // ── ODE ──────────────────────────────────────────────────────────────────
+  { id: 24, course: "ODE", num: "Ch.1", name: "一阶方程", topics: ["分离变量法", "线性方程与积分因子", "Bernoulli 方程", "存在唯一性定理"] },
+  { id: 25, course: "ODE", num: "Ch.2", name: "高阶线性方程", topics: ["特征方程法", "叠加原理与 Wronskian", "待定系数法", "常数变易法"] },
+  { id: 26, course: "ODE", num: "Ch.3", name: "Laplace 变换", topics: ["Laplace 变换定义与性质", "逆变换与部分分式", "卷积定理", "用 Laplace 变换求解 IVP"] },
+  { id: 27, course: "ODE", num: "Ch.4", name: "线性方程组与稳定性", topics: ["线性方程组的矩阵解法", "相平面与轨迹", "平衡点类型与稳定性", "Lyapunov 稳定性"] },
 ];
 
 // ── Shared UI ─────────────────────────────────────────────────────────────────
@@ -1293,7 +1604,7 @@ function HomePage({ setPage, profile }) {
         <div style={{ position: "absolute", right: 60, bottom: -40, width: 120, height: 120, borderRadius: "50%", background: "rgba(255,255,255,0.05)" }} />
         <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.12em", opacity: 0.7, textTransform: "uppercase", marginBottom: 10 }}>数学与应用数学学习平台</div>
         <div style={{ fontSize: 30, fontWeight: 700, marginBottom: 10, letterSpacing: "-0.5px" }}>你好，{profile?.name || "同学"} 👋</div>
-        <div style={{ fontSize: 16, opacity: 0.85, lineHeight: 1.7, marginBottom: 24, maxWidth: 520 }}>涵盖数值分析、最优化理论两门课程，AI 智能出题与记忆卡片，系统提升数学能力。</div>
+        <div style={{ fontSize: 16, opacity: 0.85, lineHeight: 1.7, marginBottom: 24, maxWidth: 520 }}>涵盖数值分析、线性代数、概率论、数理统计、ODE、最优化六门课程，AI 智能出题与记忆卡片，系统提升数学能力。</div>
         <div style={{ display: "flex", gap: 12 }}>
           <button onClick={() => setPage("知识点")} style={{ padding: "12px 28px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", background: "#fff", color: G.teal, border: "none", borderRadius: 12, cursor: "pointer" }}>开始学习</button>
           <button onClick={() => setPage("题库练习")} style={{ padding: "12px 28px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", background: "rgba(255,255,255,0.15)", color: "#fff", border: "2px solid rgba(255,255,255,0.3)", borderRadius: 12, cursor: "pointer" }}>进入题库</button>
@@ -1305,7 +1616,7 @@ function HomePage({ setPage, profile }) {
         const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); const today = new Date().toDateString(); if (d.last !== today) { const yesterday = new Date(Date.now()-86400000).toDateString(); const s = d.last === yesterday ? (d.count || 0) + 1 : 1; localStorage.setItem("mc_streak", JSON.stringify({last: today, count: s})); return s; } return d.count || 1; } catch { return 1; } })();
         return (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 24 }}>
-            <StatCard icon="📚" label="门课程" value="2" sub="数值分析 · 最优化" color={G.teal} />
+            <StatCard icon="📚" label="门课程" value="6" sub="数值分析 · 线代 · 概率 · 统计 · ODE · 最优化" color={G.teal} />
             <StatCard icon="✏️" label="题目" value={ALL_QUESTIONS.length + "+"} sub="持续更新" color={G.amber} />
             <StatCard icon="🃏" label="记忆卡片" value={FLASHCARDS.length} sub="公式定理" color={G.purple} />
             <StatCard icon="🔥" label="连续学习" value={streak + " 天"} sub="保持每日练习！" color="#E24B4A" />
@@ -2069,7 +2380,7 @@ function ReportPage({ setPage }) {
 
 // ── Upload Page ─────────────────────────────────────────────────────────────
 function UploadPage({ setPage, profile }) {
-  const DEFAULT_UPLOAD_COURSES = ["线性代数", "ODE", "数值分析", "最优化方法", "高等数学"];
+  const DEFAULT_UPLOAD_COURSES = ["数值分析", "线性代数", "概率论", "数理统计", "ODE", "最优化", "高等数学"];
   const [title, setTitle] = useState("");
   const [course, setCourse] = useState("线性代数");
   const [customCourse, setCustomCourse] = useState("");
@@ -2547,7 +2858,7 @@ function MaterialsPage({ setPage, profile }) {
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
         <Btn size="sm" onClick={() => setSelected(null)}>← 返回资料库</Btn>
         <div style={{ fontSize: 20, fontWeight: 700, color: "#111" }}>{selected.title}</div>
-        <Badge color={selected.course === "数值分析" ? "teal" : "blue"}>{selected.course}</Badge>
+        <Badge color={getCourseColor(selected.course)}>{selected.course}</Badge>
         {selected.chapter && <Badge color="amber">{selected.chapter}</Badge>}
       </div>
 
@@ -2668,12 +2979,12 @@ function MaterialsPage({ setPage, profile }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
         {filtered.map(m => (
-          <div key={m.id} onClick={() => setSelected(m)} style={{ ...s.card, cursor: "pointer", transition: "transform .15s, box-shadow .15s", borderTop: `4px solid ${m.course === "数值分析" ? G.teal : G.blue}` }}>
+          <div key={m.id} onClick={() => setSelected(m)} style={{ ...s.card, cursor: "pointer", transition: "transform .15s, box-shadow .15s", borderTop: `4px solid ${getCourseBorderColor(m.course)}` }}>
             <div style={{ fontSize: 32, marginBottom: 12 }}>📄</div>
             <div style={{ fontSize: 17, fontWeight: 700, color: "#111", marginBottom: 6 }}>{m.title}</div>
             {m.description && <div style={{ fontSize: 14, color: "#666", marginBottom: 10, lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{m.description}</div>}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-              <Badge color={m.course === "数值分析" ? "teal" : "blue"}>{m.course}</Badge>
+              <Badge color={getCourseColor(m.course)}>{m.course}</Badge>
               {m.chapter && <Badge color="amber">{m.chapter}</Badge>}
               {(m.status || "approved") !== "approved" && <Badge color="red">待审核</Badge>}
             </div>
