@@ -473,87 +473,150 @@ const fetchFileAsBrowserFile = async (url, fallbackName = "material.pdf") => {
 
 const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
   const materialId = material?.id;
-  if (!materialId) return { topics: [], questions: [], insertedCount: 0 };
+  if (!materialId) return { topics: [], questions: [], insertedCount: 0, materialLinked: false };
+
   const chapter = (material?.chapter && material.chapter !== "全部")
     ? material.chapter : (material?.course || material?.title || "本资料");
 
+  // Step 1: Extract text from PDF using pdf.js (client-side, free)
   let text = "";
-  // Extract PDF text client-side
+  const pdfLikelyScanned = false;
+
   if (file) {
     try {
       await ensurePdfJs();
       const buf = await file.arrayBuffer();
       const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
-      for (let i = 1; i <= Math.min(pdf.numPages, 40); i++) {
+      const pageTexts = [];
+      const numPages = Math.min(pdf.numPages, 40);
+      for (let i = 1; i <= numPages; i++) {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
-        let line = "", lastY = null;
-        for (const item of (content.items || [])) {
-          const s = item.str || ""; if (!s) continue;
-          const y = item.transform ? item.transform[5] : 0;
-          if (lastY !== null && Math.abs(y - lastY) > 4) { text += line.trim() + "\n"; line = ""; }
-          if (line && !/ $/.test(line)) line += " ";
-          line += s; lastY = y;
+        // Sort items by Y position (top to bottom), then X (left to right)
+        const items = (content.items || [])
+          .filter(item => item.str && item.str.trim())
+          .sort((a, b) => {
+            const yDiff = (b.transform?.[5] || 0) - (a.transform?.[5] || 0);
+            if (Math.abs(yDiff) > 5) return yDiff;
+            return (a.transform?.[4] || 0) - (b.transform?.[4] || 0);
+          });
+        let pageText = "";
+        let lastY = null;
+        for (const item of items) {
+          const y = item.transform?.[5] || 0;
+          if (lastY !== null && Math.abs(y - lastY) > 8) pageText += "
+";
+          else if (pageText && !pageText.endsWith(" ")) pageText += " ";
+          pageText += item.str;
+          lastY = y;
         }
-        if (line.trim()) text += line.trim() + "\n";
+        if (pageText.trim()) pageTexts.push(pageText.trim());
       }
-    } catch (e) {}
+      text = pageTexts.join("
+
+").trim();
+    } catch (e) {
+      console.error("PDF extraction error:", e.message);
+    }
   }
-  if (!text && material?.file_data) {
+
+  // Step 2: Try fetching from stored URL if no local file
+  if (!text && material?.file_data && material.file_data.startsWith("http")) {
     try {
       const r = await fetch(material.file_data);
       if (r.ok) {
         const blob = await r.blob();
         const f2 = new File([blob], material.file_name || "m.pdf", { type: "application/pdf" });
-        return await processMaterialWithAI({ material, file: f2, genCount });
+        const sub = await processMaterialWithAI({ material, file: f2, genCount });
+        return sub;
       }
     } catch (e) {}
   }
-  text = text.trim();
-  const hasText = text.length > 50;
+
+  const hasText = text.trim().length > 80;
   let topics = [], questions = [], usedApi = false;
 
-  // Call /api/extract (the ONLY working API)
+  // Step 3: Call /api/extract with the extracted text
   if (hasText) {
     try {
-      const res = await fetch("/api/extract", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.slice(0, 8000), course: material?.course || "数学", chapter, count: genCount }),
+      const resp = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: text.slice(0, 8000),
+          course: material?.course || "数学",
+          chapter,
+          count: genCount,
+        }),
       });
-      const d = await res.json();
-      if (!d.error) { topics = d.topics || []; questions = d.questions || []; usedApi = true; }
-    } catch (e) {}
-  }
-
-  // Free fallback from sentences
-  if (questions.length < genCount && hasText) {
-    const sents = text.replace(/\s+/g, " ").split(/[。.!！?？\n]/).map(s => s.trim()).filter(s => s.length > 15 && s.length < 180);
-    for (let i = 0; i < sents.length && questions.length < genCount; i++) {
-      const sent = sents[i];
-      if (i % 2 === 0) {
-        questions.push({ question: `以下说法是否正确：「${sent.slice(0, 58)}」`, options: null, answer: "正确", explanation: sent.slice(0, 100), type: "判断题", chapter });
+      const data = await resp.json();
+      if (!data.error) {
+        topics = Array.isArray(data.topics) ? data.topics : [];
+        questions = Array.isArray(data.questions) ? data.questions : [];
+        usedApi = true;
       } else {
-        const key = sent.split(/[，, ]+/).find(w => w.length > 1) || "该知识点";
-        questions.push({ question: `关于「${key}」，以下哪个描述最准确？`, options: ["A." + sent.slice(0, 35), "B.与原文相反", "C.教材未提及", "D.以上都不对"], answer: "A", explanation: sent.slice(0, 100), type: "单选题", chapter });
+        console.error("API extract error:", data.error);
       }
+    } catch (e) {
+      console.error("API extract fetch error:", e.message);
     }
   }
-  if (questions.length === 0) questions = [{ question: `关于「${chapter}」，先理解定义再做题通常更有效。`, options: null, answer: "正确", explanation: "先掌握概念与条件，减少错误。", type: "判断题", chapter }];
 
-  // Save to DB
+  // Step 4: Fallback - build basic questions from sentences if API fails
+  if (questions.length === 0 && hasText) {
+    const sents = text
+      .split(/[
+。.!！?？]/)
+      .map(s => s.replace(/\s+/g, " ").trim())
+      .filter(s => s.length > 20 && s.length < 200 && /[一-龥a-zA-Z]/.test(s));
+    for (let i = 0; i < sents.length && questions.length < genCount; i++) {
+      const s = sents[i];
+      questions.push({
+        question: `判断：「${s.slice(0, 60)}」`,
+        options: null, answer: "正确",
+        explanation: s.slice(0, 80),
+        type: "判断题", chapter,
+      });
+    }
+  }
+  if (questions.length === 0) {
+    questions = [{
+      question: `关于「${chapter}」，先理解定义再做题通常更有效。`,
+      options: null, answer: "正确",
+      explanation: "先掌握概念与适用条件，可减少机械套题错误。",
+      type: "判断题", chapter,
+    }];
+  }
+
+  // Step 5: Save questions to DB
   let insertedCount = 0;
+  let materialLinked = false;
   try {
-    const rows = questions.map(q => ({ chapter: q.chapter || chapter, course: material?.course || "数学", type: q.type || (q.options ? "单选题" : "判断题"), question: q.question, options: q.options || null, answer: q.answer, explanation: q.explanation || "", material_id: materialId }));
+    const rows = questions.map(q => ({
+      chapter: q.chapter || chapter,
+      course: material?.course || "数学",
+      type: q.type || (q.options ? "单选题" : "判断题"),
+      question: q.question,
+      options: q.options || null,
+      answer: q.answer,
+      explanation: q.explanation || "",
+      material_id: materialId,
+    }));
     const { error: e1 } = await supabase.from("questions").insert(rows);
-    if (!e1) { insertedCount = rows.length; }
+    if (!e1) { insertedCount = rows.length; materialLinked = true; }
     else {
+      // Try without material_id if column missing
       const rows2 = rows.map(({ material_id, ...r }) => r);
       const { error: e2 } = await supabase.from("questions").insert(rows2);
       if (!e2) insertedCount = rows2.length;
     }
   } catch (e) {}
 
-  return { topics, questions, insertedCount, hasText, usedApi, pdfLikelyScanned: !hasText, parseHint: !hasText ? "未能从 PDF 提取文字（可能是扫描版）" : null };
+  return {
+    topics, questions, insertedCount, materialLinked,
+    hasText, usedApi, pdfLikelyScanned: !hasText,
+    parseHint: !hasText ? "未能从 PDF 提取文字（可能是扫描版），建议使用可选中文字的电子版 PDF。" : null,
+  };
 };
 
 
