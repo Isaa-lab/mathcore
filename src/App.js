@@ -565,8 +565,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
   // Step 4: Fallback - build basic questions from sentences if API fails
   if (questions.length === 0 && hasText) {
     const sents = text
-      .split(/[
-。.!！?？]/)
+      .split(/[。.!！?？]/)
       .map(s => s.replace(/\s+/g, " ").trim())
       .filter(s => s.length > 20 && s.length < 200 && /[一-龥a-zA-Z]/.test(s));
     for (let i = 0; i < sents.length && questions.length < genCount; i++) {
