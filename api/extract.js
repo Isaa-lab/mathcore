@@ -14,52 +14,73 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "PDF 文字太少（可能是扫描版）。请使用可以选中文字的电子版 PDF。" });
   }
 
-  // Clean and truncate text - remove garbage characters
-  const cleanText = text
+  // Clean and truncate: remove control chars, collapse whitespace, then pick the
+  // most content-dense 8000 chars (skip very short lines that are likely page numbers)
+  const preCleaned = text
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
-    .trim()
-    .slice(0, 6000);
+    .trim();
+
+  // Filter out lines that are clearly noise (page numbers, lone digits, very short fragments)
+  const filteredLines = preCleaned
+    .split("\n")
+    .filter(l => {
+      const t = l.trim();
+      if (t.length === 0) return false;
+      // pure page numbers or very short lines (< 4 chars)
+      if (/^\d+$/.test(t) && t.length <= 4) return false;
+      return true;
+    })
+    .join("\n");
+
+  // Prefer the first 8000 chars of content (after the above cleaning)
+  const cleanText = filteredLines.slice(0, 8000);
 
   const ch = (chapter && chapter !== "全部") ? chapter : (course || "本章节");
 
-  const prompt = `你是一位专业的数学课程教师，请根据以下教材内容完成两个任务。
+  // Detect if content is likely English (helps AI respond in the right style)
+  const englishRatio = (cleanText.match(/[a-zA-Z]/g) || []).length / Math.max(cleanText.length, 1);
+  const isEnglish = englishRatio > 0.4;
 
-=== 教材内容 ===
+  const prompt = `You are an expert mathematics professor. Based ONLY on the textbook excerpt below, complete two tasks.
+
+=== TEXTBOOK CONTENT (${isEnglish ? "English" : "Chinese"}) ===
 ${cleanText}
-=== 结束 ===
+=== END ===
 
-课程：${course || "数学"}，章节：${ch}
+Course: ${course || "Mathematics"}, Topic: ${ch}
 
-任务一：从教材中提取 3~5 个核心知识点，每个知识点给出名称和一句话摘要。
+TASK 1: Extract 3–5 key concepts from the text. Each concept needs a name and a one-sentence summary that directly references the text.
 
-任务二：根据教材内容出 ${count} 道题目，要求：
-- 题目必须考察教材中出现的具体概念、定义、公式或方法
-- 单选题：4个选项（A/B/C/D），选项内容都要有实际意义，不能用"与原文相反"或"以上都不对"之类的占位选项
-- 判断题：options 设为 null，answer 为"正确"或"错误"
-- 解析要说明正确答案的原因，并引用教材原文
-- 题目数量：单选题和判断题混合，共 ${count} 道
+TASK 2: Generate exactly ${count} exam questions based STRICTLY on the textbook content above.
+Rules:
+- Every question must test a SPECIFIC concept, definition, theorem, formula, or numerical method from the text
+- Multiple-choice: provide 4 options (A/B/C/D). All distractors must be plausible mathematical alternatives — NEVER use "none of the above", "opposite of the text", or placeholder options
+- True/False: set options to null, answer is "True"/"False" (English) or "正确"/"错误" (Chinese)
+- Include at least one computational or application question if the text contains formulas/algorithms
+- Explanation must cite the specific part of the text that justifies the answer (≤60 words)
+- DO NOT invent theorems, formulas, or values not present in the text
 
-请严格按以下 JSON 格式返回，不要有任何额外文字：
+Respond ONLY with valid JSON, no extra text:
 {
   "topics": [
-    { "name": "知识点名称", "summary": "核心内容摘要（30字以内）" }
+    { "name": "concept name", "summary": "one-sentence summary citing the text" }
   ],
   "questions": [
     {
       "type": "单选题",
-      "question": "题目内容（具体，来自教材）",
-      "options": ["A.选项内容", "B.选项内容", "C.选项内容", "D.选项内容"],
+      "question": "Question text (specific, grounded in the textbook)",
+      "options": ["A. option", "B. option", "C. option", "D. option"],
       "answer": "A",
-      "explanation": "解析：为什么选A，引用教材内容（50字以内）"
+      "explanation": "Why A is correct, citing the text (≤60 words)"
     },
     {
       "type": "判断题",
-      "question": "判断该说法是否正确：[具体陈述]",
+      "question": "True or False: [specific claim from the text]",
       "options": null,
       "answer": "正确",
-      "explanation": "解析内容（30字以内）"
+      "explanation": "Explanation citing the text (≤40 words)"
     }
   ]
 }`;

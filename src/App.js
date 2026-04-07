@@ -487,12 +487,17 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
       await ensurePdfJs();
       const buf = await file.arrayBuffer();
       const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
-      const pageTexts = [];
-      const numPages = Math.min(pdf.numPages, 40);
-      for (let i = 1; i <= numPages; i++) {
+      const totalPages = pdf.numPages;
+
+      // Sample strategy: skip likely cover/TOC pages (first 3), sample up to 50 content pages
+      const startPage = Math.min(4, totalPages);
+      const endPage = Math.min(startPage + 49, totalPages);
+
+      // First pass: collect all page texts to detect running headers/footers
+      const rawPageTexts = [];
+      for (let i = startPage; i <= endPage; i++) {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
-        // Sort items by Y position (top to bottom), then X (left to right)
         const items = (content.items || [])
           .filter(item => item.str && item.str.trim())
           .sort((a, b) => {
@@ -505,16 +510,45 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
         for (const item of items) {
           const y = item.transform?.[5] || 0;
           if (lastY !== null && Math.abs(y - lastY) > 8) pageText += "\n";
-
           else if (pageText && !pageText.endsWith(" ")) pageText += " ";
           pageText += item.str;
           lastY = y;
         }
-        if (pageText.trim()) pageTexts.push(pageText.trim());
+        if (pageText.trim()) rawPageTexts.push(pageText.trim());
       }
-      text = pageTexts.join("\n\n").trim();
 
+      // Detect running headers/footers: short lines (< 80 chars) appearing in 30%+ of pages
+      const lineFreq = {};
+      const sampledCount = rawPageTexts.length;
+      rawPageTexts.forEach(pt => {
+        const firstLine = pt.split("\n")[0].trim();
+        const lastLine = pt.split("\n").slice(-1)[0].trim();
+        [firstLine, lastLine].forEach(l => {
+          if (l.length > 0 && l.length < 80) {
+            lineFreq[l] = (lineFreq[l] || 0) + 1;
+          }
+        });
+      });
+      const threshold = Math.max(2, Math.floor(sampledCount * 0.3));
+      const headerFooterSet = new Set(
+        Object.entries(lineFreq).filter(([, c]) => c >= threshold).map(([l]) => l)
+      );
 
+      const pageTexts = rawPageTexts.map(pt => {
+        return pt
+          .split("\n")
+          .filter(l => !headerFooterSet.has(l.trim()))
+          .join("\n");
+      }).filter(pt => pt.trim().length > 0);
+
+      let rawText = pageTexts.join("\n\n").trim();
+
+      // Fix hyphenated line breaks common in English academic PDFs (e.g. "algo-\nrithm")
+      rawText = rawText.replace(/([a-zA-Z])-\n([a-zA-Z])/g, "$1$2");
+      // Collapse excessive blank lines
+      rawText = rawText.replace(/\n{3,}/g, "\n\n");
+
+      text = normalizeMaterialText(rawText);
     } catch (e) {
       console.error("PDF extraction error:", e.message);
     }
@@ -611,9 +645,26 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
     }
   } catch (e) {}
 
+  // Build diagnostic info for the UI
+  const textLen = text.trim().length;
+  const englishRatio = textLen > 0
+    ? (text.match(/[a-zA-Z]/g) || []).length / textLen
+    : 0;
+  const textDiag = {
+    charCount: textLen,
+    language: englishRatio > 0.4 ? "English" : "Chinese",
+    quality: !hasText ? "poor" : textLen < 500 ? "low" : textLen < 2000 ? "medium" : "good",
+    hint: !hasText
+      ? "未能提取文字（扫描版 PDF），题目质量很低，建议使用可选中文字的电子版 PDF"
+      : textLen < 500
+      ? `提取文字较少（${textLen} 字符），建议上传内容更多的 PDF 以提升出题质量`
+      : `提取到 ${textLen} 字符（${englishRatio > 0.4 ? "英文" : "中文"}教材），题目基于真实教材内容生成`,
+  };
+
   return {
     topics, questions, insertedCount, materialLinked,
     hasText, usedApi, pdfLikelyScanned: !hasText,
+    textDiag,
     parseHint: !hasText ? "未能从 PDF 提取文字（可能是扫描版），建议使用可选中文字的电子版 PDF。" : null,
   };
 };
@@ -1465,8 +1516,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       const hint = (!fetchedFile && [".doc", ".docx", ".ppt", ".pptx"].includes(getFileExt(material?.file_name || "")))
         ? "（当前建议优先上传 PDF，DOCX/PPTX 容易提取失败）"
         : "";
-      const scanHint = result?.parseHint ? ` ${result.parseHint}` : "";
-      setMaterialGenerateMsg(inserted > 0 ? `已为该资料补充 ${inserted} 道题。${scanHint}` : `补题完成，但未新增题目。${hint}${scanHint}`);
+      const diagHint = result?.textDiag?.hint ? ` | ${result.textDiag.hint}` : (result?.parseHint ? ` ${result.parseHint}` : "");
+      setMaterialGenerateMsg(inserted > 0 ? `已为该资料补充 ${inserted} 道题。${diagHint}` : `补题完成，但未新增题目。${hint}${diagHint}`);
       return { ok: inserted > 0, inserted };
     } catch (e) {
       setMaterialGenerateMsg("补题失败：" + (e?.message || "未知错误"));
@@ -2085,9 +2136,9 @@ function UploadPage({ setPage, profile }) {
             genCount: 6,
             actorName: profile?.name || "用户",
           });
-          const linkedHint = result.materialLinked ? "" : "（当前数据库缺少 questions.material_id，题目已入库但未绑定资料；请执行 SQL 补齐后可按资料精准练习）";
-          const scanHint = result.parseHint ? ` ${result.parseHint}` : "";
-          setSuccess(`上传成功！已提取 ${result.topics.length} 个知识点，入库 ${result.insertedCount ?? result.questions.length} 道题目。${linkedHint}${scanHint}`);
+          const linkedHint = result.materialLinked ? "" : "（题目已入库，可在题库正常练习）";
+          const diagHint = result?.textDiag?.hint ? ` 📊 ${result.textDiag.hint}` : (result.parseHint ? ` ${result.parseHint}` : "");
+          setSuccess(`上传成功！已提取 ${result.topics.length} 个知识点，入库 ${result.insertedCount ?? result.questions.length} 道题目。${linkedHint}${diagHint}`);
         } catch (e) {
           setSuccess("上传成功！资料已发布，AI 解析稍后可在教师端重试。");
         }
