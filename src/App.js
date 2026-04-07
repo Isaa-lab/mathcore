@@ -504,17 +504,17 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
         let lastY = null;
         for (const item of items) {
           const y = item.transform?.[5] || 0;
-          if (lastY !== null && Math.abs(y - lastY) > 8) pageText += "
-";
+          if (lastY !== null && Math.abs(y - lastY) > 8) pageText += "\n";
+
           else if (pageText && !pageText.endsWith(" ")) pageText += " ";
           pageText += item.str;
           lastY = y;
         }
         if (pageText.trim()) pageTexts.push(pageText.trim());
       }
-      text = pageTexts.join("
+      text = pageTexts.join("\n\n").trim();
 
-").trim();
+
     } catch (e) {
       console.error("PDF extraction error:", e.message);
     }
