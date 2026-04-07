@@ -1698,102 +1698,161 @@ function KnowledgePage({ setPage, setChapterFilter }) {
     setTopicMastery((prev) => ({ ...prev, [topic.id]: { ...(prev[topic.id] || {}), status } }));
   };
 
+  const [selectedTopic, setSelectedTopic] = useState(null);
+
   const selectedMaterial = materials.find((m) => m.id === selectedMaterialId) || null;
-  const topicsForMaterial = aiTopics.filter((t) => t.material_id === selectedMaterialId);
+
+  // Build course knowledge points from hardcoded CHAPTERS + KNOWLEDGE_CONTENT
+  const courseTopics = selectedMaterial
+    ? CHAPTERS.filter(ch => ch.course === selectedMaterial.course)
+        .flatMap(ch =>
+          ch.topics.map(topicName => ({
+            id: `${ch.num}__${topicName}`,
+            name: topicName,
+            chapterNum: ch.num,
+            chapterName: ch.name,
+            hasDetail: !!KNOWLEDGE_CONTENT[topicName],
+            intro: KNOWLEDGE_CONTENT[topicName]?.intro || null,
+          }))
+        )
+    : [];
+
+  // AI-extracted topics from DB (for future use when AI extraction works)
+  const aiTopicsForMaterial = aiTopics.filter((t) => t.material_id === selectedMaterialId);
+
+  const totalTopicCount = courseTopics.length + aiTopicsForMaterial.length;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16, padding: "2rem", maxWidth: 1200, margin: "0 auto" }}>
-      <div style={{ ...s.card, padding: "1rem 0", height: "fit-content" }}>
-        <div style={{ padding: "8px 14px 12px", borderBottom: "1px solid #f0f0f0", marginBottom: 8 }}>
-          <div style={{ fontSize: 13, color: "#666", fontWeight: 700 }}>上传资料知识库</div>
-          <div style={{ fontSize: 12, color: "#999", marginTop: 4 }}>所有上传资料都会在这里沉淀为知识点</div>
-        </div>
-        {materials.map((m) => {
-          const active = selectedMaterialId === m.id;
-          const cnt = aiTopics.filter((t) => t.material_id === m.id).length;
-          return (
-            <div
-              key={m.id}
-              onClick={() => setSelectedMaterialId(m.id)}
-              style={{
-                padding: "10px 14px",
-                cursor: "pointer",
-                borderLeft: `3px solid ${active ? G.teal : "transparent"}`,
-                background: active ? G.tealLight : "transparent",
-              }}
-            >
-              <div style={{ fontSize: 14, fontWeight: active ? 700 : 500, color: active ? G.tealDark : "#222" }}>{m.title}</div>
-              <div style={{ fontSize: 11, color: "#888", marginTop: 3 }}>{m.course || "未分类"} · {m.chapter || "未分章"} · {cnt} 知识点</div>
-            </div>
-          );
-        })}
-        {materials.length === 0 && <div style={{ padding: "12px 14px", color: "#999", fontSize: 13 }}>暂无资料，请先上传 PDF</div>}
-      </div>
-
-      <div style={{ ...s.card }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18, paddingBottom: 14, borderBottom: "1px solid #f0f0f0" }}>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>{selectedMaterial?.title || "请选择资料"}</div>
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <Badge color="teal">{selectedMaterial?.course || "未分类"}</Badge>
-              <Badge color="blue">{selectedMaterial?.chapter || "未分章"}</Badge>
-              <Badge color="purple">{topicsForMaterial.length} 个知识点</Badge>
-            </div>
+    <>
+      {selectedTopic && (
+        <TopicModal
+          topic={selectedTopic}
+          onClose={() => setSelectedTopic(null)}
+          setPage={setPage}
+          setChapterFilter={setChapterFilter}
+        />
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16, padding: "2rem", maxWidth: 1200, margin: "0 auto" }}>
+        <div style={{ ...s.card, padding: "1rem 0", height: "fit-content" }}>
+          <div style={{ padding: "8px 14px 12px", borderBottom: "1px solid #f0f0f0", marginBottom: 8 }}>
+            <div style={{ fontSize: 13, color: "#666", fontWeight: 700 }}>资料知识库</div>
+            <div style={{ fontSize: 12, color: "#999", marginTop: 4 }}>点击资料查看对应课程知识点</div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Btn size="sm" onClick={() => reloadKnowledge()}>刷新</Btn>
-            <Btn size="sm" onClick={() => setPage("上传资料")}>上传新资料</Btn>
-            <Btn
-              size="sm"
-              variant="primary"
-              onClick={() => {
-                if (!selectedMaterial) return;
-                setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
-              }}
-              disabled={!selectedMaterial}
-            >
-              进入该资料练习 →
-            </Btn>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {topicsForMaterial.map((t) => (
-            <div key={t.id} style={{ border: "1.5px solid " + G.purple + "33", borderRadius: 14, padding: "14px 16px", background: "#fcfbff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#111" }}>{t.name}</div>
-                  {t.chapter ? <div style={{ fontSize: 12, color: "#999", marginTop: 2 }}>大纲：{t.chapter}</div> : null}
-                  <div style={{ fontSize: 13, color: "#666", marginTop: 4, lineHeight: 1.6 }}>{t.summary || "暂无简介"}</div>
+          {materials.map((m) => {
+            const active = selectedMaterialId === m.id;
+            const cnt = CHAPTERS.filter(ch => ch.course === m.course).flatMap(ch => ch.topics).length;
+            return (
+              <div
+                key={m.id}
+                onClick={() => setSelectedMaterialId(m.id)}
+                style={{
+                  padding: "10px 14px",
+                  cursor: "pointer",
+                  borderLeft: `3px solid ${active ? getCourseBorderColor(m.course) : "transparent"}`,
+                  background: active ? G.tealLight : "transparent",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: active ? 700 : 500, color: active ? G.tealDark : "#222" }}>{m.title}</div>
+                <div style={{ fontSize: 11, color: "#888", marginTop: 3 }}>
+                  {m.course || "未分类"} · {cnt > 0 ? `${cnt} 个知识点` : "暂无"}
                 </div>
-                <Badge color="purple">AI提取</Badge>
               </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Btn size="sm" onClick={() => markTopicMastery(t, "doing")}>学习中</Btn>
-                <Btn size="sm" variant="primary" onClick={() => markTopicMastery(t, "done")}>标记已掌握</Btn>
-                <Btn
-                  size="sm"
-                  onClick={() => {
-                    setChapterFilter(t.name);
-                    setPage("题库练习");
-                  }}
-                >
-                  练这个知识点 →
-                </Btn>
-                <Badge color={(topicMastery[t.id]?.status || "todo") === "done" ? "teal" : (topicMastery[t.id]?.status || "todo") === "doing" ? "amber" : "red"}>
-                  {(topicMastery[t.id]?.status || "todo") === "done" ? "已掌握" : (topicMastery[t.id]?.status || "todo") === "doing" ? "学习中" : "未开始"}
-                </Badge>
+            );
+          })}
+          {materials.length === 0 && <div style={{ padding: "12px 14px", color: "#999", fontSize: 13 }}>暂无资料，请先上传 PDF</div>}
+        </div>
+
+        <div style={{ ...s.card }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18, paddingBottom: 14, borderBottom: "1px solid #f0f0f0" }}>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>{selectedMaterial?.title || "请选择资料"}</div>
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <Badge color={getCourseColor(selectedMaterial?.course)}>{selectedMaterial?.course || "未分类"}</Badge>
+                <Badge color="blue">{selectedMaterial?.chapter || "全部章节"}</Badge>
+                <Badge color="purple">{totalTopicCount} 个知识点</Badge>
               </div>
             </div>
-          ))}
-          {selectedMaterial && topicsForMaterial.length === 0 && (
-            <div style={{ color: "#999", padding: "1rem", border: "1px dashed #ddd", borderRadius: 12 }}>
-              该资料暂未提取到知识点，点击「进入该资料练习」可触发自动补题与再提取。
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn size="sm" onClick={() => reloadKnowledge()}>刷新</Btn>
+              <Btn size="sm" onClick={() => setPage("上传资料")}>上传新资料</Btn>
+              <Btn
+                size="sm"
+                variant="primary"
+                onClick={() => {
+                  if (!selectedMaterial) return;
+                  setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
+                }}
+                disabled={!selectedMaterial}
+              >
+                进入该资料练习 →
+              </Btn>
+            </div>
+          </div>
+
+          {/* Group by chapter */}
+          {courseTopics.length > 0 ? (
+            CHAPTERS.filter(ch => ch.course === selectedMaterial?.course).map(ch => {
+              const chTopics = courseTopics.filter(t => t.chapterNum === ch.num);
+              if (chTopics.length === 0) return null;
+              return (
+                <div key={ch.num} style={{ marginBottom: 24 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#555", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ background: getCourseBorderColor(selectedMaterial?.course), color: "#fff", borderRadius: 6, padding: "2px 8px", fontSize: 11 }}>{ch.num}</span>
+                    {ch.name}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 10 }}>
+                    {chTopics.map(t => {
+                      const mastery = topicMastery[t.id]?.status || "todo";
+                      const masteryColor = mastery === "done" ? "teal" : mastery === "doing" ? "amber" : "red";
+                      const masteryLabel = mastery === "done" ? "已掌握 ✓" : mastery === "doing" ? "学习中" : "未开始";
+                      return (
+                        <div key={t.id} style={{ border: `1.5px solid ${t.hasDetail ? G.purple + "44" : "#eee"}`, borderRadius: 12, padding: "14px 16px", background: t.hasDetail ? "#fcfbff" : "#fafafa", display: "flex", flexDirection: "column", gap: 8 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: "#111", lineHeight: 1.4 }}>{t.name}</div>
+                            <Badge color={masteryColor} style={{ flexShrink: 0 }}>{masteryLabel}</Badge>
+                          </div>
+                          {t.intro && (
+                            <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                              {t.intro}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                            {t.hasDetail && (
+                              <button
+                                onClick={() => setSelectedTopic(t.name)}
+                                style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, background: G.purple, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}
+                              >
+                                查看详解 📖
+                              </button>
+                            )}
+                            <button
+                              onClick={() => { setChapterFilter(t.chapterNum); setPage("题库练习"); }}
+                              style={{ padding: "5px 12px", fontSize: 12, background: G.blueLight, color: G.blue, border: `1px solid ${G.blue}44`, borderRadius: 8, cursor: "pointer" }}
+                            >
+                              做相关题目 ✏️
+                            </button>
+                            <button
+                              onClick={() => markTopicMastery(t, mastery === "done" ? "todo" : "done")}
+                              style={{ padding: "5px 12px", fontSize: 12, background: mastery === "done" ? G.tealLight : "#fff", color: mastery === "done" ? G.teal : "#888", border: `1px solid ${mastery === "done" ? G.teal : "#ddd"}`, borderRadius: 8, cursor: "pointer" }}
+                            >
+                              {mastery === "done" ? "取消掌握" : "标记已掌握"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <div style={{ color: "#999", padding: "2rem", textAlign: "center", border: "1px dashed #ddd", borderRadius: 12 }}>
+              {selectedMaterial ? `「${selectedMaterial.course}」课程暂无配置知识点` : "请在左侧选择资料"}
             </div>
           )}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -2053,8 +2112,20 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             <span style={{ fontSize: 15, fontWeight: 700, color: "#111" }}>🔢 题目数量</span>
             <span style={{ fontSize: 15, fontWeight: 700, color: G.teal }}>{Math.min(quizCount, previewPool.length)} 题（共 {previewPool.length} 可用）</span>
           </div>
-          <input type="range" min={1} max={Math.min(previewPool.length || 30, 30)} value={quizCount} onChange={e => setQuizCount(Number(e.target.value))} style={{ width: "100%", accentColor: G.teal }} />
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginTop: 4 }}><span>1</span><span>10</span><span>20</span><span>30</span></div>
+          {(() => {
+            const sliderMax = Math.max(previewPool.length || 1, 1);
+            const t1 = Math.round(sliderMax * 0.25);
+            const t2 = Math.round(sliderMax * 0.5);
+            const t3 = Math.round(sliderMax * 0.75);
+            return (
+              <>
+                <input type="range" min={1} max={sliderMax} value={Math.min(quizCount, sliderMax)} onChange={e => setQuizCount(Number(e.target.value))} style={{ width: "100%", accentColor: G.teal }} />
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#aaa", marginTop: 4 }}>
+                  <span>1</span><span>{t1}</span><span>{t2}</span><span>{t3}</span><span>{sliderMax}</span>
+                </div>
+              </>
+            );
+          })()}
         </div>
 
         {/* Timer toggle */}
