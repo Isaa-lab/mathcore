@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 import katex from "katex";
 import "katex/dist/katex.min.css";
@@ -1347,7 +1347,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
   const chapterStr = (course && course !== "数值分析") ? `${course} ${chapterNum}` : chapterNum;
 
   // Find related questions: match by chapter string
-  const relatedQs = React.useMemo(() => {
+  const relatedQs = useMemo(() => {
     if (!chapterStr) return [];
     const matched = ALL_QUESTIONS.filter(q => q.chapter && q.chapter === chapterStr);
     if (matched.length > 0) return matched.slice(0, 4);
