@@ -1338,78 +1338,53 @@ const KNOWLEDGE_CONTENT = {
   },
 };
 
-// ── Section Header helper ────────────────────────────────────────────────────
-function SectionHeader({ icon, label, color }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-      <div style={{ width: 3, height: 18, borderRadius: 2, background: color || G.teal }} />
-      <span style={{ fontSize: 11, fontWeight: 700, color: color || G.teal, textTransform: "uppercase", letterSpacing: "0.1em" }}>{icon} {label}</span>
-    </div>
-  );
-}
-
-// ── Topic Modal ───────────────────────────────────────────────────────────────
+// ── Topic Detail Panel (replaces modal, renders inline or as overlay) ─────────
 function TopicModal({ topic, onClose, setPage, setChapterFilter }) {
   const content = KNOWLEDGE_CONTENT[topic];
   const vizKey = content?.viz;
-  const [activeTab, setActiveTab] = React.useState("learn");
-
-  const tabs = [
-    { id: "learn", label: "知识讲解", icon: "📖" },
-    { id: "viz", label: "可视化", icon: "🎨", disabled: !(vizKey && VIZ_MAP[vizKey]) },
-    { id: "examples", label: "例题讲解", icon: "✏️", disabled: !(content?.examples?.length) },
-  ];
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: "1rem" }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, padding: 0, maxWidth: 680, width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,0.22)" }}>
-
-        {/* Header */}
-        <div style={{ padding: "1.5rem 1.8rem 0", borderBottom: `2px solid ${G.tealLight}` }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "#111", marginBottom: 4 }}>{topic}</div>
-              <div style={{ fontSize: 12, color: G.teal, fontWeight: 500, letterSpacing: "0.08em" }}>KNOWLEDGE POINT</div>
-            </div>
-            <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: "50%", border: "none", background: "#f5f5f5", cursor: "pointer", fontSize: 15, color: "#666", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: "1rem" }}
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: "#fff", borderRadius: 20, maxWidth: 700, width: "100%", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 24px 60px rgba(0,0,0,0.22)" }}
+      >
+        {/* ── Header ── */}
+        <div style={{ position: "sticky", top: 0, background: "#fff", zIndex: 10, padding: "1.4rem 1.8rem 1rem", borderBottom: `2px solid ${G.tealLight}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: "#111" }}>{topic}</div>
+            <div style={{ fontSize: 12, color: G.teal, fontWeight: 600, marginTop: 3, letterSpacing: "0.06em" }}>知识点详解</div>
           </div>
-          {/* Tabs */}
-          {content && (
-            <div style={{ display: "flex", gap: 4 }}>
-              {tabs.map(t => (
-                <button key={t.id} disabled={t.disabled} onClick={() => !t.disabled && setActiveTab(t.id)}
-                  style={{ padding: "8px 16px", border: "none", borderRadius: "8px 8px 0 0", cursor: t.disabled ? "default" : "pointer", fontSize: 13, fontWeight: activeTab === t.id ? 700 : 400, background: activeTab === t.id ? G.teal : t.disabled ? "#f0f0f0" : "#f5f5f5", color: activeTab === t.id ? "#fff" : t.disabled ? "#ccc" : "#555", transition: "all 0.15s" }}>
-                  {t.icon} {t.label}
-                </button>
-              ))}
-            </div>
-          )}
+          <button onClick={onClose} style={{ width: 34, height: 34, borderRadius: "50%", border: "none", background: "#f0f0f0", cursor: "pointer", fontSize: 16, color: "#555", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
         </div>
 
-        {/* Body */}
-        <div style={{ overflowY: "auto", padding: "1.5rem 1.8rem", flex: 1 }}>
+        {/* ── Body ── */}
+        <div style={{ padding: "1.5rem 1.8rem" }}>
           {!content ? (
-            <div style={{ padding: "3rem", textAlign: "center", color: "#888", fontSize: 15 }}>该知识点内容正在整理中，敬请期待 📚</div>
-          ) : activeTab === "learn" ? (
+            <div style={{ padding: "3rem", textAlign: "center", color: "#aaa", fontSize: 15 }}>该知识点内容正在整理中 📚</div>
+          ) : (
             <>
-              {/* Intro */}
-              <div style={{ fontSize: 14.5, color: "#444", lineHeight: 1.85, marginBottom: 20, padding: "14px 18px", background: G.tealLight, borderRadius: 12, borderLeft: `4px solid ${G.teal}` }}>{content.intro}</div>
-
-              {/* Formulas */}
+              {/* 1. 知识讲解 */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <div style={{ width: 4, height: 20, borderRadius: 2, background: G.teal }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: G.teal }}>知识讲解</span>
+              </div>
+              <div style={{ fontSize: 14.5, color: "#444", lineHeight: 1.85, marginBottom: 16, padding: "14px 18px", background: G.tealLight, borderRadius: 12, borderLeft: `4px solid ${G.teal}` }}>
+                {content.intro}
+              </div>
               <div style={{ marginBottom: 20 }}>
-                <SectionHeader icon="📐" label="核心公式" color={G.purple} />
                 {content.formulas.map((f, i) => (
                   <div key={i} style={{ marginBottom: 10, padding: "14px 18px", background: G.purpleLight, borderRadius: 10, border: `1px solid ${G.purple}22` }}>
-                    <div style={{ fontSize: 11, color: G.purple, fontWeight: 600, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>{f.label}</div>
+                    <div style={{ fontSize: 11, color: G.purple, fontWeight: 700, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.07em" }}>{f.label}</div>
                     <M tex={f.tex} block />
                   </div>
                 ))}
               </div>
-
-              {/* Steps */}
               {content.steps && (
-                <div style={{ marginBottom: 20 }}>
-                  <SectionHeader icon="🔢" label="解题步骤" color={G.blue} />
+                <div style={{ marginBottom: 16 }}>
                   {content.steps.map((s, i) => (
                     <div key={i} style={{ display: "flex", gap: 12, marginBottom: 10 }}>
                       <div style={{ width: 26, height: 26, borderRadius: "50%", background: G.blue, color: "#fff", fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</div>
@@ -1418,59 +1393,69 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter }) {
                   ))}
                 </div>
               )}
-
-              {/* Note */}
               {content.note && (
-                <div style={{ padding: "14px 18px", background: G.amberLight, borderRadius: 10, borderLeft: `4px solid ${G.amber}`, fontSize: 14, color: "#5a3a00", lineHeight: 1.75 }}>
+                <div style={{ padding: "12px 16px", background: G.amberLight, borderRadius: 10, borderLeft: `4px solid ${G.amber}`, fontSize: 13.5, color: "#5a3a00", lineHeight: 1.75, marginBottom: 20 }}>
                   <strong>💡 重点提示：</strong>{content.note}
                 </div>
               )}
-            </>
-          ) : activeTab === "viz" ? (
-            <>
-              <SectionHeader icon="🎨" label="可视化交互" color={G.teal} />
-              <div style={{ padding: "1.5rem", background: "#fafafa", borderRadius: 14, border: "1px solid #eee", marginBottom: 16 }}>
-                {VIZ_MAP[vizKey]}
-              </div>
-              <div style={{ fontSize: 13, color: "#666", lineHeight: 1.7, padding: "12px 16px", background: G.blueLight, borderRadius: 10 }}>
-                上图展示了 <strong>{topic}</strong> 的核心几何直觉。结合图形理解公式中各变量的含义，有助于更直观地掌握算法原理。
-              </div>
-            </>
-          ) : activeTab === "examples" ? (
-            <>
-              <SectionHeader icon="✏️" label="例题讲解" color={G.amber} />
-              {content.examples.map((ex, idx) => (
-                <div key={idx} style={{ marginBottom: 24, borderRadius: 14, border: `1px solid ${G.amber}44`, overflow: "hidden" }}>
-                  {/* Problem */}
-                  <div style={{ padding: "14px 18px", background: G.amberLight, borderLeft: `4px solid ${G.amber}` }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: G.amber, letterSpacing: "0.1em", marginBottom: 6 }}>PROBLEM {idx + 1}</div>
-                    <div style={{ fontSize: 14.5, color: "#3a2800", lineHeight: 1.75, fontWeight: 500 }}>{ex.problem}</div>
+
+              {/* 2. 可视化互动 */}
+              {vizKey && VIZ_MAP[vizKey] && (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "24px 0 12px" }}>
+                    <div style={{ width: 4, height: 20, borderRadius: 2, background: G.amber }} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: G.amber }}>可视化互动</span>
                   </div>
-                  {/* Steps */}
-                  <div style={{ padding: "14px 18px", background: "#fff" }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: G.blue, letterSpacing: "0.1em", marginBottom: 10 }}>解题过程</div>
-                    {ex.steps.map((s, si) => (
-                      <div key={si} style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "flex-start" }}>
-                        <div style={{ width: 22, height: 22, borderRadius: "50%", background: G.blueLight, color: G.blue, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>{si + 1}</div>
-                        <div style={{ fontSize: 13.5, color: "#333", lineHeight: 1.7 }}>{s}</div>
+                  <div style={{ padding: "1.2rem", background: "#fafafa", borderRadius: 14, border: "1px solid #eee", marginBottom: 16 }}>
+                    {VIZ_MAP[vizKey]}
+                  </div>
+                  <div style={{ fontSize: 13, color: "#666", lineHeight: 1.7, padding: "10px 14px", background: G.blueLight, borderRadius: 10, marginBottom: 20 }}>
+                    上图直观展示了 <strong>{topic}</strong> 的核心原理，帮助理解公式中各变量的几何含义。
+                  </div>
+                </>
+              )}
+
+              {/* 3. 例题讲解 */}
+              {content.examples?.length > 0 && (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "24px 0 14px" }}>
+                    <div style={{ width: 4, height: 20, borderRadius: 2, background: G.purple }} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: G.purple }}>例题讲解</span>
+                  </div>
+                  {content.examples.map((ex, idx) => (
+                    <div key={idx} style={{ marginBottom: 20, borderRadius: 14, border: `1px solid ${G.purple}33`, overflow: "hidden" }}>
+                      <div style={{ padding: "14px 18px", background: G.purpleLight, borderLeft: `4px solid ${G.purple}` }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: G.purple, letterSpacing: "0.1em", marginBottom: 6 }}>例题 {idx + 1}</div>
+                        <div style={{ fontSize: 14.5, color: "#2a1060", lineHeight: 1.75, fontWeight: 500 }}>{ex.problem}</div>
                       </div>
-                    ))}
-                  </div>
-                  {/* Answer */}
-                  <div style={{ padding: "12px 18px", background: "#f0faf5", borderTop: "1px solid #e0f0e8" }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: G.tealDark, letterSpacing: "0.1em", marginBottom: 5 }}>最终答案</div>
-                    <div style={{ fontSize: 13.5, color: "#1a4a35", lineHeight: 1.7 }}>{ex.answer}</div>
-                  </div>
-                </div>
-              ))}
+                      <div style={{ padding: "14px 18px", background: "#fff" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: G.blue, letterSpacing: "0.1em", marginBottom: 10 }}>解题过程</div>
+                        {ex.steps.map((s, si) => (
+                          <div key={si} style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "flex-start" }}>
+                            <div style={{ width: 22, height: 22, borderRadius: "50%", background: G.blueLight, color: G.blue, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>{si + 1}</div>
+                            <div style={{ fontSize: 13.5, color: "#333", lineHeight: 1.7 }}>{s}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ padding: "12px 18px", background: "#f0faf5", borderTop: "1px solid #d8f0e4" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: G.tealDark, letterSpacing: "0.1em", marginBottom: 5 }}>最终答案</div>
+                        <div style={{ fontSize: 13.5, color: "#1a4a35", lineHeight: 1.7 }}>{ex.answer}</div>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
             </>
-          ) : null}
+          )}
         </div>
 
-        {/* Footer */}
+        {/* ── Footer ── */}
         <div style={{ padding: "1rem 1.8rem", borderTop: "1px solid #f0f0f0", display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center" }}>
           {setPage && setChapterFilter && TOPIC_CHAPTER[topic] && (
-            <button onClick={() => { const ch = TOPIC_CHAPTER[topic]; setChapterFilter(ch); onClose(); setPage("题库练习"); }} style={{ padding: "9px 18px", background: G.blueLight, color: G.blue, border: `1px solid ${G.blue}44`, borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+            <button
+              onClick={() => { const ch = TOPIC_CHAPTER[topic]; setChapterFilter(ch); onClose(); setPage("题库练习"); }}
+              style={{ padding: "9px 20px", background: G.blueLight, color: G.blue, border: `1px solid ${G.blue}44`, borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+            >
               ✏️ 做相关题目 →
             </button>
           )}
@@ -2106,42 +2091,62 @@ function KnowledgePage({ setPage, setChapterFilter }) {
                     <span style={{ background: getCourseBorderColor(selectedMaterial?.course), color: "#fff", borderRadius: 6, padding: "2px 8px", fontSize: 11 }}>{ch.num}</span>
                     {ch.name}
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 10 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
                     {chTopics.map(t => {
                       const mastery = topicMastery[t.id]?.status || "todo";
-                      const masteryColor = mastery === "done" ? "teal" : mastery === "doing" ? "amber" : "red";
-                      const masteryLabel = mastery === "done" ? "已掌握 ✓" : mastery === "doing" ? "学习中" : "未开始";
                       return (
-                        <div key={t.id} style={{ border: `1.5px solid ${t.hasDetail ? G.purple + "44" : "#eee"}`, borderRadius: 12, padding: "14px 16px", background: t.hasDetail ? "#fcfbff" : "#fafafa", display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div
+                          key={t.id}
+                          onClick={() => t.hasDetail && setSelectedTopic(t.name)}
+                          style={{
+                            border: `1.5px solid ${t.hasDetail ? G.purple + "44" : "#eee"}`,
+                            borderRadius: 14,
+                            padding: "16px 18px",
+                            background: t.hasDetail ? "#fcfbff" : "#fafafa",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 10,
+                            cursor: t.hasDetail ? "pointer" : "default",
+                            transition: "box-shadow 0.15s, transform 0.1s",
+                          }}
+                          onMouseEnter={e => { if (t.hasDetail) { e.currentTarget.style.boxShadow = "0 4px 20px rgba(124,58,237,0.15)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
+                          onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
+                        >
+                          {/* Title row */}
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                             <div style={{ fontSize: 15, fontWeight: 700, color: "#111", lineHeight: 1.4 }}>{t.name}</div>
-                            <Badge color={masteryColor} style={{ flexShrink: 0 }}>{masteryLabel}</Badge>
+                            {mastery === "done" && (
+                              <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, color: G.teal, background: G.tealLight, padding: "2px 8px", borderRadius: 20, whiteSpace: "nowrap" }}>已掌握 ✓</span>
+                            )}
                           </div>
+                          {/* Intro snippet */}
                           {t.intro && (
                             <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
                               {t.intro}
                             </div>
                           )}
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                          {/* Action row */}
+                          <div style={{ display: "flex", gap: 8, marginTop: 2 }} onClick={e => e.stopPropagation()}>
                             {t.hasDetail && (
                               <button
                                 onClick={() => setSelectedTopic(t.name)}
-                                style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, background: G.purple, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}
+                                style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 600, background: G.purple, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
                               >
-                                查看详解 📖
+                                📖 查看详解
                               </button>
                             )}
                             <button
                               onClick={() => { setChapterFilter(t.chapterNum); setPage("题库练习"); }}
-                              style={{ padding: "5px 12px", fontSize: 12, background: G.blueLight, color: G.blue, border: `1px solid ${G.blue}44`, borderRadius: 8, cursor: "pointer" }}
+                              style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 500, background: G.blueLight, color: G.blue, border: `1px solid ${G.blue}33`, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
                             >
-                              做相关题目 ✏️
+                              ✏️ 练习题目
                             </button>
                             <button
                               onClick={() => markTopicMastery(t, mastery === "done" ? "todo" : "done")}
-                              style={{ padding: "5px 12px", fontSize: 12, background: mastery === "done" ? G.tealLight : "#fff", color: mastery === "done" ? G.teal : "#888", border: `1px solid ${mastery === "done" ? G.teal : "#ddd"}`, borderRadius: 8, cursor: "pointer" }}
+                              title={mastery === "done" ? "取消掌握" : "标记已掌握"}
+                              style={{ padding: "7px 10px", fontSize: 16, background: mastery === "done" ? G.tealLight : "#f5f5f5", border: `1px solid ${mastery === "done" ? G.teal : "#ddd"}`, borderRadius: 8, cursor: "pointer", lineHeight: 1 }}
                             >
-                              {mastery === "done" ? "取消掌握" : "标记已掌握"}
+                              {mastery === "done" ? "✅" : "☆"}
                             </button>
                           </div>
                         </div>
