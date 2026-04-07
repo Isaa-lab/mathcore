@@ -87,39 +87,55 @@ Respond ONLY with valid JSON, no extra text:
 
   let responseText = "";
   let apiUsed = "";
+  let quotaExceeded = false;
 
-  // ── Gemini (free) ──────────────────────────────────────────────────────────
-  if (GEMINI_KEY) {
+  // Helper: call one Gemini model, returns text or null; sets quotaExceeded on 429
+  const callGemini = async (model) => {
     try {
       const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.3,
-              maxOutputTokens: 4096,
-            },
+            generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
           }),
         }
       );
       if (r.ok) {
         const d = await r.json();
         const t = d?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        if (t.length > 20) { responseText = t; apiUsed = "gemini"; }
-        else {
-          const reason = d?.candidates?.[0]?.finishReason;
-          console.error("Gemini empty response, reason:", reason, JSON.stringify(d).slice(0, 300));
-        }
-      } else {
-        const err = await r.text();
-        console.error("Gemini HTTP error:", r.status, err.slice(0, 300));
+        if (t.length > 20) return t;
+        const reason = d?.candidates?.[0]?.finishReason;
+        console.error(`Gemini(${model}) empty, reason:`, reason);
+        return null;
       }
+      if (r.status === 429) {
+        quotaExceeded = true;
+        const err = await r.text();
+        console.error(`Gemini(${model}) 429:`, err.slice(0, 200));
+        return null;
+      }
+      const err = await r.text();
+      console.error(`Gemini(${model}) HTTP ${r.status}:`, err.slice(0, 200));
+      return null;
     } catch (e) {
-      console.error("Gemini exception:", e.message);
+      console.error(`Gemini(${model}) exception:`, e.message);
+      return null;
     }
+  };
+
+  // ── Gemini cascade: 2.0-flash → wait 4s → 2.0-flash-lite ─────────────────
+  if (GEMINI_KEY) {
+    responseText = await callGemini("gemini-2.0-flash") || "";
+    if (!responseText && quotaExceeded) {
+      // Wait 4 s then try the lighter model (higher RPM quota)
+      await new Promise(r => setTimeout(r, 4000));
+      quotaExceeded = false;
+      responseText = await callGemini("gemini-2.0-flash-lite") || "";
+    }
+    if (responseText) apiUsed = "gemini";
   }
 
   // ── Anthropic fallback ─────────────────────────────────────────────────────
@@ -152,6 +168,12 @@ Respond ONLY with valid JSON, no extra text:
   }
 
   if (!responseText) {
+    if (quotaExceeded) {
+      return res.status(429).json({
+        error: "QUOTA_EXCEEDED",
+        message: "Gemini API 每分钟配额已用完，请等待 1 分钟后重新上传/补题。",
+      });
+    }
     return res.status(500).json({
       error: "AI 调用失败。" + (GEMINI_KEY ? "GEMINI_KEY 已配置，请检查 Key 是否有效（去 aistudio.google.com/apikey 验证）" : "请配置 GEMINI_KEY"),
     });

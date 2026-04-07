@@ -569,6 +569,8 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
 
   const hasText = text.trim().length > 80;
   let topics = [], questions = [], usedApi = false;
+  let apiQuotaExceeded = false;
+  let apiErrorMsg = "";
 
   // Step 3: Call /api/extract with the extracted text
   if (hasText) {
@@ -584,11 +586,16 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
         }),
       });
       const data = await resp.json();
-      if (!data.error) {
+      if (resp.status === 429 || data.error === "QUOTA_EXCEEDED") {
+        apiQuotaExceeded = true;
+        apiErrorMsg = data.message || "Gemini API 配额已用完，请等待 1 分钟后重试。";
+        console.warn("API quota exceeded:", apiErrorMsg);
+      } else if (!data.error) {
         topics = Array.isArray(data.topics) ? data.topics : [];
         questions = Array.isArray(data.questions) ? data.questions : [];
         usedApi = true;
       } else {
+        apiErrorMsg = data.error;
         console.error("API extract error:", data.error);
       }
     } catch (e) {
@@ -596,54 +603,64 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
     }
   }
 
-  // Step 4: Fallback - build basic questions from sentences if API fails
-  if (questions.length === 0 && hasText) {
+  // Step 4: Fallback sentence-based questions — ONLY when API failed for non-quota reasons
+  // Skip entirely on quota exceeded (would produce garbage questions)
+  if (questions.length === 0 && hasText && !apiQuotaExceeded) {
+    const isLikelySentence = (s) => {
+      if (s.length < 30 || s.length > 180) return false;
+      // Reject fragments starting with punctuation, math operators, or digits
+      if (/^[\s,，.。;；:：\-+×÷=<>()\[\]{}|\/\\^_*\d]/.test(s)) return false;
+      // Reject if math symbol density is too high (formula fragment)
+      const mathCount = (s.match(/[=+\-×÷<>()\[\]{}|\/\\^_]/g) || []).length;
+      if (mathCount > s.length * 0.15) return false;
+      // Must contain at least 5 words / tokens
+      if (s.trim().split(/\s+/).length < 5) return false;
+      // Must have real alphabetic or CJK content
+      if (!/[一-龥a-zA-Z]{3,}/.test(s)) return false;
+      return true;
+    };
+
     const sents = text
-      .split(/[。.!！?？]/)
+      .split(/[。\n]|\.\s+/)
       .map(s => s.replace(/\s+/g, " ").trim())
-      .filter(s => s.length > 20 && s.length < 200 && /[一-龥a-zA-Z]/.test(s));
+      .filter(isLikelySentence);
+
     for (let i = 0; i < sents.length && questions.length < genCount; i++) {
       const s = sents[i];
       questions.push({
-        question: `判断：「${s.slice(0, 60)}」`,
+        question: `判断：「${s.slice(0, 80)}」是否正确？`,
         options: null, answer: "正确",
-        explanation: s.slice(0, 80),
+        explanation: "请结合教材核对该陈述的准确性。",
         type: "判断题", chapter,
       });
     }
   }
-  if (questions.length === 0) {
-    questions = [{
-      question: `关于「${chapter}」，先理解定义再做题通常更有效。`,
-      options: null, answer: "正确",
-      explanation: "先掌握概念与适用条件，可减少机械套题错误。",
-      type: "判断题", chapter,
-    }];
-  }
 
-  // Step 5: Save questions to DB
+  // Step 5: Save questions to DB — skip if quota exceeded (don't persist garbage)
   let insertedCount = 0;
   let materialLinked = false;
-  try {
-    const rows = questions.map(q => ({
-      chapter: q.chapter || chapter,
-      course: material?.course || "数学",
-      type: q.type || (q.options ? "单选题" : "判断题"),
-      question: q.question,
-      options: q.options || null,
-      answer: q.answer,
-      explanation: q.explanation || "",
-      material_id: materialId,
-    }));
-    const { error: e1 } = await supabase.from("questions").insert(rows);
-    if (!e1) { insertedCount = rows.length; materialLinked = true; }
-    else {
-      // Try without material_id if column missing
-      const rows2 = rows.map(({ material_id, ...r }) => r);
-      const { error: e2 } = await supabase.from("questions").insert(rows2);
-      if (!e2) insertedCount = rows2.length;
-    }
-  } catch (e) {}
+  if (!apiQuotaExceeded && questions.length > 0) {
+    try {
+      const rows = questions.map(q => ({
+        chapter: q.chapter || chapter,
+        course: material?.course || "数学",
+        type: q.type || (q.options ? "单选题" : "判断题"),
+        question: q.question,
+        options: q.options || null,
+        answer: q.answer,
+        explanation: q.explanation || "",
+        material_id: materialId,
+      }));
+      const { error: e1 } = await supabase.from("questions").insert(rows);
+      if (!e1) { insertedCount = rows.length; materialLinked = true; }
+      else {
+        // Try without material_id if column missing
+        const rows2 = rows.map(({ material_id, ...r }) => r);
+        const { error: e2 } = await supabase.from("questions").insert(rows2);
+        if (!e2) insertedCount = rows2.length;
+      }
+    } catch (e) {}
+  }
 
   // Build diagnostic info for the UI
   const textLen = text.trim().length;
@@ -665,6 +682,8 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
     topics, questions, insertedCount, materialLinked,
     hasText, usedApi, pdfLikelyScanned: !hasText,
     textDiag,
+    apiQuotaExceeded,
+    apiErrorMsg,
     parseHint: !hasText ? "未能从 PDF 提取文字（可能是扫描版），建议使用可选中文字的电子版 PDF。" : null,
   };
 };
@@ -1516,8 +1535,12 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       const hint = (!fetchedFile && [".doc", ".docx", ".ppt", ".pptx"].includes(getFileExt(material?.file_name || "")))
         ? "（当前建议优先上传 PDF，DOCX/PPTX 容易提取失败）"
         : "";
-      const diagHint = result?.textDiag?.hint ? ` | ${result.textDiag.hint}` : (result?.parseHint ? ` ${result.parseHint}` : "");
-      setMaterialGenerateMsg(inserted > 0 ? `已为该资料补充 ${inserted} 道题。${diagHint}` : `补题完成，但未新增题目。${hint}${diagHint}`);
+      if (result?.apiQuotaExceeded) {
+        setMaterialGenerateMsg(`⚠️ ${result.apiErrorMsg || "Gemini API 配额暂时用完，请等待 1 分钟后再点击补题。"}`);
+      } else {
+        const diagHint = result?.textDiag?.hint ? ` | ${result.textDiag.hint}` : (result?.parseHint ? ` ${result.parseHint}` : "");
+        setMaterialGenerateMsg(inserted > 0 ? `已为该资料补充 ${inserted} 道题。${diagHint}` : `补题完成，但未新增题目。${hint}${diagHint}`);
+      }
       return { ok: inserted > 0, inserted };
     } catch (e) {
       setMaterialGenerateMsg("补题失败：" + (e?.message || "未知错误"));
@@ -2136,9 +2159,13 @@ function UploadPage({ setPage, profile }) {
             genCount: 6,
             actorName: profile?.name || "用户",
           });
-          const linkedHint = result.materialLinked ? "" : "（题目已入库，可在题库正常练习）";
-          const diagHint = result?.textDiag?.hint ? ` 📊 ${result.textDiag.hint}` : (result.parseHint ? ` ${result.parseHint}` : "");
-          setSuccess(`上传成功！已提取 ${result.topics.length} 个知识点，入库 ${result.insertedCount ?? result.questions.length} 道题目。${linkedHint}${diagHint}`);
+          if (result.apiQuotaExceeded) {
+            setSuccess(`上传成功！资料已保存。⚠️ ${result.apiErrorMsg || "Gemini API 配额暂时用完，请在资料库点击「补题」重试出题。"}`);
+          } else {
+            const linkedHint = result.materialLinked ? "" : "（题目已入库，可在题库正常练习）";
+            const diagHint = result?.textDiag?.hint ? ` 📊 ${result.textDiag.hint}` : (result.parseHint ? ` ${result.parseHint}` : "");
+            setSuccess(`上传成功！已提取 ${result.topics.length} 个知识点，入库 ${result.insertedCount ?? result.questions.length} 道题目。${linkedHint}${diagHint}`);
+          }
         } catch (e) {
           setSuccess("上传成功！资料已发布，AI 解析稍后可在教师端重试。");
         }
