@@ -4546,48 +4546,36 @@ function MaterialsPage({ setPage, profile }) {
 
 // ── MathText: 渲染含 LaTeX 公式的文本 ────────────────────────────────────────
 function MathText({ text }) {
-  const parts = React.useMemo(() => {
-    if (!text) return [{ type: 'text', content: '' }];
-    const segments = [];
-    const pattern = /($[\s\S]+?$|\[[s\S]+?\]|$[^$\n]+?$|\([^)]+?\))/g;
-    let last = 0, m;
-    while ((m = pattern.exec(text)) !== null) {
-      if (m.index > last) segments.push({ type: 'text', content: text.slice(last, m.index) });
-      const raw = m[0];
-      const isBlock = raw.startsWith('$') || raw.startsWith('\\[');
-      const inner = raw.replace(/^$|$$|^\[|\]$|^\(|\)$/g, '').replace(/^$|$/g, '');
-      segments.push({ type: isBlock ? 'block' : 'inline', content: inner });
-      last = m.index + raw.length;
-    }
-    if (last < text.length) segments.push({ type: 'text', content: text.slice(last) });
-    return segments;
-  }, [text]);
+  if (!text) return <span />;
+  const parts = text.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$)/);
   return (
     <span>
-      {parts.map((p, i) => {
-        if (p.type === 'text') {
-          return <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{p.content}</span>;
+      {parts.map((part, i) => {
+        if (part.startsWith('$$') && part.endsWith('$$') && part.length > 4) {
+          const inner = part.slice(2, -2).trim();
+          try {
+            const html = katex.renderToString(inner, { throwOnError: false, displayMode: true });
+            return <div key={i} style={{ overflowX: 'auto', margin: '6px 0' }} dangerouslySetInnerHTML={{ __html: html }} />;
+          } catch(e) { return <code key={i}>{part}</code>; }
+        } else if (part.startsWith('$') && part.endsWith('$') && part.length > 2) {
+          const inner = part.slice(1, -1).trim();
+          try {
+            const html = katex.renderToString(inner, { throwOnError: false, displayMode: false });
+            return <span key={i} dangerouslySetInnerHTML={{ __html: html }} />;
+          } catch(e) { return <code key={i}>{part}</code>; }
         }
-        try {
-          const html = katex.renderToString(p.content, { throwOnError: false, displayMode: p.type === 'block' });
-          return p.type === 'block'
-            ? <div key={i} style={{ overflowX: 'auto', margin: '6px 0' }} dangerouslySetInnerHTML={{ __html: html }} />
-            : <span key={i} dangerouslySetInnerHTML={{ __html: html }} />;
-        } catch {
-          return <code key={i} style={{ background: '#f0f0f0', padding: '1px 4px', borderRadius: 4, fontSize: '0.9em' }}>{p.content}</code>;
-        }
+        return <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{part}</span>;
       })}
     </span>
   );
 }
-
 function MaterialChatPage({ setPage, profile }) {
   const [materials, setMaterials] = useState([]);
   const [materialId, setMaterialId] = useState("");
   const [question, setQuestion] = useState("");
   const [chatting, setChatting] = useState(false);
   const [history, setHistory] = useState([]);
-  const chatEndRef = React.useRef(null);
+  const chatEndRef = useRef(null);
   const selectedMaterial = materials.find(m => m.id === materialId);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [history]);
