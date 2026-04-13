@@ -3107,7 +3107,7 @@ function TopNav({ page, setPage, profile, onLogout }) {
       <div onClick={() => setPage("首页")} style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flexShrink: 0 }}>
         <div style={{ width: 36, height: 36, borderRadius: 10, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <text x="11" y="16" textAnchor="middle" fontFamily="'SF Pro Display','Helvetica Neue',Arial,sans-serif" fontSize="15" fontWeight="800" fill="white">M</text>
+            <path d="M17 4H6L11.5 11L6 18H17" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </div>
         <span style={{ fontSize: 18, fontWeight: 800, color: "#111", letterSpacing: "-0.5px" }}>MathCore</span>
@@ -3261,7 +3261,7 @@ function HomePage({ setPage, profile }) {
         background: "linear-gradient(135deg, #0d7a58 0%, #1D9E75 45%, #1565c0 100%)",
         padding: "3.5rem 3rem 3rem",
         position: "relative", overflow: "hidden",
-        borderBottomLeftRadius: 0, borderBottomRightRadius: 0,
+        borderRadius: 28,
       }}>
         {/* decorative */}
         <div style={{ position:"absolute", right:-60, top:-60, width:320, height:320, borderRadius:"50%", background:"rgba(255,255,255,0.04)" }} />
