@@ -4,6 +4,7 @@ export default async function handler(req, res) {
   const {
     chapter, type, count,
     mode, question: chatQuestion, materialTitle, materialContext,
+    conversationHistory,
     userProvider, userKey, userCustomUrl,
   } = req.body;
 
@@ -20,41 +21,49 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "暂无可用 AI 服务。请在首页点击「AI 设置」输入你的 API Key（推荐免费的 Groq）。" });
   }
 
-  // ── Prompt 构建 ───────────────────────────────────────────────────────────
-  const isChatMode = mode === "chat" && chatQuestion;
-  const isTutorMode = mode === "tutor" && chatQuestion;
+  const isChatMode = (mode === "chat" || mode === "tutor") && chatQuestion;
 
-  let prompt;
-  if (isTutorMode) {
-    prompt = `你是一位专业的数学期末复习助教，名叫"小核"，正在帮学生复习《${materialTitle || "数学课程"}》。
-
-${materialContext ? `【课程知识点】\n${materialContext}\n` : ""}
-【学生输入】${chatQuestion}
-
-【你的行为准则】
-1. 分析资料时，先指出哪些是必考题型、高频考点、低频考点，并用 【必考】【高频】【了解】 标注
-2. 每次只教一个知识点，教完立刻出2-3道检验题，不要一口气讲一整章
-3. 数学公式全部用 LaTeX：行内公式用 $公式$，独立公式用 $$公式$$
-4. 每道题讲解完要问"懂了吗？懂了我们继续，不懂告诉我哪里卡住了"
-5. 绝不直接给题目最终答案，先给提示，等学生回应
-6. 若学生说"我会了/下一个/跳过"，立刻执行不反复确认
-7. 在讲知识点前先展示"这个知识点在考试中长什么样"（真题示例格式），再教做法
-8. 鼓励为主，学生答对了要夸，答错了要分析原因（计算失误/公式误用/概念盲区）
-9. 用中文回复，控制在500字以内，生动有趣`;
+  // ── 系统 Prompt ─────────────────────────────────────────────────────────────
+  let systemPrompt;
+  if (mode === "tutor") {
+    systemPrompt = `你是一位专业的数学期末复习助教，名叫"小核"，正在帮学生复习《${materialTitle || "数学课程"}》。
+${materialContext ? `\n【课程知识点参考】\n${materialContext}\n` : ""}
+【行为准则】
+1. 分析资料时先标注 【必考】【高频】【了解】优先级
+2. 每次只教一个知识点，教完立刻出2-3道检验题（不一次讲完整章）
+3. 数学公式全部用 LaTeX：行内 $公式$，独立 $$公式$$
+4. 每讲完一个知识点问"懂了吗？懂了继续，不懂告诉我哪里卡住了"
+5. 绝不直接给最终答案，先提示引导
+6. 学生说"我会了/下一个/跳过"立刻执行不反复确认
+7. 讲前先展示"考试中长什么样"，再教做法，最后给答题模板
+8. 答对了夸，答错了分析原因（计算失误/公式误用/概念盲区）
+9. 用中文，500字以内，生动有趣`;
   } else if (isChatMode) {
-    prompt = `你是一位亲切、有趣的数学私教，正在陪伴学生一起学习《${materialTitle || "数学教材"}》。你的风格：温暖鼓励、循循善诱、像朋友一样交流。
+    systemPrompt = `你是一位亲切、有趣的数学私教，正在陪学生学习《${materialTitle || "数学教材"}》。风格：温暖鼓励、循循善诱、像朋友交流。
 ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
-【学生问题】${chatQuestion}
-
 【回答要求】
-1. 数学公式必须用 LaTeX 格式：行内公式用 $公式$，独立公式用 $$公式$$。例如：分离变量法的核心是 $\\frac{dy}{dx} = f(x)g(y)$，积分得 $$\\int \\frac{dy}{g(y)} = \\int f(x)dx + C$$
-2. 先给出核心答案（1-2句），再按步骤展开（不超过4步），最后用一句话总结关键思路
-3. 适当加入鼓励：如"这个问题问得很好！""你已经掌握了难点！""再理解一下这步就完全通了～"
-4. 如果问题比较复杂，结尾可以追问一下："还有哪里不清楚？" 或 "要不要我再出一道类似的题试试？"
-5. 绝对不要直接给最终答案（如果是在解题），先给提示引导学生思考
-6. 回答控制在 400 字以内，用中文，生动自然，避免机械罗列`;
-  } else {
-    prompt = `你是数学课程出题专家。请为"${chapter}"这个数学章节生成${count}道${type}，所有题目和选项必须用中文。
+1. 数学公式用 LaTeX：行内 $公式$，独立 $$公式$$
+2. 先给核心答案（1-2句），再按步骤展开（不超4步），最后总结关键思路
+3. 适当加鼓励，复杂问题结尾追问"还有哪里不清楚？"
+4. 解题时不直接给最终答案，先给提示引导思考
+5. 400字以内，中文，生动自然`;
+  }
+
+  // ── 构建 messages 数组（含历史） ────────────────────────────────────────────
+  let messages;
+  if (isChatMode) {
+    const sysMsg = { role: "system", content: systemPrompt };
+    const histMsgs = Array.isArray(conversationHistory)
+      ? conversationHistory.slice(-12).map(h => ({
+          role: h.role === "assistant" ? "assistant" : "user",
+          content: h.content || h.text || "",
+        }))
+      : [];
+    const userMsg = { role: "user", content: chatQuestion };
+    messages = [sysMsg, ...histMsgs, userMsg];
+  }
+
+  const prompt = isChatMode ? null : `你是数学课程出题专家。请为"${chapter}"这个数学章节生成${count}道${type}，所有题目和选项必须用中文。
 
 要求：
 - 题目紧贴数值分析或最优化理论内容，考察具体概念和计算
@@ -64,23 +73,17 @@ ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
 
 严格按以下 JSON 数组格式返回，不要有其他文字：
 [{"question":"题目内容","options":["A.选项1","B.选项2","C.选项3","D.选项4"],"answer":"A","explanation":"解析内容","type":"单选题"}]`;
-  }
 
-  // ── OpenAI-compatible helper ───────────────────────────────────────────────
+  // ── OpenAI-compatible helper（支持 messages 数组） ───────────────────────────
   const callOpenAICompat = async (baseUrl, key, model) => {
     try {
+      const body = isChatMode
+        ? { model, messages, temperature: 0.6, max_tokens: 2000 }
+        : { model, messages: [{ role: "user", content: prompt }], temperature: 0.5, max_tokens: 3000 };
       const r = await fetch(`${baseUrl}/chat/completions`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${key}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.5,
-          max_tokens: 3000,
-        }),
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+        body: JSON.stringify(body),
       });
       if (r.ok) {
         const d = await r.json();
@@ -98,14 +101,30 @@ ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
   // ── Gemini helper ──────────────────────────────────────────────────────────
   const callGemini = async (key) => {
     try {
+      // Convert messages to Gemini format
+      let geminiContents;
+      if (isChatMode && messages) {
+        geminiContents = messages
+          .filter(m => m.role !== "system")
+          .map(m => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
+        if (messages[0]?.role === "system") {
+          // Prepend system message to first user message
+          const firstUserIdx = geminiContents.findIndex(m => m.role === "user");
+          if (firstUserIdx >= 0) {
+            geminiContents[firstUserIdx].parts[0].text = messages[0].content + "\n\n" + geminiContents[firstUserIdx].parts[0].text;
+          }
+        }
+      } else {
+        geminiContents = [{ parts: [{ text: prompt }] }];
+      }
       const r = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.5, maxOutputTokens: 3000 },
+            contents: geminiContents,
+            generationConfig: { temperature: 0.6, maxOutputTokens: 2000 },
           }),
         }
       );
@@ -113,8 +132,6 @@ ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
         const d = await r.json();
         return d?.candidates?.[0]?.content?.parts?.[0]?.text || "";
       }
-      const err = await r.text();
-      console.error("Gemini HTTP error:", r.status, err.slice(0, 200));
       return null;
     } catch (e) {
       console.error("Gemini exception:", e.message);
@@ -124,7 +141,7 @@ ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
 
   let responseText = "";
 
-  // ── Priority 1: user-supplied key ─────────────────────────────────────────
+  // Priority 1: user key
   if (hasUserKey) {
     const k = String(userKey).trim();
     if (effectiveProvider === "groq") {
@@ -142,53 +159,50 @@ ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
     }
   }
 
-  // ── Priority 2: server Groq key ───────────────────────────────────────────
+  // Priority 2: server Groq
   if (!responseText && GROQ_KEY) {
     responseText = await callOpenAICompat("https://api.groq.com/openai/v1", GROQ_KEY, "llama-3.3-70b-versatile") || "";
     if (!responseText) responseText = await callOpenAICompat("https://api.groq.com/openai/v1", GROQ_KEY, "llama-3.1-8b-instant") || "";
   }
 
-  // ── Priority 3: server DeepSeek key ──────────────────────────────────────
+  // Priority 3: server DeepSeek
   if (!responseText && DEEPSEEK_KEY) {
     responseText = await callOpenAICompat("https://api.deepseek.com", DEEPSEEK_KEY, "deepseek-chat") || "";
   }
 
-  // ── Priority 4: server Gemini key ─────────────────────────────────────────
+  // Priority 4: server Gemini
   if (!responseText && GEMINI_KEY) {
     responseText = await callGemini(GEMINI_KEY) || "";
   }
 
-  // ── Priority 5: server Anthropic key ──────────────────────────────────────
+  // Priority 5: Anthropic
   if (!responseText && ANTHROPIC_KEY) {
     try {
+      const anthropicMessages = isChatMode
+        ? messages.filter(m => m.role !== "system").map(m => ({ role: m.role, content: m.content }))
+        : [{ role: "user", content: prompt }];
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": ANTHROPIC_KEY,
-          "anthropic-version": "2023-06-01",
-        },
+        headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
-          max_tokens: 3000,
-          messages: [{ role: "user", content: prompt }],
+          max_tokens: 2000,
+          system: isChatMode ? systemPrompt : undefined,
+          messages: anthropicMessages,
         }),
       });
       if (r.ok) {
         const d = await r.json();
         responseText = d.content?.map(b => b.text || "").join("") || "";
       }
-    } catch (e) {
-      console.error("Anthropic exception:", e.message);
-    }
+    } catch (e) { console.error("Anthropic exception:", e.message); }
   }
 
   if (!responseText) {
     return res.status(500).json({ error: "暂无可用 AI 服务。请在首页「AI 设置」配置 API Key（推荐免费的 Groq）。" });
   }
 
-  // Chat / Tutor 模式：直接返回文本
-  if (isChatMode || isTutorMode) {
+  if (isChatMode) {
     return res.status(200).json({ answer: responseText.trim() });
   }
 
@@ -206,7 +220,6 @@ ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
     }
   }
 
-  // Normalise: accept array directly or wrapped in an object
   if (!Array.isArray(questions)) {
     const wrapped = questions?.questions || questions?.problems || questions?.exercises;
     if (Array.isArray(wrapped)) questions = wrapped;

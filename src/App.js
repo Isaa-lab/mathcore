@@ -3105,12 +3105,16 @@ function TopNav({ page, setPage, profile, onLogout }) {
   return (
     <div style={{ background: "rgba(255,255,255,0.92)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", borderBottom: "1px solid rgba(0,0,0,0.06)", padding: "0 2rem", display: "flex", alignItems: "center", justifyContent: "space-between", height: 60, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 2px 16px rgba(0,0,0,0.04)" }}>
       <div onClick={() => setPage("首页")} style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flexShrink: 0 }}>
-        <div style={{ width: 34, height: 34, borderRadius: 9, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17 }}>&#128784;</div>
-        <span style={{ fontSize: 17, fontWeight: 700, color: "#111", letterSpacing: "-0.3px" }}>MathCore</span>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <text x="11" y="16" textAnchor="middle" fontFamily="'SF Pro Display','Helvetica Neue',Arial,sans-serif" fontSize="15" fontWeight="800" fill="white">M</text>
+          </svg>
+        </div>
+        <span style={{ fontSize: 18, fontWeight: 800, color: "#111", letterSpacing: "-0.5px" }}>MathCore</span>
       </div>
       <div style={{ display: "flex", gap: 1, alignItems: "center" }}>
         {primaryLinks.map(l => (
-          <button key={l} onClick={() => setPage(l)} style={{ padding: "7px 13px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", fontWeight: isActive(l) ? 600 : 400, background: isActive(l) ? G.tealLight : "transparent", color: isActive(l) ? G.tealDark : "#555", whiteSpace: "nowrap" }}>
+          <button key={l} onClick={() => setPage(l)} style={{ padding: "8px 14px", borderRadius: 9, fontSize: 14, fontFamily: "inherit", border: "none", cursor: "pointer", fontWeight: isActive(l) ? 700 : 400, background: isActive(l) ? G.tealLight : "transparent", color: isActive(l) ? G.tealDark : "#444", whiteSpace: "nowrap" }}>
             {l === "资料对话" ? "🤖 AI助教" : l}
           </button>
         ))}
@@ -3242,137 +3246,206 @@ function HomePage({ setPage, profile }) {
   const [showAISettings, setShowAISettings] = useState(false);
   const aiCfg = getAIConfig();
   const hasUserKey = aiCfg.key.length > 4;
-  const providerLabel = { groq: "Groq⚡", gemini: "Gemini", deepseek: "DeepSeek", kimi: "Kimi", custom: "自定义" }[aiCfg.provider] || "Gemini";
+  const providerLabel = { groq: "Groq", gemini: "Gemini", deepseek: "DeepSeek", kimi: "Kimi", custom: "自定义" }[aiCfg.provider] || "Groq";
+
+  const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); return d.days || 1; } catch { return 1; } })();
+  const badgeStats = getBadgeStats();
+  const unlockedIds = new Set(BADGES.filter(b => b.check(badgeStats)).map(b => b.id));
 
   return (
-    <div style={{ padding: "1.5rem 2rem", maxWidth: 960, margin: "0 auto" }}>
+    <div style={{ maxWidth: 1020, margin: "0 auto", padding: "0 0 60px" }}>
       {showAISettings && <AISettingsModal onClose={() => setShowAISettings(false)} />}
 
-      {/* ── Hero Section ── */}
+      {/* ───────── HERO ───────── */}
       <div style={{
-        background: "linear-gradient(135deg, #1D9E75 0%, #0d7c5c 60%, #185FA5 100%)",
-        borderRadius: 28, padding: "2.5rem 2.8rem", marginBottom: 28, color: "#fff",
+        background: "linear-gradient(135deg, #0d7a58 0%, #1D9E75 45%, #1565c0 100%)",
+        padding: "3.5rem 3rem 3rem",
         position: "relative", overflow: "hidden",
-        boxShadow: "0 16px 48px rgba(29,158,117,0.25)"
+        borderBottomLeftRadius: 0, borderBottomRightRadius: 0,
       }}>
-        {/* Decorative blobs */}
-        <div style={{ position: "absolute", right: -30, top: -30, width: 220, height: 220, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
-        <div style={{ position: "absolute", right: 80, bottom: -50, width: 140, height: 140, borderRadius: "50%", background: "rgba(255,255,255,0.04)" }} />
-        <div style={{ position: "absolute", left: "50%", top: -20, width: 300, height: 300, borderRadius: "50%", background: "rgba(255,255,255,0.02)" }} />
+        {/* decorative */}
+        <div style={{ position:"absolute", right:-60, top:-60, width:320, height:320, borderRadius:"50%", background:"rgba(255,255,255,0.04)" }} />
+        <div style={{ position:"absolute", right:100, bottom:-80, width:200, height:200, borderRadius:"50%", background:"rgba(255,255,255,0.03)" }} />
 
-        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.14em", opacity: 0.65, textTransform: "uppercase", marginBottom: 12 }}>
-          数学与应用数学学习平台
-        </div>
-        <div style={{ fontSize: 34, fontWeight: 800, marginBottom: 8, letterSpacing: "-0.8px", lineHeight: 1.2 }}>
-          你好，{profile?.name || "同学"} 👋
-        </div>
-        <div style={{ fontSize: 15, opacity: 0.8, lineHeight: 1.7, marginBottom: 28, maxWidth: 480 }}>
-          涵盖数值分析 · 线性代数 · 概率论 · 数理统计 · ODE · 最优化，AI 智能出题与记忆卡片
-        </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <button onClick={() => setPage("知识点")} style={{ padding: "13px 28px", fontSize: 15, fontWeight: 700, fontFamily: "inherit", background: "#fff", color: G.teal, border: "none", borderRadius: 14, cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.15)" }}>
-            开始学习
-          </button>
-          <button onClick={() => setPage("题库练习")} style={{ padding: "13px 24px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", background: "rgba(255,255,255,0.18)", color: "#fff", border: "2px solid rgba(255,255,255,0.35)", borderRadius: 14, cursor: "pointer" }}>
-            进入题库
-          </button>
-          <button onClick={() => setPage("资料对话")} style={{ padding: "11px 20px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: "rgba(255,255,255,0.12)", color: "#fff", border: "1.5px solid rgba(255,255,255,0.25)", borderRadius: 14, cursor: "pointer" }}>
-            🤖 AI 复习助教
-          </button>
-          <button onClick={() => setShowAISettings(true)} style={{ padding: "11px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: hasUserKey ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)", color: "#fff", border: "1.5px solid rgba(255,255,255,0.3)", borderRadius: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-            ⚙️{hasUserKey ? <span style={{ fontSize: 11, background: "rgba(255,255,255,0.2)", padding: "2px 7px", borderRadius: 8 }}>{providerLabel} ✓</span> : " AI 设置"}
-          </button>
-        </div>
-      </div>
+        <div style={{ position:"relative", zIndex:1 }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:16 }}>
+            <div>
+              <div style={{ color:"rgba(255,255,255,0.7)", fontSize:13, fontWeight:600, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:10 }}>
+                数学智能学习平台
+              </div>
+              <div style={{ fontSize:40, fontWeight:900, color:"#fff", letterSpacing:"-1px", lineHeight:1.1, marginBottom:14 }}>
+                你好，{profile?.name || "同学"} 👋
+              </div>
+              <div style={{ fontSize:15, color:"rgba(255,255,255,0.8)", lineHeight:1.7, maxWidth:500 }}>
+                两大核心功能：<strong style={{color:"#fff"}}>上传资料 → AI 知识分析</strong>，以及 <strong style={{color:"#fff"}}>制定备考计划 → AI 助教带领复习</strong>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:10, flexShrink:0 }}>
+              <button onClick={() => setShowAISettings(true)} style={{ padding:"10px 18px", fontSize:13, fontWeight:600, fontFamily:"inherit", background: hasUserKey ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.12)", color:"#fff", border:"1.5px solid rgba(255,255,255,0.35)", borderRadius:12, cursor:"pointer", display:"flex", alignItems:"center", gap:7 }}>
+                ⚙️ AI 设置
+                {hasUserKey && <span style={{ fontSize:11, background:"rgba(255,255,255,0.2)", padding:"2px 8px", borderRadius:8 }}>{providerLabel} ✓</span>}
+              </button>
+            </div>
+          </div>
 
-      {/* ── Stats Row ── */}
-      {(() => {
-        const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); return d.days || 1; } catch { return 1; } })();
-        const stats2 = [
-          { icon: "📚", value: "6", label: "门课程", sub: "数值分析 · 线代 · 概率", color: G.teal, bg: G.tealLight },
-          { icon: "✏️", value: ALL_QUESTIONS.length + "+", label: "道题目", sub: "持续更新中", color: G.blue, bg: G.blueLight },
-          { icon: "🃏", value: FLASHCARDS.length, label: "张卡片", sub: "公式定理", color: G.purple, bg: G.purpleLight },
-          { icon: "🔥", value: streak, label: "天连学", sub: "保持每日练习！", color: "#E24B4A", bg: "#FCEBEB" },
-        ];
-        return (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 28 }}>
-            {stats2.map(st => (
-              <div key={st.label} style={{ background: st.bg, borderRadius: 18, padding: "1.2rem 1.1rem", border: "1px solid " + st.color + "22" }}>
-                <div style={{ fontSize: 22, marginBottom: 6 }}>{st.icon}</div>
-                <div style={{ fontSize: 28, fontWeight: 800, color: st.color, lineHeight: 1, marginBottom: 2 }}>{st.value}</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#222", marginBottom: 2 }}>{st.label}</div>
-                <div style={{ fontSize: 11, color: "#888" }}>{st.sub}</div>
+          {/* Stats pills */}
+          <div style={{ display:"flex", gap:10, marginTop:28, flexWrap:"wrap" }}>
+            {[
+              { icon:"🔥", val: streak + "天", label:"连续学习" },
+              { icon:"✏️", val: ALL_QUESTIONS.length + "+", label:"题目总量" },
+              { icon:"🏃", val: FLASHCARDS.length, label:"记忆卡片" },
+              { icon:"🏅", val: unlockedIds.size + "/" + BADGES.length, label:"徽章解锁" },
+            ].map(p => (
+              <div key={p.label} style={{ background:"rgba(255,255,255,0.14)", backdropFilter:"blur(8px)", borderRadius:14, padding:"10px 18px", display:"flex", alignItems:"center", gap:8, border:"1px solid rgba(255,255,255,0.2)" }}>
+                <span style={{ fontSize:18 }}>{p.icon}</span>
+                <div>
+                  <div style={{ fontSize:18, fontWeight:800, color:"#fff", lineHeight:1 }}>{p.val}</div>
+                  <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)" }}>{p.label}</div>
+                </div>
               </div>
             ))}
           </div>
-        );
-      })()}
-
-      {/* ── Quick Access ── */}
-      <div style={{ fontSize: 13, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14 }}>快速入口</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 28 }}>
-        {[
-          { icon: "⚡", title: "每日练习", desc: "AI 精选题目", page: "题库练习", bg: "#F0F7FF", accent: G.blue },
-          { icon: "🃏", title: "记忆卡片", desc: "核心公式闪记", page: "记忆卡片", bg: G.purpleLight, accent: G.purple },
-          { icon: "🤖", title: "AI 复习助教", desc: "5步法智能辅导", page: "资料对话", bg: "#F0FDF8", accent: G.teal },
-          { icon: "📊", title: "学习报告", desc: "正确率与薄弱点", page: "学习报告", bg: G.amberLight, accent: G.amber },
-          { icon: "❌", title: "错题本", desc: "针对性攻克错题", page: "错题本", bg: G.redLight, accent: G.red },
-          { icon: "🌳", title: "技能树", desc: "可视化知识路径", page: "技能树", bg: "#f0fdf4", accent: G.teal },
-        ].map(q => (
-          <div key={q.title} onClick={() => setPage(q.page)} style={{ background: q.bg, borderRadius: 18, padding: "1.3rem 1.2rem", cursor: "pointer", display: "flex", gap: 14, alignItems: "center", border: "1px solid " + q.accent + "22", transition: "box-shadow .15s, transform .15s" }}
-            onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 6px 20px " + q.accent + "30"; e.currentTarget.style.transform = "translateY(-3px)"; }}
-            onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
-          >
-            <div style={{ width: 46, height: 46, borderRadius: 14, background: q.accent + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>{q.icon}</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "#111", marginBottom: 3 }}>{q.title}</div>
-              <div style={{ fontSize: 12, color: "#888" }}>{q.desc}</div>
-            </div>
-          </div>
-        ))}
+        </div>
       </div>
 
-      <JoinClassCard profile={profile} />
+      {/* ───────── TWO CORE WORKFLOW CARDS ───────── */}
+      <div style={{ padding:"0 2rem", marginTop:-1 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginTop:24, marginBottom:24 }}>
 
-      {/* ── Badge Gallery ── */}
-      {(() => {
-        const stats = getBadgeStats();
-        const unlockedIds = new Set(BADGES.filter(b => b.check(stats)).map(b => b.id));
-        const lockedCount = BADGES.length - unlockedIds.size;
-        return (
-          <div style={{ marginTop: 28 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em" }}>🏅 成就徽章</div>
-              <div style={{ fontSize: 12, color: "#bbb" }}>{unlockedIds.size}/{BADGES.length} 已解锁</div>
+          {/* Card 1: 资料学习 */}
+          <div style={{ background:"#fff", borderRadius:24, overflow:"hidden", boxShadow:"0 4px 24px rgba(29,158,117,0.12)", border:"1px solid rgba(29,158,117,0.15)" }}>
+            <div style={{ background:"linear-gradient(135deg, #ecfdf5, #d1fae5)", padding:"1.6rem 1.8rem 1.2rem", borderBottom:"1px solid #a7f3d0" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
+                <div style={{ width:44, height:44, borderRadius:14, background:G.teal, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>📚</div>
+                <div>
+                  <div style={{ fontSize:20, fontWeight:800, color:"#064e3b" }}>资料学习</div>
+                  <div style={{ fontSize:12, color:"#065f46", fontWeight:500 }}>Upload → Analyze → Practice</div>
+                </div>
+              </div>
+              <div style={{ fontSize:14, color:"#065f46", lineHeight:1.7 }}>
+                上传课件、作业、真题，AI 自动提取知识点结构、生成题库、配套记忆卡片
+              </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10 }}>
-              {BADGES.map(b => {
-                const unlocked = unlockedIds.has(b.id);
-                return (
-                  <div key={b.id} title={b.desc} style={{
-                    background: unlocked ? "linear-gradient(135deg,#fef3c7,#fde68a)" : "#f8f8f8",
-                    border: unlocked ? "1.5px solid #fcd34d" : "1.5px solid #eee",
-                    borderRadius: 16, padding: "14px 8px", display: "flex", flexDirection: "column",
-                    alignItems: "center", gap: 7, opacity: unlocked ? 1 : 0.4,
-                    boxShadow: unlocked ? "0 4px 12px rgba(252,211,77,0.3)" : "none",
-                  }}>
-                    <span style={{ fontSize: 24, filter: unlocked ? "none" : "grayscale(1)" }}>{b.emoji}</span>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: unlocked ? "#92400e" : "#aaa", textAlign: "center", lineHeight: 1.3 }}>{b.name}</div>
-                    <div style={{ fontSize: 10, color: unlocked ? "#b45309" : "#ccc", textAlign: "center", lineHeight: 1.3 }}>{b.desc}</div>
+            <div style={{ padding:"1rem 1.8rem 1.5rem" }}>
+              <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:16 }}>
+                {[
+                  { icon:"⬆️", text:"上传资料", sub:"支持 PDF、图片、文字", page:"资料库" },
+                  { icon:"🧠", text:"AI 知识分析", sub:"自动展开知识点卡片", page:"知识点" },
+                  { icon:"✏️", text:"掰对应题库", sub:"AI 为每个知识点出题", page:"题库练习" },
+                ].map(item => (
+                  <div key={item.text} onClick={() => setPage(item.page)} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", borderRadius:12, cursor:"pointer", background:"#f8fffe", border:"1px solid #e0faf4", transition:"background .15s" }}
+                    onMouseEnter={e => e.currentTarget.style.background="#ecfdf5"}
+                    onMouseLeave={e => e.currentTarget.style.background="#f8fffe"}
+                  >
+                    <span style={{ fontSize:18, width:28, textAlign:"center" }}>{item.icon}</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:14, fontWeight:700, color:"#111" }}>{item.text}</div>
+                      <div style={{ fontSize:12, color:"#888" }}>{item.sub}</div>
+                    </div>
+                    <span style={{ color:"#aaa", fontSize:14 }}>›</span>
                   </div>
-                );
-              })}
+                ))}
+              </div>
+              <button onClick={() => setPage("资料库")} style={{ width:"100%", padding:"12px", background:G.teal, color:"#fff", border:"none", borderRadius:14, fontSize:15, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>
+                开始学习 →
+              </button>
             </div>
-            {lockedCount > 0 && <div style={{ marginTop: 12, fontSize: 12, color: "#bbb", textAlign: "center" }}>还有 {lockedCount} 枚徽章待解锁，继续学习吧 💪</div>}
           </div>
-        );
-      })()}
+
+          {/* Card 2: 备考复习 */}
+          <div style={{ background:"#fff", borderRadius:24, overflow:"hidden", boxShadow:"0 4px 24px rgba(24,95,165,0.12)", border:"1px solid rgba(24,95,165,0.15)" }}>
+            <div style={{ background:"linear-gradient(135deg, #eff6ff, #dbeafe)", padding:"1.6rem 1.8rem 1.2rem", borderBottom:"1px solid #bfdbfe" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
+                <div style={{ width:44, height:44, borderRadius:14, background:G.blue, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>🎯</div>
+                <div>
+                  <div style={{ fontSize:20, fontWeight:800, color:"#1e3a5f" }}>期末备考</div>
+                  <div style={{ fontSize:12, color:"#1e40af", fontWeight:500 }}>Plan → AI Review → Track</div>
+                </div>
+              </div>
+              <div style={{ fontSize:14, color:"#1e3a5f", lineHeight:1.7 }}>
+                设定考试日期和范围，生成倍计划，AI 小核逐章引导复习、即时检验、分析薄弱点
+              </div>
+            </div>
+            <div style={{ padding:"1rem 1.8rem 1.5rem" }}>
+              <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:16 }}>
+                {[
+                  { icon:"📅", text:"制定备考计划", sub:"设考试日期指定范围和章节", page:"学习报告" },
+                  { icon:"🤖", text:"AI 助教带领复习", sub:"必考/高频项目分级教学", page:"资料对话" },
+                  { icon:"❌", text:"错题本强化", sub:"将错题转化为巳掌握的知识点", page:"错题本" },
+                ].map(item => (
+                  <div key={item.text} onClick={() => setPage(item.page)} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", borderRadius:12, cursor:"pointer", background:"#f8faff", border:"1px solid #e0eaff", transition:"background .15s" }}
+                    onMouseEnter={e => e.currentTarget.style.background="#eff6ff"}
+                    onMouseLeave={e => e.currentTarget.style.background="#f8faff"}
+                  >
+                    <span style={{ fontSize:18, width:28, textAlign:"center" }}>{item.icon}</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:14, fontWeight:700, color:"#111" }}>{item.text}</div>
+                      <div style={{ fontSize:12, color:"#888" }}>{item.sub}</div>
+                    </div>
+                    <span style={{ color:"#aaa", fontSize:14 }}>›</span>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setPage("资料对话")} style={{ width:"100%", padding:"12px", background:G.blue, color:"#fff", border:"none", borderRadius:14, fontSize:15, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>
+                开始备考 →
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ───────── QUICK TOOLS ───────── */}
+        <div style={{ marginBottom:24 }}>
+          <div style={{ fontSize:12, fontWeight:700, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:12 }}>快捷工具</div>
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            {[
+              { icon:"🏃", label:"记忆卡片", page:"记忆卡片", color:G.purple, bg:G.purpleLight },
+              { icon:"📊", label:"学习报告", page:"学习报告", color:G.amber, bg:G.amberLight },
+              { icon:"🌳", label:"技能树", page:"技能树", color:G.teal, bg:G.tealLight },
+              { icon:"📚", label:"知识点", page:"知识点", color:G.blue, bg:G.blueLight },
+              { icon:"⬆️", label:"上传资料", page:"上传资料", color:"#666", bg:"#f5f5f5" },
+            ].map(t => (
+              <button key={t.label} onClick={() => setPage(t.page)} style={{ padding:"9px 18px", background:t.bg, color:t.color, border:"1px solid " + t.color + "30", borderRadius:20, fontSize:13, fontWeight:600, fontFamily:"inherit", cursor:"pointer", display:"flex", alignItems:"center", gap:7 }}>
+                <span>{t.icon}</span>{t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <JoinClassCard profile={profile} />
+
+        {/* ───────── BADGE GALLERY ───────── */}
+        <div style={{ marginTop:28 }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+            <div style={{ fontSize:16, fontWeight:800, color:"#111" }}>🏅 成就墙</div>
+            <div style={{ fontSize:12, color:"#bbb" }}>{unlockedIds.size}/{BADGES.length} 已解锁</div>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:10 }}>
+            {BADGES.map(b => {
+              const unlocked = unlockedIds.has(b.id);
+              return (
+                <div key={b.id} title={b.desc} style={{
+                  background: unlocked ? "linear-gradient(135deg,#fef9c3,#fef08a)" : "#fafafa",
+                  border: unlocked ? "2px solid #facc15" : "1.5px solid #eee",
+                  borderRadius:18, padding:"16px 8px",
+                  display:"flex", flexDirection:"column", alignItems:"center", gap:8,
+                  opacity: unlocked ? 1 : 0.45,
+                  boxShadow: unlocked ? "0 4px 16px rgba(250,204,21,0.3)" : "none",
+                  transition:"all .2s",
+                }}>
+                  <span style={{ fontSize:26, filter: unlocked ? "none" : "grayscale(1)" }}>{b.emoji}</span>
+                  <div style={{ fontSize:12, fontWeight:700, color: unlocked ? "#78350f" : "#999", textAlign:"center", lineHeight:1.3 }}>{b.name}</div>
+                  <div style={{ fontSize:10, color: unlocked ? "#92400e" : "#ccc", textAlign:"center", lineHeight:1.4 }}>{b.desc}</div>
+                  {unlocked && <div style={{ fontSize:9, background:"#22c55e", color:"#fff", padding:"2px 8px", borderRadius:20, fontWeight:700 }}>已解锁 ✓</div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-
-// ── Knowledge Page ────────────────────────────────────────────────────────────
 function KnowledgePage({ setPage, setChapterFilter }) {
   const [materials, setMaterials] = useState([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState(null);
@@ -5386,6 +5459,7 @@ function MaterialChatPage({ setPage, profile }) {
           question: askText,
           materialTitle: selected?.title || "本资料",
           materialContext: contextChunks || "",
+          conversationHistory: history.slice(-12).map(h => ({ role: h.role, content: h.text })),
           userProvider: aiCfg.provider,
           userKey: aiCfg.key,
           userCustomUrl: aiCfg.customUrl,
