@@ -576,6 +576,17 @@ const isLowQualityQuestion = (q) => {
   if (sourceQuote && sourceQuote.length < 6) return true;
   if (qualityScore > 0 && qualityScore < 70) return true;
 
+  // 过滤含明显占位/垃圾选项的题目
+  if (Array.isArray(opts)) {
+    const garbage = ['与原文相反', '教材未提及', '以上都不对', '与上述相反', '原文未提及',
+      'Classification of Differential Eq', 'A.1 ', 'B.1 ', 'C.1 '];
+    const hasGarbageOpt = opts.some(o => garbage.some(g => String(o).includes(g)));
+    if (hasGarbageOpt) return true;
+    const chapterTitleCount = opts.filter(o => /^[A-D]\.\s*\d+\.\d+\s+[A-Z]/.test(String(o))).length;
+    if (chapterTitleCount >= 2) return true;
+  }
+  if (/^关于[「『][\d.]+ [A-Z]/.test(text) && text.length < 30) return true;
+
   return false;
 };
 
@@ -614,7 +625,7 @@ const fetchFileAsBrowserFile = async (url, fallbackName = "material.pdf") => {
   }
 };
 
-const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
+const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
   const materialId = material?.id;
   if (!materialId) return { topics: [], questions: [], insertedCount: 0, materialLinked: false };
 
@@ -2061,6 +2072,121 @@ const KNOWLEDGE_CONTENT = {
       { problem: "用 Laplace 变换解 IVP：y''−y'−2y=0，y(0)=1，y'(0)=0。", steps: ["取 Laplace 变换：s²Y−s·1−0−(sY−1)−2Y=0", "化简：(s²−s−2)Y=s−1，Y=(s−1)/[(s−1)(s+2)·/(s²−s−2的因式)... 因式分解：s²−s−2=(s−2)(s+1)", "Y=(s−1)/[(s−2)(s+1)]，部分分式：A/(s−2)+B/(s+1)", "A=(2−1)/(2+1)=1/3，B=(−1−1)/(−1−2)=−2/(−3)=2/3", "y(t)=(1/3)e²ᵗ+(2/3)e⁻ᵗ"], answer: "y(t)=(1/3)e²ᵗ+(2/3)e⁻ᵗ。验证：y(0)=1/3+2/3=1 ✓，y'(0)=(2/3)e²ᵗ−(2/3)e⁻ᵗ|_{t=0}=0 ✓" },
     ],
   },
+  "浮点数系统": {
+    intro: "计算机用有限位二进制表示实数，浮点数系统由基数β、尾数位数t、指数范围决定，不能精确表示大多数实数。IEEE 754 双精度有效位约15-16 位十进制。",
+    formulas: [
+      { label: "IEEE 754 双精度", tex: "x = \pm m \times 2^e,\quad m\in[1,2),\; e\in[-1022,1023]" },
+      { label: "机器精度", tex: "\varepsilon_{\text{mach}} = 2^{-52} \approx 2.22\times 10^{-16}" },
+      { label: "相对舎入误差", tex: "\left|\frac{fl(x)-x}{x}\right| \leq \frac{1}{2}\varepsilon_{\text{mach}}" },
+    ],
+    steps: ["判断数是否溢出或下溢", "标准化为 ±m×2^e，m∈[1,2)", "截断/舎入到 52 位尾数（双精度）", "计算相对误差：|fl(x)-x|/|x|"],
+    note: "浮点数不满足结合律：(a+b)+c 可能 ≠ a+(b+c)。大数加小数会吃掉小数（信息丢失），应从小到大累加。",
+    examples: [
+      { problem: "用 4 位十进制浮点数（β=10, t=4）表示 1/3，计算舎入误差。", steps: ["1/3 = 0.33333…，标准化为 0.3333×10⁰（截断4位）", "fl(1/3) = 0.3333", "绝对误差：|0.3333 - 0.33333…| ≈ 3.3×10⁻⁵", "相对误差：3.3×10⁻⁵ / 0.3333 ≈ 9.9×10⁻⁵"], answer: "fl(1/3)=0.3333，相对误差≈10⁻⁴，符合 4 位有效数字精度（误差界 5×10⁻⁴）" },
+    ],
+  },
+  "割线法": {
+    intro: "割线法用前两次迭代点的割线斜率代替 Newton 法的导数，无需计算 f'(x)，收敛阶约为黄金比 φ≈1.618。",
+    formulas: [
+      { label: "割线法迭代", tex: "x_{n+1} = x_n - f(x_n)\,\frac{x_n - x_{n-1}}{f(x_n)-f(x_{n-1})}" },
+      { label: "收敛阶", tex: "\alpha = \frac{1+\sqrt{5}}{2} \approx 1.618" },
+    ],
+    steps: ["选初始两点 x₀, x₁（不需满足变号）", "计算 f(x₀), f(x₁)", "用割线公式计算 x₂", "重复直到 |xₙ₊₁ - xₙ| < ε"],
+    note: "割线法每步只需一次函数求值（Newton 法需要一次函数+一次导数）；比二分法快，比 Newton 法稍慢。",
+    examples: [
+      { problem: "用割线法求 f(x) = x³ - 2 = 0 的根，x₀=1, x₁=2。", steps: ["f(1) = -1, f(2) = 6", "x₂ = 2 - 6·(2-1)/(6-(-1)) = 2 - 6/7 ≈ 1.1429", "f(1.1429) ≈ 1.494 - 2 = -0.506", "x₃ = 1.1429 - (-0.506)·(1.1429-2)/(-0.506-6) ≈ 1.2809"], answer: "经几次迭代后收敛到 ∛2 ≈ 1.2599，割线法比二分法快，不需要导数" },
+    ],
+  },
+  "Jacobi / Gauss-Seidel 法": {
+    intro: "迭代法用于求解大型稀疏线性方程组 Ax=b，Jacobi 法用上次值全部更新，Gauss-Seidel 法立即使用新值，通常收敛快 2 倍。",
+    formulas: [
+      { label: "Jacobi 迭代", tex: "x_i^{(k+1)} = \frac{1}{a_{ii}}\!\left(b_i - \sum_{j\neq i}a_{ij}x_j^{(k)}\right)" },
+      { label: "Gauss-Seidel 迭代", tex: "x_i^{(k+1)} = \frac{1}{a_{ii}}\!\left(b_i - \sum_{j<i}a_{ij}x_j^{(k+1)} - \sum_{j>i}a_{ij}x_j^{(k)}\right)" },
+      { label: "收敛充分条件", tex: "\rho(D^{-1}(L+U)) < 1\; \text{或 A 严格对角占优}" },
+    ],
+    steps: ["分解 A = D + L + U（对角、下三角、上三角）", "初始化 x⁽⁰⁾（通常取零向量）", "Jacobi：用 x⁽ᵏ⁾ 整批更新 x⁽ᵏ⁺¹⁾", "Gauss-Seidel：顺序更新，立即使用新值"],
+    note: "严格对角占优（|aᵢᵢ| > Σⱼ≠ᵢ|aᵢⱼ|）保证两法均收敛；Gauss-Seidel 通常比 Jacobi 快约2 倍。",
+    examples: [
+      { problem: "用 Gauss-Seidel 法求 4x+y=9, x+3y=7，从 x⁽⁰⁾=(0,0) 开始两轮迭代。", steps: ["第1轮：x⁽¹⁾ = (9 - 1×0)/4 = 2.25", "y⁽¹⁾ = (7 - 1×2.25)/3 = 1.583", "第2轮：x⁽²⁾ = (9 - 1×1.583)/4 = 1.854", "y⁽²⁾ = (7 - 1×1.854)/3 = 1.715，继续迭代…"], answer: "真解为 x=20/11≈1.818, y=19/11≈1.727；Gauss-Seidel 通常在几十轮迭代内收敛" },
+    ],
+  },
+  "Newton 插值": {
+    intro: "Newton 差商插值多项式利用差商表递推构造，可方便地增加新节点而无需重建全部多项式，与 Lagrange 插值等价但计算更高效。",
+    formulas: [
+      { label: "一阶差商", tex: "f[x_0,x_1] = \frac{f(x_1)-f(x_0)}{x_1-x_0}" },
+      { label: "Newton 差商公式", tex: "P_n(x) = \sum_{k=0}^n f[x_0,\ldots,x_k]\prod_{i=0}^{k-1}(x-x_i)" },
+      { label: "误差项", tex: "R_n(x) = f[x_0,\ldots,x_n,x]\prod_{i=0}^n(x-x_i)" },
+    ],
+    steps: ["建立差商表：f[xᵢ]=f(xᵢ)；f[xᵢ,xⱼ]=(f[xⱼ]-f[xᵢ])/(xⱼ-xᵢ)", "主对角线（首行）元素即为各阶差商系数", "写出 Newton 多项式 P_n(x)", "估算误差 |R_n(x)|"],
+    note: "Newton 插值与 Lagrange 插值给出同一多项式；新增节点 xₙ₊₁ 只需计算一列新差商，效率高。",
+    examples: [
+      { problem: "已知 f(0)=1, f(1)=3, f(2)=7，构造 Newton 差商插值多项式并求 f(1.5)。", steps: ["零阶差商：f[0]=1, f[1]=3, f[2]=7", "一阶差商：f[0,1]=(3-1)/(1-0)=2, f[1,2]=(7-3)/(2-1)=4", "二阶差商：f[0,1,2]=(4-2)/(2-0)=1", "P₂(x) = 1 + 2(x-0) + 1(x-0)(x-1) = x²+x+1"], answer: "P₂(1.5) = 1.5²+1.5+1 = 4.75；f(x)=x²+x+1 完全吴合，插值误差为零" },
+    ],
+  },
+  "数値微分": {
+    intro: "数値微分用函数値差商近似导数，中心差分精度最高（O(h²)），但步长 h 太小会引入浮点舎入误差，需权衡取舎。",
+    formulas: [
+      { label: "前向差分 O(h)", tex: "f'(x) \approx \frac{f(x+h)-f(x)}{h}" },
+      { label: "中心差分 O(h²)", tex: "f'(x) \approx \frac{f(x+h)-f(x-h)}{2h}" },
+      { label: "二阶导数 O(h²)", tex: "f''(x) \approx \frac{f(x+h)-2f(x)+f(x-h)}{h^2}" },
+    ],
+    steps: ["选择差分格式（优先中心差分）", "选步长 h（通常 10⁻⁵~10⁻³）", "计算差商得近似导数", "用 Richardson 外推提高精度（可选）"],
+    note: "最优步长约 h* ≈ √ε_mach（前向差分）或 ε_mach^(1/3)（中心差分），约10⁻⁸ 量级。",
+    examples: [
+      { problem: "用中心差分计算 f(x)=sin(x) 在 x=π/4 处的一阶导数，h=0.1。", steps: ["f(π/4+0.1) = sin(0.8854) ≈ 0.7745", "f(π/4-0.1) = sin(0.6854) ≈ 0.6332", "f'(π/4) ≈ (0.7745-0.6332)/(2×0.1) = 0.1413/0.2 ≈ 0.7065", "精确値 cos(π/4) = √2/2 ≈ 0.7071，误差 ≈ 6×10⁻⁴"], answer: "数値导数 ≈ 0.7065，与精确値 0.7071 误差约0.08%，符合 O(h²)=O(0.01) 精度" },
+    ],
+  },
+  "Romberg 法": {
+    intro: "Romberg 积分用 Richardson 外推提高梯形法精度，构造三角形外推表，主对角线收敛最快，最终可达任意阶精度。",
+    formulas: [
+      { label: "梯形法（2ʲ等分）", tex: "T_j = \frac{b-a}{2^j}\!\left[\frac{f(a)+f(b)}{2}+\sum_{k=1}^{2^j-1}f\!\left(a+k\frac{b-a}{2^j}\right)\right]" },
+      { label: "Richardson 外推", tex: "R(j,k) = \frac{4^k R(j,k-1)-R(j-1,k-1)}{4^k - 1}" },
+    ],
+    steps: ["计算 R(0,0)=T₁，R(1,0)=T₂，R(2,0)=T₄ …（步长逐步减半）", "外推：R(j,1)=(4R(j,0)-R(j-1,0))/3 消去 O(h²) 误差", "继续外推：R(j,k) 消去更高阶误差项", "取对角线 R(n,n) 作为最终结果"],
+    note: "Romberg 法对光滑函数高效；每次对分步长，复用已有函数値，相当于自适应精度控制。",
+    examples: [
+      { problem: "用 Romberg 法前两层计算 ∫₀¹ eˣ dx（精确値 e-1≈1.71828）。", steps: ["R(0,0): h=1，T₁=(f(0)+f(1))/2=(1+e)/2≈1.8591", "R(1,0): h=0.5，T₂=(f(0)+2f(0.5)+f(1))/4≈1.7539", "R(1,1): (4×1.7539-1.8591)/3 = (7.0156-1.8591)/3 ≈ 1.71828", "误差从 0.141（R(0,0)）降到 0.0001（R(1,1)）"], answer: "R(1,1)≈1.71828，一次外推后误差从 O(h²)≈0.14 降到 O(h⁴)≈0.0001，精度提升约100倍" },
+    ],
+  },
+  "Bernoulli 方程": {
+    intro: "Bernoulli 方程 y' + P(x)y = Q(x)yⁿ 通过换元 v = y^(1-n) 线性化，是可精确求解的非线性 ODE 典型形式之一。",
+    formulas: [
+      { label: "Bernoulli 方程", tex: "y' + P(x)y = Q(x)y^n,\quad n\neq 0,1" },
+      { label: "换元 v = y^(1-n)", tex: "v' + (1-n)P(x)v = (1-n)Q(x)\quad (\text{线性ODE})" },
+    ],
+    steps: ["识别 n（yⁿ 的指数），确认 n≠0,1", "令 v = y^(1-n)，则 v' = (1-n)y^(-n)y'", "方程两边除以 yⁿ 后化为线性 ODE", "用积分因子法求 v(x)，还原 y = v^(1/(1-n))"],
+    note: "n=0 退化为线性 ODE；n=1 为分离变量方程；n=2 特别常见（Logistic 增长模型的变形）。",
+    examples: [
+      { problem: "求解 y' - y = xy³（n=3）。", steps: ["令 v = y^(1-3) = y⁻²，则 v' = -2y⁻³y'", "方程两边乘 (-2)y⁻³：v' + 2v = -2x", "积分因子 μ = e^(2x)：(ve^(2x))' = -2xe^(2x)", "积分得 ve^(2x) = -xe^(2x) + e^(2x)/2 + C，即 v = -x + 1/2 + Ce^(-2x)"], answer: "y = v^(-1/2) = [1/2 - x + Ce^(-2x)]^(-1/2)；验证：当 y(0)=1 时，C=1/2" },
+    ],
+  },
+  "线性规划概述": {
+    intro: "线性规划（LP）在线性约束下最优化线性目标函数，是运筹学核心工具，广泛用于资源分配、运输问题、生产计划等。",
+    formulas: [
+      { label: "标准形", tex: "\min c^\top x \;\text{s.t.}\; Ax = b,\; x \geq 0" },
+      { label: "最优解位于顶点", tex: "\text{若有界，最优解在可行域顶点（基可行解）处取得}" },
+      { label: "强对偶定理", tex: "\min c^\top x = \max b^\top y \;\text{（对偶问题最优値相等）}" },
+    ],
+    steps: ["定义决策变量 x₁, x₂, …", "建立目标函数（最大化或最小化）", "写出约束条件（≤, ≥, = 形式）", "引入松弛变量化为标准形，用单纯形法求解"],
+    note: "LP 可在多项式时间内求解（内点法）；最优解若存在必在顶点处。整数规划（ILP）是 NP-hard。",
+    examples: [
+      { problem: "最大化 z = 5x₁ + 4x₂，约束 6x₁+4x₂≤24，x₁+2x₂≤6，x₁,x₂≥0。", steps: ["可行域顶点：(0,0),(4,0),(3,1.5),(0,3)", "各顶点目标値：z(4,0)=20, z(3,1.5)=21, z(0,3)=12, z(0,0)=0", "最大値在 (3,1.5) 处：z=5×3+4×1.5=21"], answer: "最优解 x₁=3, x₂=1.5，最大利润 z=21；几何上最优解总在可行域顶点" },
+    ],
+  },
+  "相平面分析": {
+    intro: "相平面法通过平衡点稳定性分析研究非线性ODE系统的定性行为，无需求解析解，用 Jacobian 特征値判断平衡点类型。",
+    formulas: [
+      { label: "自治系统", tex: "\dot{x}=f(x,y),\;\dot{y}=g(x,y)" },
+      { label: "平衡点", tex: "f(x^*,y^*)=0,\;g(x^*,y^*)=0" },
+      { label: "线性化 Jacobian", tex: "J = \begin{pmatrix}f_x & f_y\\ g_x & g_y\end{pmatrix}_{(x^*,y^*)}" },
+    ],
+    steps: ["令 ẋ=0, ẏ=0 求平衡点 (x*,y*)", "计算平衡点处的 Jacobian 矩阵 J", "求 J 的特征値 λ₁, λ₂", "按特征値分类：均负→稳定结点，异号→马鞍点，纯虚→中心，复数→焦点"],
+    note: "特征値均负→稳定；均正→不稳定；异号→马鞍点（不稳定）；实部负复数→稳定焦点（贚旋收敛）。",
+    examples: [
+      { problem: "分析 ẋ=y, ẏ=-x-y（鸿尼振荡）在 (0,0) 的稳定性。", steps: ["平衡点：y=0, -x-y=0 → (0,0)", "Jacobian J = [[0,1],[-1,-1]]", "特征方程：λ²+λ+1=0，λ = (-1±i√3)/2", "实部 = -1/2 < 0 → 稳定焦点（贚旋收敛）"], answer: "原点是稳定焦点；解为 x(t)=e^(-t/2)[A cos(√3t/2)+B sin(√3t/2)]，随时间贚旋衰减" },
+    ],
+  },
+
 };
 
 // ── Topic Modal ───────────────────────────────────────────────────────────────
@@ -3855,7 +3981,7 @@ function UploadPage({ setPage, profile }) {
             material: insertedMaterial,
             file,
             fallbackText: `${title} ${desc}`,
-            genCount: 6,
+            genCount: 10,
             actorName: profile?.name || "用户",
           });
           if (result.apiQuotaExceeded) {
@@ -4418,13 +4544,53 @@ function MaterialsPage({ setPage, profile }) {
   );
 }
 
+// ── MathText: 渲染含 LaTeX 公式的文本 ────────────────────────────────────────
+function MathText({ text }) {
+  const parts = React.useMemo(() => {
+    if (!text) return [{ type: 'text', content: '' }];
+    const segments = [];
+    const pattern = /($[\s\S]+?$|\[[s\S]+?\]|$[^$\n]+?$|\([^)]+?\))/g;
+    let last = 0, m;
+    while ((m = pattern.exec(text)) !== null) {
+      if (m.index > last) segments.push({ type: 'text', content: text.slice(last, m.index) });
+      const raw = m[0];
+      const isBlock = raw.startsWith('$') || raw.startsWith('\\[');
+      const inner = raw.replace(/^$|$$|^\[|\]$|^\(|\)$/g, '').replace(/^$|$/g, '');
+      segments.push({ type: isBlock ? 'block' : 'inline', content: inner });
+      last = m.index + raw.length;
+    }
+    if (last < text.length) segments.push({ type: 'text', content: text.slice(last) });
+    return segments;
+  }, [text]);
+  return (
+    <span>
+      {parts.map((p, i) => {
+        if (p.type === 'text') {
+          return <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{p.content}</span>;
+        }
+        try {
+          const html = katex.renderToString(p.content, { throwOnError: false, displayMode: p.type === 'block' });
+          return p.type === 'block'
+            ? <div key={i} style={{ overflowX: 'auto', margin: '6px 0' }} dangerouslySetInnerHTML={{ __html: html }} />
+            : <span key={i} dangerouslySetInnerHTML={{ __html: html }} />;
+        } catch {
+          return <code key={i} style={{ background: '#f0f0f0', padding: '1px 4px', borderRadius: 4, fontSize: '0.9em' }}>{p.content}</code>;
+        }
+      })}
+    </span>
+  );
+}
+
 function MaterialChatPage({ setPage, profile }) {
   const [materials, setMaterials] = useState([]);
   const [materialId, setMaterialId] = useState("");
   const [question, setQuestion] = useState("");
   const [chatting, setChatting] = useState(false);
   const [history, setHistory] = useState([]);
+  const chatEndRef = React.useRef(null);
   const selectedMaterial = materials.find(m => m.id === materialId);
+
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [history]);
 
   useEffect(() => {
     const loadChatMaterials = async () => {
@@ -4510,31 +4676,49 @@ function MaterialChatPage({ setPage, profile }) {
           <Btn size="sm" onClick={() => setPage("知识点")}>看知识点卡片</Btn>
         </div>
       </div>
-      <div style={{ ...s.card, minHeight: 420 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14, maxHeight: 360, overflow: "auto" }}>
-          {history.length === 0 && <div style={{ color: "#888", fontSize: 14 }}>可提问：这份资料的核心知识点是什么？请给我一题例题并说明思路。</div>}
+      <div style={{ ...s.card, padding: 0, overflow: "hidden" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 0, minHeight: 400, maxHeight: 480, overflowY: "auto", padding: "16px 16px 8px" }}>
+          {history.length === 0 && (
+            <div style={{ textAlign: "center", paddingTop: 60, color: "#bbb" }}>
+              <div style={{ fontSize: 36, marginBottom: 12 }}>💬</div>
+              <div style={{ fontSize: 14, lineHeight: 1.8 }}>
+                可以问我：<br />
+                「这份资料的核心知识点是什么？」<br />
+                「请给我一道例题并详细讲解步骤」
+              </div>
+            </div>
+          )}
           {history.map((m, idx) => (
-            <div key={idx} style={{ alignSelf: m.role === "user" ? "flex-end" : "stretch", background: m.role === "user" ? G.tealLight : "#f7f8fa", color: "#333", borderRadius: 10, padding: "10px 12px", fontSize: 14, lineHeight: 1.7 }}>
-              <div>{m.text}</div>
-              {m.role === "assistant" && Array.isArray(m.sources) && m.sources.length > 0 && (
-                <div style={{ marginTop: 6, fontSize: 12, color: "#777" }}>来源片段：{m.sources.join(" | ")}</div>
-              )}
-              {m.role === "assistant" && (
-                <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))} style={{ padding: "4px 10px", background: G.blueLight, color: G.blue, border: "1px solid " + G.blue + "44", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
-                    基于该资料做题
-                  </button>
-                  <button onClick={() => setPage("知识点")} style={{ padding: "4px 10px", background: G.tealLight, color: G.tealDark, border: "1px solid " + G.teal + "44", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
-                    跳转知识点学习
-                  </button>
+            <div key={idx} style={{ display: "flex", gap: 10, marginBottom: 16, flexDirection: m.role === "user" ? "row-reverse" : "row", alignItems: "flex-start" }}>
+              {m.role === "user" ? (
+                <div style={{ width: 34, height: 34, borderRadius: "50%", background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff", flexShrink: 0 }}>
+                  {(profile?.name || "U")[0].toUpperCase()}
                 </div>
+              ) : (
+                <div style={{ width: 34, height: 34, borderRadius: "50%", background: G.purple, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>📐</div>
               )}
+              <div style={{ maxWidth: "80%", background: m.role === "user" ? G.teal : "#fff", color: m.role === "user" ? "#fff" : "#222", borderRadius: m.role === "user" ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "10px 14px", fontSize: 14, lineHeight: 1.8, boxShadow: "0 1px 6px rgba(0,0,0,0.07)", border: m.role === "assistant" ? "1px solid #f0f0f0" : "none" }}>
+                <MathText text={m.text} />
+                {m.role === "assistant" && (
+                  <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", borderTop: "1px solid #f0f0f0", paddingTop: 8 }}>
+                    <button onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))} style={{ padding: "4px 10px", background: G.blueLight, color: G.blue, border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>✏️ 做相关题目</button>
+                    <button onClick={() => setPage("知识点")} style={{ padding: "4px 10px", background: G.purpleLight, color: G.purple, border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>📚 知识点卡片</button>
+                  </div>
+                )}
+              </div>
             </div>
           ))}
+          {chatting && (
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 16 }}>
+              <div style={{ width: 34, height: 34, borderRadius: "50%", background: G.purple, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>📐</div>
+              <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: "4px 16px 16px 16px", padding: "12px 16px", fontSize: 14, color: "#999" }}>··· 思考中</div>
+            </div>
+          )}
+          <div ref={chatEndRef} />
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <input value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !chatting) ask(); }} placeholder="输入你的问题…" style={{ ...s.input, marginBottom: 0 }} />
-          <Btn variant="primary" onClick={ask} disabled={chatting || !materialId || !question.trim()}>{chatting ? "思考中…" : "发送"}</Btn>
+        <div style={{ borderTop: "1px solid #f0f0f0", padding: "12px 16px", display: "flex", gap: 10, background: "#fafafa" }}>
+          <input value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !chatting) ask(); }} placeholder="输入你的问题，按 Enter 发送…" style={{ ...s.input, marginBottom: 0, flex: 1 }} />
+          <Btn variant="primary" onClick={ask} disabled={chatting || !materialId || !question.trim()}>{chatting ? "…" : "发送"}</Btn>
         </div>
       </div>
     </div>
@@ -4635,7 +4819,7 @@ function TeacherPage({ setPage, profile }) {
             material: { ...material, status: "approved" },
             file: null,
             fallbackText: `${material?.title || ""} ${material?.description || ""}`,
-            genCount: 6,
+            genCount: 10,
             actorName: profile?.name || "教师",
           });
         } catch (e) {}
@@ -4655,7 +4839,7 @@ function TeacherPage({ setPage, profile }) {
             material: { ...material, status: "approved" },
             file: null,
             fallbackText: `${material?.title || ""} ${material?.description || ""}`,
-            genCount: 6,
+            genCount: 10,
             actorName: profile?.name || "教师",
           });
         } catch (e) {}

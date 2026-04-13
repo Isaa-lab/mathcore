@@ -42,41 +42,39 @@ export default async function handler(req, res) {
   const englishRatio = (cleanText.match(/[a-zA-Z]/g) || []).length / Math.max(cleanText.length, 1);
   const isEnglish = englishRatio > 0.4;
 
-  const prompt = `You are an expert mathematics professor generating study materials from a textbook excerpt.
+  const prompt = `你是一位专业数学教授，正在为中国大学生制作习题和知识点卡片。教材原文可能是英文，但所有输出内容必须使用中文。
 
-CRITICAL WARNING — The text below was extracted from a PDF and may contain GARBLED mathematical notation:
-- Superscripts/subscripts may be broken: "x 2" means x², "d t 2" means d²/dt², "x n" means xₙ
-- Operators may be separated by spaces: "d y / d x" means dy/dx
-- Greek letters may appear as: "theta", "θ", "α", "β", "λ", "μ" etc.
-YOU MUST reconstruct all formulas correctly in standard mathematical notation before using them.
-NEVER copy garbled text verbatim into questions or topic names.
+【重要警告】以下文本由 PDF 自动提取，数学符号可能存在乱码：
+- "x 2" 实为 x²，"d t 2" 实为 d²/dt²，"x n" 实为 xₙ
+- "d y / d x" 实为 dy/dx，字母间多余空格是乱码
+- 所有数学公式必须还原为正确标准符号，绝对不能照抄乱码原文
 
-=== TEXTBOOK EXCERPT (${isEnglish ? "English" : "Chinese"}) ===
+=== 教材原文（${isEnglish ? "英文" : "中文"}教材，输出用中文）===
 ${cleanText}
-=== END ===
+=== 原文结束 ===
 
-Course: ${course || "Mathematics"} | Topic: ${ch}
+课程：${course || "数学"} | 章节：${ch}
 
-TASK 1 — Extract exactly 3 to 5 key concepts (topics). Each must have:
-  - "name": short concept name (3–6 words, clean, no garbled text)
-  - "summary": one sentence explaining the concept clearly
+【任务一】提取 3~5 个核心知识点，每个知识点必须包含：
+  - "name"：知识点名称（中文，4~10字，不能照抄乱码）
+  - "summary"：一句话说明该知识点的核心内容（中文，20~60字）
 
-TASK 2 — Generate exactly ${count} exam questions from the text. Rules:
-- Base every question on a SPECIFIC definition, theorem, method, or result in the text
-- REWRITE all mathematical expressions in clean standard notation (fix garbled text)
-- Multiple-choice (单选题): exactly 4 options A/B/C/D, all plausible distractors
-- True/False (判断题): options=null, answer="正确" or "错误"
-- Mix types: at least ${Math.max(1, Math.floor(count * 0.6))} multiple-choice and at least 1 true/false
-- Explanation ≤ 50 words, must justify the answer
+【任务二】生成恰好 ${count} 道中文习题，要求：
+- 每道题必须基于原文的具体定义、定理、公式或方法
+- 所有数学公式用标准符号（如 dy/dx、∫、∑、e^(at) 等），不照搬乱码
+- 单选题（单选题）：恰好 4 个选项 A/B/C/D，干扰项必须是合理的数学表达式，绝对禁止使用"与原文相反""教材未提及""以上都不对"等无效选项
+- 判断题（判断题）：options 为 null，answer 为"正确"或"错误"
+- 题型分配：至少 ${Math.max(2, Math.floor(count * 0.7))} 道单选题，至少 1 道判断题
+- 解析 ≤ 60 字，需明确说明正确理由
 
-Output ONLY this JSON, no markdown, no extra text:
+仅输出如下 JSON，不附加任何其他文字或 markdown：
 {
   "topics": [
-    { "name": "Separation of Variables", "summary": "A method to solve ODEs by separating x and y terms to opposite sides." }
+    { "name": "分离变量法", "summary": "将 dy/dx = f(x)g(y) 改写为 dy/g(y) = f(x)dx，两端分别积分求解一阶常微分方程的方法。" }
   ],
   "questions": [
-    { "type": "单选题", "question": "Which condition must hold for a first-order ODE dy/dx = f(x,y) to be solvable by separation of variables?", "options": ["A. f can be written as g(x)·h(y)", "B. f is linear in y", "C. f is constant", "D. f depends only on x"], "answer": "A", "explanation": "Separation of variables requires f(x,y) = g(x)·h(y) so each side can be integrated independently." },
-    { "type": "判断题", "question": "判断：dy/dx = x·y² 可以用分离变量法求解。", "options": null, "answer": "正确", "explanation": "该方程可改写为 dy/y² = x dx，两侧分别对 x 和 y 积分即可求解。" }
+    { "type": "单选题", "question": "用分离变量法求解 dy/dx = xy，其通解为？", "options": ["A. y = Ce^(x²/2)", "B. y = Ce^x", "C. y = Ce^(x²)", "D. y = x² + C"], "answer": "A", "explanation": "分离变量得 dy/y = x dx，积分得 ln|y| = x²/2 + C₀，故 y = Ce^(x²/2)。" },
+    { "type": "判断题", "question": "方程 dy/dx = x²·sin(y) 可以用分离变量法求解。", "options": null, "answer": "正确", "explanation": "该方程可改写为 dy/sin(y) = x² dx，两端可分别积分，故可用分离变量法。" }
   ]
 }`;
 
