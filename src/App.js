@@ -5455,7 +5455,11 @@ function MaterialsPage({ setPage, profile }) {
 // ── MathText: 渲染含 LaTeX 公式的文本 ────────────────────────────────────────
 function MathText({ text }) {
   if (!text) return <span />;
-  const parts = text.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$)/);
+  const clean = text
+    .replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g,
+      '「📊 图示区域，建议前往『知识点』页面查看可视化」')
+    .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/g, '');
+  const parts = clean.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$)/);
   return (
     <span>
       {parts.map((part, i) => {
@@ -5471,6 +5475,9 @@ function MathText({ text }) {
             const html = katex.renderToString(inner, { throwOnError: false, displayMode: false });
             return <span key={i} dangerouslySetInnerHTML={{ __html: html }} />;
           } catch(e) { return <code key={i}>{part}</code>; }
+        }
+        if (part.startsWith('「📊')) {
+          return <div key={i} style={{ background: '#f0fdf4', border: '1px dashed #86efac', borderRadius: 8, padding: '8px 12px', margin: '8px 0', color: '#166534', fontSize: 13 }}>{part}</div>;
         }
         return <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{part}</span>;
       })}
