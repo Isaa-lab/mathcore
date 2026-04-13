@@ -1243,7 +1243,27 @@ const KNOWLEDGE_CONTENT = {
     note: "一定收敛，但速度慢（线性）。每步误差缩小 1/2。",
     viz: "二分法",
     examples: [
-      { problem: "用二分法求 f(x)=x³−x−2=0 在 [1,2] 上的根，迭代 3 次。", steps: ["f(1)=−2<0，f(2)=4>0，有根 ✓", "c₁=1.5，f(1.5)=−0.125<0 → 新区间 [1.5, 2]", "c₂=1.75，f(1.75)≈1.359>0 → 新区间 [1.5, 1.75]", "c₃=1.625，f(1.625)≈0.566>0 → 新区间 [1.5, 1.625]"], answer: "3次迭代后根的近似值 ≈ 1.5625，误差 ≤ (2−1)/2⁴=0.0625" },
+      {
+        problem: "用二分法求 $f(x)=x^3-x-2=0$ 在 $[1,2]$ 上的根，迭代3次，并估计误差。",
+        steps: [
+          "**验证有根：** $f(1)=1-1-2=-2<0$，$f(2)=8-2-2=4>0$，由零点定理，$[1,2]$ 内必有根 ✓",
+          "**第1次迭代：** 中点 $c_1=\\frac{1+2}{2}=1.5$，$f(1.5)=3.375-1.5-2=-0.125<0$，故根在 $[1.5, 2]$",
+          "**第2次迭代：** 中点 $c_2=\\frac{1.5+2}{2}=1.75$，$f(1.75)\\approx 1.359>0$，故根在 $[1.5, 1.75]$",
+          "**第3次迭代：** 中点 $c_3=\\frac{1.5+1.75}{2}=1.625$，$f(1.625)\\approx 0.566>0$，故根在 $[1.5, 1.625]$",
+          "**误差估计：** 经过 $n=3$ 次迭代后，误差上界 $|c_3-r|\\leq\\frac{b-a}{2^{n+1}}=\\frac{1}{2^4}=0.0625$"
+        ],
+        answer: "3次迭代后近似根 $x\\approx 1.5625$，误差 $\\leq 0.0625$。**规律：** 每次迭代区间缩半，$n$次后误差 $\\leq (b-a)/2^{n+1}$"
+      },
+      {
+        problem: "若要使二分法的误差 $\\leq 10^{-4}$，对 $[0,1]$ 区间需要迭代多少次？",
+        steps: [
+          "**建立不等式：** 需满足 $\\frac{b-a}{2^{n+1}} \\leq 10^{-4}$",
+          "**代入数据：** $\\frac{1-0}{2^{n+1}} \\leq 10^{-4}$，即 $2^{n+1} \\geq 10^4$",
+          "**取对数求解：** $(n+1)\\ln 2 \\geq 4\\ln 10$，得 $n+1 \\geq \\frac{4\\times 2.303}{0.693} \\approx 13.29$",
+          "**结论：** $n \\geq 12.29$，故至少需要 **13次** 迭代"
+        ],
+        answer: "至少需要 **13次** 迭代。通用公式：$n \\geq \\log_2\\frac{b-a}{\\varepsilon} - 1$"
+      },
     ],
   },
   "Newton 法": {
@@ -1256,7 +1276,17 @@ const KNOWLEDGE_CONTENT = {
     note: "每步有效数字大约翻倍，但需要 f'(x)≠0 且初始值足够近。",
     viz: "Newton 法",
     examples: [
-      { problem: "用 Newton 法求 √2，即求 f(x)=x²−2=0，取 x₀=1。", steps: ["f(x)=x²−2，f'(x)=2x", "x₁=1−(1−2)/(2)=1.5，误差=0.0858", "x₂=1.5−(2.25−2)/3=1.4167，误差=0.0025", "x₃≈1.4142，误差≈7×10⁻⁷"], answer: "x₃≈1.41421，已达 6 位有效数字（体现二阶收敛速度）" },
+      {
+        problem: "用Newton迭代法求 $\\sqrt{2}$（即求 $f(x)=x^2-2=0$ 的正根），取初值 $x_0=1$，迭代至6位有效数字。",
+        steps: [
+          "**建立迭代公式：** $f(x)=x^2-2$，$f'(x)=2x$，Newton迭代公式为 $x_{n+1}=x_n-\\frac{f(x_n)}{f'(x_n)}=x_n-\\frac{x_n^2-2}{2x_n}=\\frac{x_n+2/x_n}{2}$",
+          "**第1次迭代：** $x_1=\\frac{1+2/1}{2}=\\frac{3}{2}=1.5$，误差 $|x_1-\\sqrt{2}|\\approx 0.0858$",
+          "**第2次迭代：** $x_2=\\frac{1.5+2/1.5}{2}=\\frac{1.5+1.333}{2}\\approx 1.4167$，误差 $\\approx 0.0025$",
+          "**第3次迭代：** $x_3=\\frac{1.4167+2/1.4167}{2}\\approx 1.41422$，误差 $\\approx 7\\times 10^{-7}$",
+          "**二阶收敛验证：** 误差从 $0.0858\\to 0.0025\\to 7\\times 10^{-7}$，每步误差约为上步的平方（体现二阶收敛）"
+        ],
+        answer: "经过仅3次迭代，$x_3\\approx 1.41421$，达到6位有效数字。Newton法的二阶收敛远快于二分法的线性收敛。"
+      },
     ],
   },
   "不动点迭代": {
@@ -2448,9 +2478,9 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                       {/* Problem */}
                       <div style={{ padding: "16px 20px", background: "linear-gradient(135deg,#ecfdf5,#d1fae5)", borderLeft: "5px solid #10b981" }}>
                         <div style={{ fontSize: 11, fontWeight: 800, color: "#065f46", letterSpacing: "0.12em", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ background: "#10b981", color: "#fff", padding: "2px 8px", borderRadius: 20 }}>EXAMPLE {idx+1}</span>
+                          <span style={{ background: G.teal, color: "#fff", padding: "4px 12px", borderRadius: 20, fontSize: 12 }}>例题 {idx+1}</span>
                         </div>
-                        <div style={{ fontSize: 15, color: "#064e3b", lineHeight: 1.8, fontWeight: 500 }}>{ex.problem}</div>
+                        <div style={{ fontSize: 15, color: "#064e3b", lineHeight: 1.8, fontWeight: 500 }}><MathText text={ex.problem} /></div>
                       </div>
                       {/* Solution steps */}
                       <div style={{ padding: "16px 20px", background: "#fff" }}>
@@ -2460,8 +2490,8 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                         </div>
                         {ex.steps.map((s, si) => (
                           <div key={si} style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "flex-start" }}>
-                            <div style={{ flexShrink: 0, width: 24, height: 24, borderRadius: "50%", background: si % 2 === 0 ? G.blueLight : "#f0f9ff", color: G.blue, fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", border: `1.5px solid ${G.blue}33`, marginTop: 1 }}>{si+1}</div>
-                            <div style={{ fontSize: 14, color: "#1f2937", lineHeight: 1.8 }}>{s}</div>
+                            <div style={{ flexShrink: 0, width: 26, height: 26, borderRadius: "50%", background: G.blue, color: "#fff", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 2 }}>{si+1}</div>
+                            <div style={{ fontSize: 14.5, color: "#1f2937", lineHeight: 1.95, flex: 1 }}><MathText text={s} /></div>
                           </div>
                         ))}
                       </div>
@@ -2470,7 +2500,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                         <span style={{ fontSize: 16, flexShrink: 0 }}>✅</span>
                         <div>
                           <div style={{ fontSize: 11, fontWeight: 800, color: "#065f46", letterSpacing: "0.08em", marginBottom: 4 }}>最终答案</div>
-                          <div style={{ fontSize: 14, color: "#064e3b", lineHeight: 1.75 }}>{ex.answer}</div>
+                          <div style={{ fontSize: 14, color: "#064e3b", lineHeight: 1.75 }}><MathText text={ex.answer} /></div>
                         </div>
                       </div>
                     </div>
@@ -2805,9 +2835,9 @@ const CHAPTERS = [
 
 // ── Shared UI ─────────────────────────────────────────────────────────────────
 const s = {
-  card: { background: "#fff", border: "1px solid #eee", borderRadius: 16, padding: "1.5rem" },
-  input: { width: "100%", fontSize: 15, padding: "12px 14px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontFamily: "inherit", boxSizing: "border-box", outline: "none", color: "#111" },
-  label: { fontSize: 13, color: "#555", marginBottom: 6, display: "block", fontWeight: 500 },
+  card: { background: "#fff", border: "1px solid #f0f0f0", borderRadius: 20, padding: "1.6rem", boxShadow: "0 2px 16px rgba(0,0,0,0.05)" },
+  input: { width: "100%", fontSize: 15, padding: "13px 16px", border: "1.5px solid #e5e5e7", borderRadius: 12, fontFamily: "inherit", boxSizing: "border-box", outline: "none", color: "#111", background: "#fafafa" },
+  label: { fontSize: 13, color: "#555", marginBottom: 8, display: "block", fontWeight: 600, letterSpacing: "0.01em" },
 };
 
 const Btn = ({ children, onClick, variant = "outline", size = "md", disabled = false, style = {} }) => {
@@ -2828,15 +2858,14 @@ const Badge = ({ children, color = "teal" }) => {
   const [bg, fg] = m[color] || m.teal;
   return <span style={{ background: bg, color: fg, fontSize: 11, padding: "3px 10px", borderRadius: 20, fontWeight: 600, whiteSpace: "nowrap" }}>{children}</span>;
 };
-
-const StatCard = ({ label, value, sub, color = G.teal, icon }) => (
-  <div style={{ background: "#fff", borderRadius: 16, padding: "1.25rem 1.5rem", border: "1px solid #eee", borderTop: `4px solid ${color}` }}>
-    <div style={{ fontSize: 24, marginBottom: 6 }}>{icon}</div>
-    <div style={{ fontSize: 28, fontWeight: 700, color: "#111", marginBottom: 2 }}>{value}</div>
-    <div style={{ fontSize: 13, color: "#888" }}>{label}</div>
-    {sub && <div style={{ fontSize: 11, color: "#aaa", marginTop: 2 }}>{sub}</div>}
+const StatCard = ({ label, value, sub, color = G.teal, icon }) => (
+  <div style={{ background: color + "10", borderRadius: 20, padding: "1.2rem 1.1rem", border: "1px solid " + color + "22", boxShadow: "0 2px 12px rgba(0,0,0,0.03)" }}>
+    <div style={{ fontSize: 22, marginBottom: 8 }}>{icon}</div>
+    <div style={{ fontSize: 28, fontWeight: 800, color, lineHeight: 1, marginBottom: 4 }}>{value}</div>
+    <div style={{ fontSize: 13, fontWeight: 700, color: "#222", marginBottom: 2 }}>{label}</div>
+    {sub && <div style={{ fontSize: 11, color: "#999" }}>{sub}</div>}
   </div>
-);
+)
 
 const ProgressBar = ({ value, max = 100, color = G.teal, height = 8 }) => (
   <div style={{ height, background: "#f0f0f0", borderRadius: height, overflow: "hidden" }}>
@@ -3074,7 +3103,7 @@ function TopNav({ page, setPage, profile, onLogout }) {
     : ["上传资料", "技能树", "记忆卡片", "错题本"];
   const isActive = (l) => page === l;
   return (
-    <div style={{ background: "#fff", borderBottom: "1px solid #eee", padding: "0 2rem", display: "flex", alignItems: "center", justifyContent: "space-between", height: 60, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 8px rgba(0,0,0,0.03)" }}>
+    <div style={{ background: "rgba(255,255,255,0.92)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", borderBottom: "1px solid rgba(0,0,0,0.06)", padding: "0 2rem", display: "flex", alignItems: "center", justifyContent: "space-between", height: 60, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 2px 16px rgba(0,0,0,0.04)" }}>
       <div onClick={() => setPage("首页")} style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flexShrink: 0 }}>
         <div style={{ width: 34, height: 34, borderRadius: 9, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17 }}>&#128784;</div>
         <span style={{ fontSize: 17, fontWeight: 700, color: "#111", letterSpacing: "-0.3px" }}>MathCore</span>
@@ -3216,64 +3245,96 @@ function HomePage({ setPage, profile }) {
   const providerLabel = { groq: "Groq⚡", gemini: "Gemini", deepseek: "DeepSeek", kimi: "Kimi", custom: "自定义" }[aiCfg.provider] || "Gemini";
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 1000, margin: "0 auto" }}>
+    <div style={{ padding: "1.5rem 2rem", maxWidth: 960, margin: "0 auto" }}>
       {showAISettings && <AISettingsModal onClose={() => setShowAISettings(false)} />}
-      {/* Hero */}
-      <div style={{ background: `linear-gradient(135deg, ${G.teal} 0%, #0a7a5a 100%)`, borderRadius: 24, padding: "2.5rem 3rem", marginBottom: 24, color: "#fff", position: "relative", overflow: "hidden" }}>
-        <div style={{ position: "absolute", right: -20, top: -20, width: 180, height: 180, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
-        <div style={{ position: "absolute", right: 60, bottom: -40, width: 120, height: 120, borderRadius: "50%", background: "rgba(255,255,255,0.05)" }} />
-        <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.12em", opacity: 0.7, textTransform: "uppercase", marginBottom: 10 }}>数学与应用数学学习平台</div>
-        <div style={{ fontSize: 30, fontWeight: 700, marginBottom: 10, letterSpacing: "-0.5px" }}>你好，{profile?.name || "同学"} 👋</div>
-        <div style={{ fontSize: 16, opacity: 0.85, lineHeight: 1.7, marginBottom: 24, maxWidth: 520 }}>涵盖数值分析、线性代数、概率论、数理统计、ODE、最优化六门课程，AI 智能出题与记忆卡片，系统提升数学能力。</div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <button onClick={() => setPage("知识点")} style={{ padding: "12px 28px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", background: "#fff", color: G.teal, border: "none", borderRadius: 12, cursor: "pointer" }}>开始学习</button>
-          <button onClick={() => setPage("题库练习")} style={{ padding: "12px 28px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", background: "rgba(255,255,255,0.15)", color: "#fff", border: "2px solid rgba(255,255,255,0.3)", borderRadius: 12, cursor: "pointer" }}>进入题库</button>
-          <button onClick={() => setPage("资料对话")} style={{ padding: "10px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: "rgba(255,255,255,0.12)", color: "#fff", border: "1.5px solid rgba(255,255,255,0.3)", borderRadius: 12, cursor: "pointer" }}>🤖 AI 复习助教</button>
-          <button onClick={() => setShowAISettings(true)} style={{ padding: "10px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: hasUserKey ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)", color: "#fff", border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-            ⚙️ AI 设置{hasUserKey ? <span style={{ fontSize: 11, background: "rgba(255,255,255,0.2)", padding: "2px 7px", borderRadius: 8 }}>{providerLabel} ✓</span> : <span style={{ fontSize: 11, opacity: 0.7 }}>配置 Key</span>}
+
+      {/* ── Hero Section ── */}
+      <div style={{
+        background: "linear-gradient(135deg, #1D9E75 0%, #0d7c5c 60%, #185FA5 100%)",
+        borderRadius: 28, padding: "2.5rem 2.8rem", marginBottom: 28, color: "#fff",
+        position: "relative", overflow: "hidden",
+        boxShadow: "0 16px 48px rgba(29,158,117,0.25)"
+      }}>
+        {/* Decorative blobs */}
+        <div style={{ position: "absolute", right: -30, top: -30, width: 220, height: 220, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
+        <div style={{ position: "absolute", right: 80, bottom: -50, width: 140, height: 140, borderRadius: "50%", background: "rgba(255,255,255,0.04)" }} />
+        <div style={{ position: "absolute", left: "50%", top: -20, width: 300, height: 300, borderRadius: "50%", background: "rgba(255,255,255,0.02)" }} />
+
+        <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.14em", opacity: 0.65, textTransform: "uppercase", marginBottom: 12 }}>
+          数学与应用数学学习平台
+        </div>
+        <div style={{ fontSize: 34, fontWeight: 800, marginBottom: 8, letterSpacing: "-0.8px", lineHeight: 1.2 }}>
+          你好，{profile?.name || "同学"} 👋
+        </div>
+        <div style={{ fontSize: 15, opacity: 0.8, lineHeight: 1.7, marginBottom: 28, maxWidth: 480 }}>
+          涵盖数值分析 · 线性代数 · 概率论 · 数理统计 · ODE · 最优化，AI 智能出题与记忆卡片
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <button onClick={() => setPage("知识点")} style={{ padding: "13px 28px", fontSize: 15, fontWeight: 700, fontFamily: "inherit", background: "#fff", color: G.teal, border: "none", borderRadius: 14, cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.15)" }}>
+            开始学习
+          </button>
+          <button onClick={() => setPage("题库练习")} style={{ padding: "13px 24px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", background: "rgba(255,255,255,0.18)", color: "#fff", border: "2px solid rgba(255,255,255,0.35)", borderRadius: 14, cursor: "pointer" }}>
+            进入题库
+          </button>
+          <button onClick={() => setPage("资料对话")} style={{ padding: "11px 20px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: "rgba(255,255,255,0.12)", color: "#fff", border: "1.5px solid rgba(255,255,255,0.25)", borderRadius: 14, cursor: "pointer" }}>
+            🤖 AI 复习助教
+          </button>
+          <button onClick={() => setShowAISettings(true)} style={{ padding: "11px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: hasUserKey ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)", color: "#fff", border: "1.5px solid rgba(255,255,255,0.3)", borderRadius: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+            ⚙️{hasUserKey ? <span style={{ fontSize: 11, background: "rgba(255,255,255,0.2)", padding: "2px 7px", borderRadius: 8 }}>{providerLabel} ✓</span> : " AI 设置"}
           </button>
         </div>
       </div>
 
-      {/* Stats */}
+      {/* ── Stats Row ── */}
       {(() => {
-        const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); const today = new Date().toDateString(); if (d.last !== today) { const yesterday = new Date(Date.now()-86400000).toDateString(); const s = d.last === yesterday ? (d.count || 0) + 1 : 1; localStorage.setItem("mc_streak", JSON.stringify({last: today, count: s})); return s; } return d.count || 1; } catch { return 1; } })();
+        const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); return d.days || 1; } catch { return 1; } })();
+        const stats2 = [
+          { icon: "📚", value: "6", label: "门课程", sub: "数值分析 · 线代 · 概率", color: G.teal, bg: G.tealLight },
+          { icon: "✏️", value: ALL_QUESTIONS.length + "+", label: "道题目", sub: "持续更新中", color: G.blue, bg: G.blueLight },
+          { icon: "🃏", value: FLASHCARDS.length, label: "张卡片", sub: "公式定理", color: G.purple, bg: G.purpleLight },
+          { icon: "🔥", value: streak, label: "天连学", sub: "保持每日练习！", color: "#E24B4A", bg: "#FCEBEB" },
+        ];
         return (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 24 }}>
-            <StatCard icon="📚" label="门课程" value="6" sub="数值分析 · 线代 · 概率 · 统计 · ODE · 最优化" color={G.teal} />
-            <StatCard icon="✏️" label="题目" value={ALL_QUESTIONS.length + "+"} sub="持续更新" color={G.amber} />
-            <StatCard icon="🃏" label="记忆卡片" value={FLASHCARDS.length} sub="公式定理" color={G.purple} />
-            <StatCard icon="🔥" label="连续学习" value={streak + " 天"} sub="保持每日练习！" color="#E24B4A" />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 28 }}>
+            {stats2.map(st => (
+              <div key={st.label} style={{ background: st.bg, borderRadius: 18, padding: "1.2rem 1.1rem", border: "1px solid " + st.color + "22" }}>
+                <div style={{ fontSize: 22, marginBottom: 6 }}>{st.icon}</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: st.color, lineHeight: 1, marginBottom: 2 }}>{st.value}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#222", marginBottom: 2 }}>{st.label}</div>
+                <div style={{ fontSize: 11, color: "#888" }}>{st.sub}</div>
+              </div>
+            ))}
           </div>
         );
       })()}
 
-      {/* Quick access */}
-      <div style={{ fontSize: 13, fontWeight: 700, color: "#444", letterSpacing: "0.04em", marginBottom: 14 }}>快速入口</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+      {/* ── Quick Access ── */}
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14 }}>快速入口</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 28 }}>
         {[
           { icon: "⚡", title: "每日练习", desc: "AI 精选题目", page: "题库练习", bg: "#F0F7FF", accent: G.blue },
-          { icon: "🏃", title: "记忆卡片", desc: "核心公式闪记", page: "记忆卡片", bg: G.purpleLight, accent: G.purple },
+          { icon: "🃏", title: "记忆卡片", desc: "核心公式闪记", page: "记忆卡片", bg: G.purpleLight, accent: G.purple },
           { icon: "🤖", title: "AI 复习助教", desc: "5步法智能辅导", page: "资料对话", bg: "#F0FDF8", accent: G.teal },
           { icon: "📊", title: "学习报告", desc: "正确率与薄弱点", page: "学习报告", bg: G.amberLight, accent: G.amber },
           { icon: "❌", title: "错题本", desc: "针对性攻克错题", page: "错题本", bg: G.redLight, accent: G.red },
           { icon: "🌳", title: "技能树", desc: "可视化知识路径", page: "技能树", bg: "#f0fdf4", accent: G.teal },
         ].map(q => (
-          <div key={q.title} onClick={() => setPage(q.page)} style={{ background: q.bg, borderRadius: 14, padding: "1.2rem", cursor: "pointer", display: "flex", gap: 12, alignItems: "center", border: "1px solid " + q.accent + "22", transition: "box-shadow .15s, transform .15s" }}
-            onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 4px 16px " + q.accent + "33"; e.currentTarget.style.transform = "translateY(-2px)"; }}
+          <div key={q.title} onClick={() => setPage(q.page)} style={{ background: q.bg, borderRadius: 18, padding: "1.3rem 1.2rem", cursor: "pointer", display: "flex", gap: 14, alignItems: "center", border: "1px solid " + q.accent + "22", transition: "box-shadow .15s, transform .15s" }}
+            onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 6px 20px " + q.accent + "30"; e.currentTarget.style.transform = "translateY(-3px)"; }}
             onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
           >
-            <div style={{ width: 42, height: 42, borderRadius: 12, background: q.accent + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>{q.icon}</div>
+            <div style={{ width: 46, height: 46, borderRadius: 14, background: q.accent + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>{q.icon}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#111", marginBottom: 2 }}>{q.title}</div>
-              <div style={{ fontSize: 12, color: "#777", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{q.desc}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#111", marginBottom: 3 }}>{q.title}</div>
+              <div style={{ fontSize: 12, color: "#888" }}>{q.desc}</div>
             </div>
           </div>
         ))}
       </div>
 
       <JoinClassCard profile={profile} />
-      {/* Badge Showcase – always visible */}
+
+      {/* ── Badge Gallery ── */}
       {(() => {
         const stats = getBadgeStats();
         const unlockedIds = new Set(BADGES.filter(b => b.check(stats)).map(b => b.id));
@@ -3281,8 +3342,8 @@ function HomePage({ setPage, profile }) {
         return (
           <div style={{ marginTop: 28 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#444", letterSpacing: "0.04em" }}>🏅 成就徽章</div>
-              <div style={{ fontSize: 12, color: "#aaa" }}>{unlockedIds.size}/{BADGES.length} 已解锁</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em" }}>🏅 成就徽章</div>
+              <div style={{ fontSize: 12, color: "#bbb" }}>{unlockedIds.size}/{BADGES.length} 已解锁</div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10 }}>
               {BADGES.map(b => {
@@ -3291,24 +3352,25 @@ function HomePage({ setPage, profile }) {
                   <div key={b.id} title={b.desc} style={{
                     background: unlocked ? "linear-gradient(135deg,#fef3c7,#fde68a)" : "#f8f8f8",
                     border: unlocked ? "1.5px solid #fcd34d" : "1.5px solid #eee",
-                    borderRadius: 14, padding: "12px 8px", display: "flex", flexDirection: "column",
-                    alignItems: "center", gap: 6, opacity: unlocked ? 1 : 0.45, transition: "all .2s",
-                    cursor: "default",
+                    borderRadius: 16, padding: "14px 8px", display: "flex", flexDirection: "column",
+                    alignItems: "center", gap: 7, opacity: unlocked ? 1 : 0.4,
+                    boxShadow: unlocked ? "0 4px 12px rgba(252,211,77,0.3)" : "none",
                   }}>
-                    <span style={{ fontSize: 22, filter: unlocked ? "none" : "grayscale(1)" }}>{b.emoji}</span>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: unlocked ? "#92400e" : "#999", textAlign: "center", lineHeight: 1.3 }}>{b.name}</div>
-                    {!unlocked && <div style={{ fontSize: 10, color: "#bbb", textAlign: "center", lineHeight: 1.3 }}>{b.desc}</div>}
+                    <span style={{ fontSize: 24, filter: unlocked ? "none" : "grayscale(1)" }}>{b.emoji}</span>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: unlocked ? "#92400e" : "#aaa", textAlign: "center", lineHeight: 1.3 }}>{b.name}</div>
+                    <div style={{ fontSize: 10, color: unlocked ? "#b45309" : "#ccc", textAlign: "center", lineHeight: 1.3 }}>{b.desc}</div>
                   </div>
                 );
               })}
             </div>
-            {lockedCount > 0 && <div style={{ marginTop: 10, fontSize: 12, color: "#aaa", textAlign: "center" }}>还有 {lockedCount} 枚徽章待解锁，继续学习吧 💪</div>}
+            {lockedCount > 0 && <div style={{ marginTop: 12, fontSize: 12, color: "#bbb", textAlign: "center" }}>还有 {lockedCount} 枚徽章待解锁，继续学习吧 💪</div>}
           </div>
         );
       })()}
     </div>
   );
 }
+
 
 // ── Knowledge Page ────────────────────────────────────────────────────────────
 function KnowledgePage({ setPage, setChapterFilter }) {
@@ -4233,29 +4295,51 @@ function ExamPlanSection({ weak }) {
   };
 
   const generatePlan = () => {
-    const scope = examChapters.length > 0 ? examChapters : weak.map(w => w.name);
+    const scope = examChapters.length > 0 ? examChapters : (weak.length > 0 ? weak.map(w => w.name) : ["综合复习"]);
+    // Assign each day a primary chapter by evenly distributing chapters
+    const dayChapter = Array.from({ length: 7 }, (_, di) => scope[di % scope.length]);
     return Array.from({ length: 7 }, (_, di) => {
       const date = new Date(Date.now() + di * 86400000);
       const dayNames = ["日","一","二","三","四","五","六"];
       const dLeft = daysLeft !== null ? daysLeft - di : null;
       const isExamDay = daysLeft !== null && dLeft === 0;
       const isPast = dLeft !== null && dLeft < 0;
+      const chap = dayChapter[di];
+      const chapShort = chap ? chap.split(" ").slice(0,2).join(" ") : "综合";
       let tasks = [];
-      if (isExamDay) tasks = ["🎓 考试日！加油！", "相信自己，沉着作答"];
-      else if (isPast) tasks = ["已过考试日"];
-      else if (dLeft !== null && dLeft === 1) tasks = ["轻松回顾重点", "早睡！保持状态"];
-      else if (dLeft !== null && dLeft <= 3) tasks = ["重点公式快速过", scope[0] ? scope[0].split(" ")[0] + " 冲刺" : "总复习"];
-      else {
-        const topic = scope[di % Math.max(scope.length, 1)] || (weak[di % Math.max(weak.length,1)]?.name?.split(" ")[0]) || "综合";
-        if (di % 3 === 0) tasks = ["复习 " + topic, "练习 8 道题"];
-        else if (di % 3 === 1) tasks = ["记忆卡片 15 张", "错题本回顾"];
-        else tasks = [topic + " AI对话提问", "巩固薄弱点"];
+      let chapter = "";
+      if (isExamDay) {
+        tasks = ["🎓 考试日！加油！", "相信自己，沉着作答"];
+      } else if (isPast) {
+        tasks = ["已过考试日"];
+      } else if (dLeft !== null && dLeft === 1) {
+        tasks = ["轻松回顾全部重点", "早睡！保持最佳状态"];
+        chapter = "冲刺";
+      } else if (dLeft !== null && dLeft <= 3) {
+        // Sprint: cycle chapters for last 3 days
+        const sprintChap = scope[(dLeft - 1) % scope.length];
+        const sprintShort = sprintChap ? sprintChap.split(" ").slice(0,2).join(" ") : "总复习";
+        tasks = ["🔥 " + sprintShort + " 冲刺复习", "重点公式快速过 · 错题再做一遍"];
+        chapter = sprintShort;
+      } else {
+        // Normal days: assign chapter, vary activity type
+        const pattern = di % 3;
+        if (pattern === 0) {
+          tasks = ["📖 精读 " + chapShort, "练习对应题目 8 道"];
+        } else if (pattern === 1) {
+          tasks = ["🃏 记忆卡片 15 张", "📝 " + chapShort + " 错题回顾"];
+        } else {
+          tasks = ["💬 " + chapShort + " AI 助教提问", "🔁 巩固薄弱知识点"];
+        }
+        chapter = chapShort;
       }
-      const intensity = isExamDay ? "exam" : (dLeft !== null && dLeft <= 1) ? "light" : (di % 3 === 0 ? "high" : "normal");
-      const bg = isExamDay ? "linear-gradient(135deg,#fef3c7,#fde68a)" : isPast ? "#f1f5f9" :
-                 intensity === "light" ? G.tealLight : intensity === "high" ? G.blueLight : "#f8fafc";
-      const border = isExamDay ? "#fcd34d" : isPast ? "#e2e8f0" : intensity === "high" ? G.blue+"88" : G.teal+"44";
-      return { date, dayName: dayNames[date.getDay()], tasks, bg, border, isExamDay, isPast, dLeft };
+      const intensity = isExamDay ? "exam" : (dLeft !== null && dLeft <= 1) ? "light" : (dLeft !== null && dLeft <= 3 ? "sprint" : (di % 3 === 0 ? "high" : "normal"));
+      const bg = isExamDay ? "linear-gradient(135deg,#fef3c7,#fde68a)" : isPast ? "#f5f5f5" :
+                 intensity === "light" ? "#f0fdf8" : intensity === "sprint" ? "#fff1f2" :
+                 intensity === "high" ? "#eff6ff" : "#fafbff";
+      const border = isExamDay ? "#fcd34d" : isPast ? "#e5e5e5" :
+                     intensity === "sprint" ? "#fca5a5" : intensity === "high" ? G.blue+"66" : G.teal+"44";
+      return { date, dayName: dayNames[date.getDay()], tasks, bg, border, isExamDay, isPast, dLeft, chapter };
     });
   };
   const plan = generatePlan();
@@ -4307,17 +4391,21 @@ function ExamPlanSection({ weak }) {
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 8 }}>
-        {plan.map(({ date, dayName, tasks, bg, border, isExamDay, isPast, dLeft }, di) => (
-          <div key={di} style={{ background: bg, border: "1.5px solid " + border, borderRadius: 12, padding: "10px 6px", textAlign: "center", opacity: isPast ? 0.5 : 1 }}>
-            <div style={{ fontSize: 11, color: "#888", fontWeight: 600, marginBottom: 3 }}>{"周" + dayName}</div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: isExamDay ? G.amber : "#333", marginBottom: 5 }}>
-              {date.getDate()}{di === 0 && <span style={{ fontSize: 9, marginLeft: 2, color: G.blue, fontWeight: 700 }}>今</span>}
+        {plan.map(({ date, dayName, tasks, bg, border, isExamDay, isPast, dLeft, chapter }, di) => (
+          <div key={di} style={{ background: bg, border: "2px solid " + border, borderRadius: 16, padding: "14px 8px", textAlign: "center", opacity: isPast ? 0.45 : 1, transition: "transform .15s", cursor: "default" }}>
+            <div style={{ fontSize: 12, color: "#999", fontWeight: 600, marginBottom: 4, letterSpacing: "0.05em" }}>{"周" + dayName}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: isExamDay ? "#92400e" : di === 0 ? G.teal : "#222", lineHeight: 1, marginBottom: 4 }}>
+              {date.getDate()}
+              {di === 0 && <span style={{ fontSize: 10, marginLeft: 3, background: G.blue, color: "#fff", padding: "1px 5px", borderRadius: 6, fontWeight: 700, verticalAlign: "middle" }}>今</span>}
             </div>
             {dLeft !== null && dLeft > 0 && !isExamDay && (
-              <div style={{ fontSize: 9, color: "#999", marginBottom: 3 }}>{"剩" + dLeft + "天"}</div>
+              <div style={{ fontSize: 11, color: isExamDay ? "#92400e" : "#aaa", marginBottom: 6, fontWeight: 600 }}>剩 {dLeft} 天</div>
+            )}
+            {chapter && !isPast && !isExamDay && (
+              <div style={{ fontSize: 11, background: "rgba(29,158,117,0.12)", color: G.teal, borderRadius: 20, padding: "2px 8px", marginBottom: 6, fontWeight: 700, display: "inline-block" }}>{chapter}</div>
             )}
             {tasks.map((t, ti) => (
-              <div key={ti} style={{ fontSize: 10, color: isExamDay ? "#92400e" : "#555", lineHeight: 1.5, background: "rgba(255,255,255,0.6)", borderRadius: 5, padding: "2px 3px", marginBottom: 3, wordBreak: "break-all" }}>{t}</div>
+              <div key={ti} style={{ fontSize: 12, color: isExamDay ? "#92400e" : "#444", lineHeight: 1.55, background: "rgba(255,255,255,0.75)", borderRadius: 8, padding: "4px 6px", marginBottom: 4, wordBreak: "keep-all" }}>{t}</div>
             ))}
           </div>
         ))}
