@@ -3,6 +3,7 @@ export default async function handler(req, res) {
 
   const {
     chapter, type, count,
+    mode, question: chatQuestion, materialTitle, materialContext,
     userProvider, userKey, userCustomUrl,
   } = req.body;
 
@@ -16,7 +17,15 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "未配置任何 API Key。请在首页点击「AI 设置」输入你的 API Key。" });
   }
 
-  const prompt = `你是数学课程出题专家。请为"${chapter}"这个数学章节生成${count}道${type}。
+  // ── Chat 模式 prompt ───────────────────────────────────────────────────────
+  const isChatMode = mode === "chat" && chatQuestion;
+  const prompt = isChatMode
+    ? `你是一位专业的数学教师助手，正在帮助学生理解《${materialTitle || "数学教材"}》这份资料。
+${materialContext ? `\n以下是资料中的相关知识点摘要供参考：\n${materialContext}\n` : ""}
+学生问题：${chatQuestion}
+
+请用简洁、准确、易懂的中文回答，如有公式请用文字或 LaTeX 表达。回答控制在 300 字以内，关键步骤分点说明。直接回答，不要说"根据资料"等前置语。`
+    : `你是数学课程出题专家。请为"${chapter}"这个数学章节生成${count}道${type}。
 
 要求：
 - 题目紧贴数值分析或最优化理论内容，考察具体概念和计算
@@ -134,7 +143,12 @@ export default async function handler(req, res) {
   }
 
   if (!responseText) {
-    return res.status(500).json({ error: "AI 服务不可用。请在首页「AI 设置」配置 DeepSeek / Kimi / Gemini API Key。" });
+    return res.status(500).json({ error: "AI 服务不可用。请在首页「AI 设置」配置 DeepSeek / Kimi / Groq / Gemini API Key。" });
+  }
+
+  // Chat 模式：直接返回文本
+  if (isChatMode) {
+    return res.status(200).json({ answer: responseText.trim() });
   }
 
   const clean = responseText.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();

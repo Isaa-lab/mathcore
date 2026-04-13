@@ -4080,10 +4080,14 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
     setRegenMsg("");
     try {
       const chapter = weakChapters[0]?.[0] || "综合";
+      const aiCfg = getAIConfig();
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chapter, type: "单选题", count: 5 }),
+        body: JSON.stringify({
+          chapter, type: "单选题", count: 5,
+          userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+        }),
       });
       const data = await res.json();
       if (data?.error) throw new Error(data.error);
@@ -4448,17 +4452,37 @@ function MaterialChatPage({ setPage, profile }) {
     setQuestion("");
     setHistory(prev => [...prev, { role: "user", text: askText }]);
     try {
-      let chunks = [];
+      // 获取资料相关题目的解析作为上下文
+      let contextChunks = "";
       try {
-        const { data } = await supabase.from("questions").select("explanation,id").eq("material_id", materialId).order("chunk_index", { ascending: true }).limit(20);
-        chunks = data || [];
+        const { data } = await supabase.from("questions")
+          .select("question,explanation,answer")
+          .eq("material_id", materialId)
+          .limit(12);
+        if (data && data.length > 0) {
+          contextChunks = data.map(q => `题：${q.question}\n答：${q.answer}（${q.explanation || ""}）`).join("\n\n");
+        }
       } catch (e) {}
-      // AI Q&A: use /api/generate as simple fallback
-      const chatData = { answer: `关于「${askText}」：请参考资料《${selected?.title || "本资料"}》相关章节，结合教材内容理解。如需 AI 详细解答，请确保 API Key 已配置。` };
-      const data = chatData;
-      setHistory(prev => [...prev, { role: "assistant", text: data.answer || "暂时无法回答", sources: data.sources || [] }]);
+
+      const aiCfg = getAIConfig();
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "chat",
+          question: askText,
+          materialTitle: selected?.title || "本资料",
+          materialContext: contextChunks || "",
+          userProvider: aiCfg.provider,
+          userKey: aiCfg.key,
+          userCustomUrl: aiCfg.customUrl,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setHistory(prev => [...prev, { role: "assistant", text: data.answer || "暂时无法回答", sources: [] }]);
     } catch (err) {
-      setHistory(prev => [...prev, { role: "assistant", text: "回答失败：" + (err?.message || "未知错误"), sources: [] }]);
+      setHistory(prev => [...prev, { role: "assistant", text: "回答失败：" + (err?.message || "未知错误。请在首页「⚙️ AI 设置」配置 API Key。"), sources: [] }]);
     }
     setChatting(false);
   };
@@ -4652,10 +4676,14 @@ function TeacherPage({ setPage, profile }) {
     const chapter = targetChapter || aiChapter;
     setAiLoading(true); setAiError(""); setAiQuestions([]);
     try {
+      const aiCfg = getAIConfig();
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chapter, type: aiType, count: aiCount }),
+        body: JSON.stringify({
+          chapter, type: aiType, count: aiCount,
+          userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+        }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -4694,10 +4722,14 @@ function TeacherPage({ setPage, profile }) {
 
       // Step 3: Call AI extraction API
       setExtractStep("AI 正在分析教材内容并生成题目…");
+      const aiCfg = getAIConfig();
       const res = await fetch("/api/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: pdfText, course: matCourse, chapter: matChapter, count: 5 }),
+        body: JSON.stringify({
+          text: pdfText, course: matCourse, chapter: matChapter, count: 5,
+          userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+        }),
       });
       const result = await res.json();
       if (result.error) throw new Error(result.error);
