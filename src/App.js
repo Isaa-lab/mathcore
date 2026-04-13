@@ -4349,8 +4349,8 @@ function FlashcardPage({ setPage }) {
 // ── Report Page ───────────────────────────────────────────────────────────────
 
 // ── ExamPlanSection: 考试倒计时 + 个性化复习日历 ─────────────────────────────
-function ExamPlanSection({ weak }) {
-  const [showForm, setShowForm] = useState(false);
+function ExamPlanSection({ weak, setPage }) {
+  const [showForm, setShowForm] = useState(() => !localStorage.getItem("mc_exam_date"));
   const [examDate, setExamDate] = useState(() => localStorage.getItem("mc_exam_date") || "");
   const [examSubject, setExamSubject] = useState(() => localStorage.getItem("mc_exam_subject") || "");
   const [examChapters, setExamChapters] = useState(() => {
@@ -4370,8 +4370,9 @@ function ExamPlanSection({ weak }) {
   const generatePlan = () => {
     const scope = examChapters.length > 0 ? examChapters : (weak.length > 0 ? weak.map(w => w.name) : ["综合复习"]);
     // Assign each day a primary chapter by evenly distributing chapters
-    const dayChapter = Array.from({ length: 7 }, (_, di) => scope[di % scope.length]);
-    return Array.from({ length: 7 }, (_, di) => {
+    const dayChapter = Array.from({ length: planLen }, (_, di) => scope[di % scope.length]);
+    const planLen = daysLeft !== null && daysLeft > 7 ? Math.min(daysLeft + 1, 14) : 7;
+    return Array.from({ length: planLen }, (_, di) => {
       const date = new Date(Date.now() + di * 86400000);
       const dayNames = ["日","一","二","三","四","五","六"];
       const dLeft = daysLeft !== null ? daysLeft - di : null;
@@ -4418,7 +4419,7 @@ function ExamPlanSection({ weak }) {
   const plan = generatePlan();
 
   return (
-    <div style={{ ...s.card, marginTop: 16 }}>
+    <div style={{ ...s.card, marginTop: 0, marginBottom: 24 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 700 }}>📅 个性化备考计划</div>
@@ -4446,7 +4447,7 @@ function ExamPlanSection({ weak }) {
             </div>
           </div>
           <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>📖 考试范围（可多选，留空则自动安排）</label>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>📖 考试范围（点击选择章节，留空则自动按薄弱章节安排）{examChapters.length > 0 && <span style={{ marginLeft:8, background:G.blue, color:"#fff", padding:"1px 8px", borderRadius:20, fontSize:11 }}>{examChapters.length} 章已选</span>}</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {allChaptersOpts.map(ch => (
                 <button key={ch} onClick={() => setExamChapters(prev => prev.includes(ch) ? prev.filter(x => x !== ch) : [...prev, ch])}
@@ -4465,7 +4466,7 @@ function ExamPlanSection({ weak }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 8 }}>
         {plan.map(({ date, dayName, tasks, bg, border, isExamDay, isPast, dLeft, chapter }, di) => (
-          <div key={di} style={{ background: bg, border: "2px solid " + border, borderRadius: 16, padding: "14px 8px", textAlign: "center", opacity: isPast ? 0.45 : 1, transition: "transform .15s", cursor: "default" }}>
+          <div key={di} style={{ background: bg, border: "2px solid " + border, borderRadius: 16, padding: "14px 8px", textAlign: "center", opacity: isPast ? 0.45 : 1, transition: "transform .15s", cursor: "default", minWidth: 120, flex: "0 0 auto" }}>
             <div style={{ fontSize: 12, color: "#999", fontWeight: 600, marginBottom: 4, letterSpacing: "0.05em" }}>{"周" + dayName}</div>
             <div style={{ fontSize: 22, fontWeight: 800, color: isExamDay ? "#92400e" : di === 0 ? G.teal : "#222", lineHeight: 1, marginBottom: 4 }}>
               {date.getDate()}
@@ -4483,8 +4484,16 @@ function ExamPlanSection({ weak }) {
           </div>
         ))}
       </div>
-      <div style={{ marginTop: 10, fontSize: 12, color: "#aaa", textAlign: "center" }}>
-        {daysLeft !== null ? "根据考试时间自动安排 · " : ""}设置考试日期后生成精准备考计划 · 每天 20-30 分钟
+      <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontSize: 12, color: "#aaa" }}>
+          {daysLeft !== null ? "📅 根据考试倒计时自动安排 · " : ""}{examChapters.length > 0 ? "已选 " + examChapters.length + " 个章节" : "建议设置考试范围"} · 每天 20-30 分钟
+        </div>
+        {setPage && (
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setPage("资料对话")} style={{ padding:"6px 14px", background:G.purpleLight, color:G.purple, border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit" }}>🤖 AI 助教复习</button>
+            <button onClick={() => setPage("题库练习")} style={{ padding:"6px 14px", background:G.tealLight, color:G.teal, border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit" }}>✏️ 开始练习</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -4551,6 +4560,9 @@ function ReportPage({ setPage }) {
           <Btn size="sm" onClick={() => { if (window.confirm("确定重置本地答题记录？")) { localStorage.removeItem("mc_answers"); window.location.reload(); } }}>重置记录</Btn>
         </div>
       </div>
+
+      {/* ── 备考计划（页面顶部） ── */}
+      <ExamPlanSection weak={weak} setPage={setPage} />
 
       {/* 顶部：级别 + 统计卡片 */}
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 14, marginBottom: 24 }}>
@@ -4696,7 +4708,6 @@ function ReportPage({ setPage }) {
         </div>
       </div>
 
-            <ExamPlanSection weak={weak} />v>
     </div>
   );
 }
