@@ -2627,6 +2627,8 @@ function AuthPage() {
 
   const handleLogin = async () => {
     setLoading(true); setError("");
+    // 手动登录时清除邮箱确认标记，避免误触发确认页
+    localStorage.removeItem("mc_confirm_pending");
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) setError("邮箱或密码错误，请重试");
     setLoading(false);
@@ -2652,6 +2654,8 @@ function AuthPage() {
     } else {
       setSuccess("注册成功！验证邮件已发送，请查收。");
       setCooldown(60);
+      // 打标记：下次 SIGNED_IN 事件来自邮箱确认
+      localStorage.setItem("mc_confirm_pending", String(Date.now()));
     }
     setLoading(false);
   };
@@ -5164,33 +5168,30 @@ export default function App() {
   };
 
   useEffect(() => {
-    // 检测邮箱确认回调（Supabase 会在 URL hash 或 query 中注入 type=signup）
-    const hash = window.location.hash || "";
-    const search = window.location.search || "";
-    const isEmailCallback =
-      hash.includes("type=signup") || hash.includes("type=email_change") ||
-      search.includes("type=signup") || search.includes("type=email_change") ||
-      (hash.includes("access_token") && hash.includes("type=signup")) ||
-      search.includes("confirmation_url");
-    if (isEmailCallback) {
-      setEmailJustConfirmed(true);
-      // 清除 URL 中的 token 参数，避免刷新重复触发
-      window.history.replaceState(null, "", window.location.pathname);
-    }
-
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) loadProfile(session.user.id);
       else setLoading(false);
     });
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "EMAIL_CONFIRMED" || event === "SIGNED_IN") {
-        if (event === "EMAIL_CONFIRMED") setEmailJustConfirmed(true);
+      if (event === "SIGNED_IN" || event === "EMAIL_CONFIRMED") {
+        // 判断是否来自邮箱验证（注册时打的标记）
+        const pendingTs = localStorage.getItem("mc_confirm_pending");
+        if (pendingTs) {
+          const age = Date.now() - Number(pendingTs);
+          // 标记有效期 48 小时（用户可能不会立刻点确认链接）
+          if (age < 48 * 3600 * 1000) {
+            setEmailJustConfirmed(true);
+          }
+          localStorage.removeItem("mc_confirm_pending");
+        }
       }
       setSession(session);
       if (session) loadProfile(session.user.id);
       else { setProfile(null); setLoading(false); }
     });
+
     return () => subscription.unsubscribe();
   }, []);
 
@@ -5216,7 +5217,7 @@ export default function App() {
     </div>
   );
 
-  if (!session && emailJustConfirmed) return <EmailConfirmedPage onContinue={() => setEmailJustConfirmed(false)} />;
+  if (emailJustConfirmed) return <EmailConfirmedPage onContinue={() => { setEmailJustConfirmed(false); }} />;
   if (!session) return <AuthPage />;
 
   const renderPage = () => {
