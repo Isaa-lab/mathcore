@@ -4370,8 +4370,8 @@ function ExamPlanSection({ weak, setPage }) {
   const generatePlan = () => {
     const scope = examChapters.length > 0 ? examChapters : (weak.length > 0 ? weak.map(w => w.name) : ["综合复习"]);
     // Assign each day a primary chapter by evenly distributing chapters
-    const dayChapter = Array.from({ length: planLen }, (_, di) => scope[di % scope.length]);
     const planLen = daysLeft !== null && daysLeft > 7 ? Math.min(daysLeft + 1, 14) : 7;
+    const dayChapter = Array.from({ length: planLen }, (_, di) => scope[di % scope.length]);
     return Array.from({ length: planLen }, (_, di) => {
       const date = new Date(Date.now() + di * 86400000);
       const dayNames = ["日","一","二","三","四","五","六"];
