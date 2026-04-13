@@ -88,7 +88,10 @@ export default async function handler(req, res) {
   // ── Priority 1: user-supplied key ─────────────────────────────────────────
   if (hasUserKey) {
     const k = String(userKey).trim();
-    if (effectiveProvider === "deepseek") {
+    if (effectiveProvider === "groq") {
+      responseText = await callOpenAICompat("https://api.groq.com/openai/v1", k, "llama-3.3-70b-versatile") || "";
+      if (!responseText) responseText = await callOpenAICompat("https://api.groq.com/openai/v1", k, "llama-3.1-8b-instant") || "";
+    } else if (effectiveProvider === "deepseek") {
       responseText = await callOpenAICompat("https://api.deepseek.com", k, "deepseek-chat") || "";
     } else if (effectiveProvider === "kimi") {
       responseText = await callOpenAICompat("https://api.moonshot.cn/v1", k, "moonshot-v1-8k") || "";

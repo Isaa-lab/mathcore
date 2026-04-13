@@ -150,7 +150,11 @@ Respond ONLY with valid JSON, no extra text:
   // ── Priority 1: user-supplied key ─────────────────────────────────────────
   if (hasUserKey) {
     const k = String(userKey).trim();
-    if (effectiveProvider === "deepseek") {
+    if (effectiveProvider === "groq") {
+      responseText = await callOpenAICompat("https://api.groq.com/openai/v1", k, "llama-3.3-70b-versatile") || "";
+      if (!responseText) responseText = await callOpenAICompat("https://api.groq.com/openai/v1", k, "llama-3.1-8b-instant") || "";
+      if (responseText) apiUsed = "groq(user)";
+    } else if (effectiveProvider === "deepseek") {
       responseText = await callOpenAICompat("https://api.deepseek.com", k, "deepseek-chat") || "";
       if (responseText) apiUsed = "deepseek(user)";
     } else if (effectiveProvider === "kimi") {

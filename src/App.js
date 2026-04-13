@@ -82,10 +82,11 @@ const getAIConfig = () => ({
 // ── AI 设置弹窗 ───────────────────────────────────────────────────────────────
 function AISettingsModal({ onClose }) {
   const AI_PROVIDERS = [
-    { id: "gemini",   name: "Gemini",    flag: "🌐", desc: "Google（支持免费 Key）",   placeholder: "AIzaSy...",    link: "https://aistudio.google.com/apikey" },
-    { id: "deepseek", name: "DeepSeek",  flag: "🇨🇳", desc: "国内推荐，价格低廉",      placeholder: "sk-...",       link: "https://platform.deepseek.com/api_keys" },
-    { id: "kimi",     name: "Kimi",      flag: "🇨🇳", desc: "月之暗面，国内可访问",    placeholder: "sk-...",       link: "https://platform.moonshot.cn/console/api-keys" },
-    { id: "custom",   name: "自定义",    flag: "⚙️",  desc: "任意 OpenAI 兼容接口",   placeholder: "sk-...",       link: null },
+    { id: "groq",     name: "Groq",      flag: "⚡", desc: "完全免费·速度最快·推荐测试", placeholder: "gsk_...",      link: "https://console.groq.com/keys", free: true },
+    { id: "gemini",   name: "Gemini",    flag: "🌐", desc: "Google（有免费 Key）",       placeholder: "AIzaSy...",    link: "https://aistudio.google.com/apikey" },
+    { id: "deepseek", name: "DeepSeek",  flag: "🇨🇳", desc: "国内推荐，价格低廉",        placeholder: "sk-...",       link: "https://platform.deepseek.com/api_keys" },
+    { id: "kimi",     name: "Kimi",      flag: "🇨🇳", desc: "月之暗面，国内可访问",      placeholder: "sk-...",       link: "https://platform.moonshot.cn/console/api-keys" },
+    { id: "custom",   name: "自定义",    flag: "⚙️",  desc: "任意 OpenAI 兼容接口",     placeholder: "sk-...",       link: null },
   ];
 
   const [provider, setProvider] = useState(localStorage.getItem("mc_ai_provider") || "gemini");
@@ -136,7 +137,8 @@ function AISettingsModal({ onClose }) {
           <div style={{ fontSize: 13, fontWeight: 600, color: "#555", marginBottom: 10 }}>选择服务商</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {AI_PROVIDERS.map(p => (
-              <button key={p.id} onClick={() => setProvider(p.id)} style={{ padding: "10px 12px", borderRadius: 12, border: provider === p.id ? `2px solid ${G.teal}` : "2px solid #e8e8e8", cursor: "pointer", background: provider === p.id ? G.tealLight : "#fafafa", textAlign: "left", fontFamily: "inherit" }}>
+              <button key={p.id} onClick={() => setProvider(p.id)} style={{ padding: "10px 12px", borderRadius: 12, border: provider === p.id ? `2px solid ${G.teal}` : "2px solid #e8e8e8", cursor: "pointer", background: provider === p.id ? G.tealLight : "#fafafa", textAlign: "left", fontFamily: "inherit", position: "relative" }}>
+                {p.free && <span style={{ position: "absolute", top: 6, right: 8, fontSize: 10, fontWeight: 700, background: "#22c55e", color: "#fff", padding: "1px 6px", borderRadius: 6 }}>免费</span>}
                 <div style={{ fontSize: 14, fontWeight: 600, color: provider === p.id ? G.tealDark : "#333" }}>{p.flag} {p.name}</div>
                 <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{p.desc}</div>
               </button>
@@ -2866,7 +2868,7 @@ function HomePage({ setPage, profile }) {
   const [showAISettings, setShowAISettings] = useState(false);
   const aiCfg = getAIConfig();
   const hasUserKey = aiCfg.key.length > 4;
-  const providerLabel = { gemini: "Gemini", deepseek: "DeepSeek", kimi: "Kimi", custom: "自定义" }[aiCfg.provider] || "Gemini";
+  const providerLabel = { groq: "Groq⚡", gemini: "Gemini", deepseek: "DeepSeek", kimi: "Kimi", custom: "自定义" }[aiCfg.provider] || "Gemini";
 
   return (
     <div style={{ padding: "2rem", maxWidth: 1000, margin: "0 auto" }}>
