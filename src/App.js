@@ -3014,8 +3014,60 @@ function AuthPage() {
 }
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
+// ── Change Password Modal ────────────────────────────────────────────────────────────
+function ChangePasswordModal({ onClose }) {
+  const [oldPwd, setOldPwd] = useState("");
+  const [newPwd, setNewPwd] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [ok, setOk] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!newPwd || newPwd.length < 6) { setMsg("新密码至少6个字符"); return; }
+    if (newPwd !== confirm) { setMsg("两次输入的新密码不一致"); return; }
+    setLoading(true); setMsg("");
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPwd });
+      if (error) { setMsg("修改失败：" + error.message); }
+      else { setOk(true); setMsg("密码修改成功！请用新密码重新登录。"); }
+    } catch(e) { setMsg("修改失败，请稍后重试"); }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 20, padding: "2rem", width: "100%", maxWidth: 380, boxShadow: "0 20px 60px rgba(0,0,0,0.15)", animation: "slideUp .25s ease" }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 20, display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 22 }}>🔒</span> 修改密码
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 12, color: "#666", marginBottom: 6, fontWeight: 600 }}>新密码</div>
+            <input type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} placeholder="至少6个字符" style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: "#666", marginBottom: 6, fontWeight: 600 }}>确认新密码</div>
+            <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="再次输入新密码" style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 14, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} onKeyDown={e => e.key === "Enter" && !loading && handleSubmit()} />
+          </div>
+          {msg && (
+            <div style={{ padding: "10px 14px", borderRadius: 10, background: ok ? "#f0fdf4" : "#fff5f5", color: ok ? G.teal : G.red, fontSize: 13, fontWeight: 500 }}>{msg}</div>
+          )}
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button onClick={onClose} style={{ flex: 1, padding: "10px", border: "1.5px solid #e0e0e0", borderRadius: 10, cursor: "pointer", background: "#fff", color: "#666", fontSize: 14, fontFamily: "inherit" }}>取消</button>
+            {!ok && <button onClick={handleSubmit} disabled={loading} style={{ flex: 2, padding: "10px", border: "none", borderRadius: 10, cursor: loading ? "not-allowed" : "pointer", background: loading ? "#aaa" : G.teal, color: "#fff", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>{loading ? "修改中..." : "确认修改"}</button>}
+            {ok && <button onClick={onClose} style={{ flex: 2, padding: "10px", border: "none", borderRadius: 10, cursor: "pointer", background: G.teal, color: "#fff", fontSize: 14, fontWeight: 600, fontFamily: "inherit" }}>完成</button>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TopNav({ page, setPage, profile, onLogout }) {
-  const [showMore, setShowMore] = React.useState(false);
+  const [showMore, setShowMore] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showPwdModal, setShowPwdModal] = useState(false);
   const primaryLinks = ["首页", "资料库", "知识点", "资料对话", "题库练习", "学习报告"];
   const moreLinks = profile?.role === "teacher"
     ? ["上传资料", "技能树", "记忆卡片", "错题本", "教师管理"]
@@ -3046,13 +3098,32 @@ function TopNav({ page, setPage, profile, onLogout }) {
           )}
         </div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-        <div style={{ width: 32, height: 32, borderRadius: "50%", background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff" }}>{(profile?.name || "U")[0].toUpperCase()}</div>
-        <div style={{ lineHeight: 1.2 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#111" }}>{profile?.name}</div>
-          <div style={{ fontSize: 11, color: "#aaa" }}>{profile?.role === "teacher" ? "教师" : "学生"}</div>
+      {showPwdModal && <ChangePasswordModal onClose={() => setShowPwdModal(false)} />}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, position: "relative" }}>
+        <div onClick={() => setShowUserMenu(v => !v)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 8px", borderRadius: 10, transition: "background .15s" }}
+          onMouseEnter={e => e.currentTarget.style.background = "#f5f5f5"}
+          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+        >
+          <div style={{ width: 32, height: 32, borderRadius: "50%", background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff" }}>{(profile?.name || "U")[0].toUpperCase()}</div>
+          <div style={{ lineHeight: 1.2 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#111" }}>{profile?.name}</div>
+            <div style={{ fontSize: 11, color: "#aaa" }}>{profile?.role === "teacher" ? "教师" : "学生"} ▾</div>
+          </div>
         </div>
-        <button onClick={onLogout} style={{ fontSize: 12, padding: "6px 12px", border: "1px solid #e8e8e8", borderRadius: 7, cursor: "pointer", background: "#fafafa", color: "#888", fontFamily: "inherit" }}>退出</button>
+        {showUserMenu && (
+          <div onMouseLeave={() => setShowUserMenu(false)} style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "#fff", borderRadius: 14, boxShadow: "0 8px 32px rgba(0,0,0,0.12)", border: "1px solid #eee", padding: "8px 6px", minWidth: 160, zIndex: 300 }}>
+            <div style={{ padding: "8px 14px", fontSize: 12, color: "#aaa", fontWeight: 600, borderBottom: "1px solid #f0f0f0", marginBottom: 6 }}>{profile?.email || profile?.name}</div>
+            <button onClick={() => { setShowPwdModal(true); setShowUserMenu(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", background: "transparent", color: "#333" }}
+              onMouseEnter={e => e.currentTarget.style.background = "#f5f5f5"}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+            >🔒 修改密码</button>
+            <div style={{ height: 1, background: "#f0f0f0", margin: "6px 8px" }} />
+            <button onClick={() => { onLogout(); setShowUserMenu(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", background: "transparent", color: G.red }}
+              onMouseEnter={e => e.currentTarget.style.background = "#fff5f5"}
+              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+            >🚪 退出登录</button>
+          </div>
+        )}
       </div>
     </div>
   );
