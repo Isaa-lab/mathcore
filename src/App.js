@@ -2629,7 +2629,13 @@ function AuthPage() {
     if (!name.trim()) { setError("请输入姓名"); return; }
     if (password.length < 6) { setError("密码至少 6 位"); return; }
     setLoading(true); setError("");
-    const { error } = await supabase.auth.signUp({ email, password, options: { data: { name, role } } });
+    const { error } = await supabase.auth.signUp({
+      email, password,
+      options: {
+        data: { name, role },
+        emailRedirectTo: "https://mathcore-theta.vercel.app",
+      },
+    });
     if (error) setError(error.message);
     else setSuccess("注册成功！请检查邮箱完成验证后登录。");
     setLoading(false);
