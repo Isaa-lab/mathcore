@@ -2858,7 +2858,8 @@ const Badge = ({ children, color = "teal" }) => {
   const [bg, fg] = m[color] || m.teal;
   return <span style={{ background: bg, color: fg, fontSize: 11, padding: "3px 10px", borderRadius: 20, fontWeight: 600, whiteSpace: "nowrap" }}>{children}</span>;
 };
-const StatCard = ({ label, value, sub, color = G.teal, icon }) => (
+
+const StatCard = ({ label, value, sub, color = G.teal, icon }) => (
   <div style={{ background: color + "10", borderRadius: 20, padding: "1.2rem 1.1rem", border: "1px solid " + color + "22", boxShadow: "0 2px 12px rgba(0,0,0,0.03)" }}>
     <div style={{ fontSize: 22, marginBottom: 8 }}>{icon}</div>
     <div style={{ fontSize: 28, fontWeight: 800, color, lineHeight: 1, marginBottom: 4 }}>{value}</div>
@@ -3697,8 +3698,12 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [allQuestions, setAllQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
   // Setup state (moved to top - never in conditional)
-  const [selectedChapters, setSelectedChapters] = useState(chapterFilter ? [chapterFilter] : []);
+  const [selectedChapters, setSelectedChapters] = useState(Array.isArray(chapterFilter) ? chapterFilter : (chapterFilter ? [chapterFilter] : []));
   const [selectedTypes, setSelectedTypes] = useState([]);
+  const [showAIHelp, setShowAIHelp] = useState(false);
+  const [aiHelpInput, setAIHelpInput] = useState("");
+  const [aiHelpReply, setAIHelpReply] = useState("");
+  const [aiHelpLoading, setAIHelpLoading] = useState(false);
   const [quizCount, setQuizCount] = useState(10);
   const [timerOn, setTimerOn] = useState(false);
   // Quiz state
@@ -3866,6 +3871,25 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
   const letters = ["A", "B", "C", "D"];
 
+  const askQuestionAI = async (userMsg) => {
+    if (!q) return;
+    setAIHelpLoading(true);
+    setAIHelpReply("");
+    try {
+      const prompt = "题目：" + q.question + (q.options ? "\n选项：" + q.options.join(" / ") : "") + "\n\n" + userMsg;
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "chat", chatQuestion: prompt, materialTitle: "数学题目解析" })
+      });
+      const data = await res.json();
+      setAIHelpReply(data.answer || data.text || data.result || "AI 暂时无法回答");
+    } catch (e) {
+      setAIHelpReply("网络错误，请稍后再试");
+    }
+    setAIHelpLoading(false);
+  };
+
   const handleSubmit = () => {
     if (selected === null) return;
     setAnswered(true);
@@ -3905,7 +3929,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       } catch {}
       return;
     }
-    setCurrent(c => c + 1); setSelected(null); setAnswered(false); setShowHint(false);
+    setCurrent(c => c + 1); setSelected(null); setAnswered(false); setShowHint(false); setShowAIHelp(false); setAIHelpReply(""); setAIHelpInput("");
   };
   // Reset streak on quiz restart
   const handleRestartQuiz = () => {
@@ -4141,7 +4165,44 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           <Badge color="blue">{q.type}</Badge>
           <Badge color="amber">{q.chapter}</Badge>
         </div>
-        <div style={{ fontSize: 18, color: "#111", lineHeight: 1.75, marginBottom: 22 }}>{q.question}</div>
+        <div style={{ fontSize: 18, color: "#111", lineHeight: 1.75, marginBottom: 12 }}>{q.question}</div>
+        {/* AI Help button */}
+        <div style={{ textAlign: "right", marginBottom: 14 }}>
+          <button onClick={() => { setShowAIHelp(!showAIHelp); if (!showAIHelp) { setAIHelpReply(""); setAIHelpInput(""); } }}
+            style={{ padding: "6px 14px", background: showAIHelp ? "#eff6ff" : "#f0fdf4", color: showAIHelp ? "#2563eb" : "#16a34a", border: "1px solid " + (showAIHelp ? "#bfdbfe" : "#bbf7d0"), borderRadius: 20, cursor: "pointer", fontSize: 13, fontWeight: 600, transition: "all 0.2s" }}>
+            {showAIHelp ? "▲ 收起AI解析" : "💬 不会？问 AI"}
+          </button>
+        </div>
+        {showAIHelp && (
+          <div style={{ background: "#f0f7ff", border: "1px solid #bfdbfe", borderRadius: 14, padding: "14px 16px", marginBottom: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#1d4ed8", marginBottom: 10 }}>🤖 AI 解析助手</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <input value={aiHelpInput} onChange={e => setAIHelpInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && askQuestionAI(aiHelpInput || "请详细解析这道题的解题思路和步骤")}
+                placeholder="输入你的困惑，或直接点击「获取解析」"
+                style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: "1px solid #dbeafe", fontSize: 13, background: "#fff", outline: "none" }} />
+              <button onClick={() => askQuestionAI(aiHelpInput || "请详细解析这道题的解题思路和步骤")}
+                disabled={aiHelpLoading}
+                style={{ padding: "8px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                {aiHelpLoading ? "..." : "发送"}
+              </button>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+              {["请详细解析这道题的解题思路和步骤", "这道题考查的是哪个知识点？", "类似题型如何解答？"].map(hint => (
+                <button key={hint} onClick={() => askQuestionAI(hint)} disabled={aiHelpLoading}
+                  style={{ padding: "4px 10px", background: "#fff", border: "1px solid #bfdbfe", borderRadius: 12, cursor: "pointer", fontSize: 12, color: "#3b82f6" }}>
+                  {hint}
+                </button>
+              ))}
+            </div>
+            {aiHelpLoading && <div style={{ color: "#3b82f6", fontSize: 13, marginTop: 4 }}>AI 正在思考中...</div>}
+            {aiHelpReply && (
+              <div style={{ background: "#fff", border: "1px solid #dbeafe", borderRadius: 10, padding: "12px 14px", marginTop: 8, fontSize: 14, lineHeight: 1.8, color: "#1e293b" }}>
+                <MathText text={aiHelpReply} />
+              </div>
+            )}
+          </div>
+        )}
         {opts && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {opts.map((opt, i) => {
@@ -4349,7 +4410,7 @@ function FlashcardPage({ setPage }) {
 // ── Report Page ───────────────────────────────────────────────────────────────
 
 // ── ExamPlanSection: 考试倒计时 + 个性化复习日历 ─────────────────────────────
-function ExamPlanSection({ weak, setPage }) {
+function ExamPlanSection({ weak, setPage, setChapterFilter }) {
   const [showForm, setShowForm] = useState(() => !localStorage.getItem("mc_exam_date"));
   const [examDate, setExamDate] = useState(() => localStorage.getItem("mc_exam_date") || "");
   const [examSubject, setExamSubject] = useState(() => localStorage.getItem("mc_exam_subject") || "");
@@ -4464,7 +4525,8 @@ function ExamPlanSection({ weak, setPage }) {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 8 }}>
+      <div style={{ overflowX: "auto", margin: "0 -4px", paddingBottom: 4 }}>
+      <div style={{ display: "flex", gap: 8, minWidth: plan.length * 132 + "px" }}>
         {plan.map(({ date, dayName, tasks, bg, border, isExamDay, isPast, dLeft, chapter }, di) => (
           <div key={di} style={{ background: bg, border: "2px solid " + border, borderRadius: 16, padding: "14px 8px", textAlign: "center", opacity: isPast ? 0.45 : 1, transition: "transform .15s", cursor: "default", minWidth: 120, flex: "0 0 auto" }}>
             <div style={{ fontSize: 12, color: "#999", fontWeight: 600, marginBottom: 4, letterSpacing: "0.05em" }}>{"周" + dayName}</div>
@@ -4483,7 +4545,7 @@ function ExamPlanSection({ weak, setPage }) {
             ))}
           </div>
         ))}
-      </div>
+      </div></div>
       <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 12, color: "#aaa" }}>
           {daysLeft !== null ? "📅 根据考试倒计时自动安排 · " : ""}{examChapters.length > 0 ? "已选 " + examChapters.length + " 个章节" : "建议设置考试范围"} · 每天 20-30 分钟
@@ -4491,7 +4553,7 @@ function ExamPlanSection({ weak, setPage }) {
         {setPage && (
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => setPage("资料对话")} style={{ padding:"6px 14px", background:G.purpleLight, color:G.purple, border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit" }}>🤖 AI 助教复习</button>
-            <button onClick={() => setPage("题库练习")} style={{ padding:"6px 14px", background:G.tealLight, color:G.teal, border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit" }}>✏️ 开始练习</button>
+            <button onClick={() => { if (setChapterFilter) setChapterFilter(scope.length > 0 ? scope : null); setPage("题库练习"); }} style={{ padding:"6px 14px", background:G.tealLight, color:G.teal, border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit" }}>✏️ 开始练习</button>
           </div>
         )}
       </div>
@@ -4500,7 +4562,7 @@ function ExamPlanSection({ weak, setPage }) {
 }
 
 
-function ReportPage({ setPage }) {
+function ReportPage({ setPage, setChapterFilter }) {
   const savedAnswers = (() => {
     try { return JSON.parse(localStorage.getItem("mc_answers") || "{}"); } catch { return {}; }
   })();
@@ -4562,7 +4624,7 @@ function ReportPage({ setPage }) {
       </div>
 
       {/* ── 备考计划（页面顶部） ── */}
-      <ExamPlanSection weak={weak} setPage={setPage} />
+      <ExamPlanSection weak={weak} setPage={setPage} setChapterFilter={setChapterFilter} />
 
       {/* 顶部：级别 + 统计卡片 */}
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 14, marginBottom: 24 }}>
@@ -6515,7 +6577,7 @@ export default function App() {
       return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} materialId={matId} materialTitle={matTitle} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
     }
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
-    if (page === "学习报告") return <ReportPage setPage={handleSetPage} />;
+    if (page === "学习报告") return <ReportPage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
     if (page === "技能树") return <SkillTreePage setPage={handleSetPage} />;
     if (page === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} />;
     if (page === "教师管理") return <TeacherPage setPage={handleSetPage} profile={profile} />;
