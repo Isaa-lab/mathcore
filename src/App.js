@@ -3883,7 +3883,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         body: JSON.stringify({ mode: "chat", chatQuestion: prompt, materialTitle: "数学题目解析" })
       });
       const data = await res.json();
-      setAIHelpReply(data.answer || data.text || data.result || "AI 暂时无法回答");
+      if (!res.ok || data.error) {
+        setAIHelpReply("⚠️ " + (data.error || "请求失败，请检查 AI 设置页面是否配置了 API Key"));
+      } else {
+        setAIHelpReply(data.answer || data.text || data.result || "AI 未返回内容，请重试");
+      }
     } catch (e) {
       setAIHelpReply("网络错误，请稍后再试");
     }
@@ -4165,7 +4169,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           <Badge color="blue">{q.type}</Badge>
           <Badge color="amber">{q.chapter}</Badge>
         </div>
-        <div style={{ fontSize: 18, color: "#111", lineHeight: 1.75, marginBottom: 12 }}>{q.question}</div>
+        <div style={{ fontSize: 18, color: "#111", lineHeight: 1.75, marginBottom: 12 }}><MathText text={q.question} /></div>
         {/* AI Help button */}
         <div style={{ textAlign: "right", marginBottom: 14 }}>
           <button onClick={() => { setShowAIHelp(!showAIHelp); if (!showAIHelp) { setAIHelpReply(""); setAIHelpInput(""); } }}
@@ -4214,7 +4218,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
               return (
                 <div key={i} onClick={() => !answered && setSelected(i)} style={{ padding: "14px 18px", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 14, alignItems: "center" }}>
                   <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid "+col+"44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, background: selected === i ? G.teal : "transparent", color: selected === i ? "#fff" : col }}>{letters[i]}</div>
-                  <span style={{ fontSize: 15, color: col }}>{opt}</span>
+                  <span style={{ fontSize: 15, color: col }}><MathText text={opt} /></span>
                   {answered && letters[i] === q.answer && <span style={{ marginLeft: "auto", color: G.teal }}>✓</span>}
                 </div>
               );
