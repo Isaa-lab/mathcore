@@ -3450,7 +3450,13 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   useEffect(() => { setTimer(0); }, [current]);
 
-  const allChapters = [...new Set(allQuestions.map(q => q.chapter).filter(Boolean))].sort();
+  const allChapters = [...new Set(allQuestions.map(q => q.chapter).filter(Boolean))].sort((a, b) => {
+    // Sort chapters numerically: Ch.1, Ch.2, ..., Ch.10
+    const numA = parseInt((a.match(/\d+/) || [0])[0]);
+    const numB = parseInt((b.match(/\d+/) || [0])[0]);
+    if (numA !== numB) return numA - numB;
+    return a.localeCompare(b, 'zh');
+  });
   const toggleChapter = (ch) => setSelectedChapters(prev =>
     prev.includes(ch) ? prev.filter(x => x !== ch) : [...prev, ch]
   );
@@ -3462,12 +3468,15 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     let pool = allQuestions;
     if (chapters.length > 0) pool = pool.filter(q => {
       if (!q.chapter) return false;
+      const qch = q.chapter.trim();
       return chapters.some(c => {
-        // Exact match or direct startsWith (e.g. "Ch.1" → "Ch.1" or "Ch.10")
-        if (q.chapter === c) return true;
-        if (q.chapter.startsWith(c + " ")) return true;
-        // Full prefix match for "线性代数 Ch.2" filter
-        if (q.chapter.startsWith(c)) return true;
+        const cTrim = c.trim();
+        // 1. Exact match
+        if (qch === cTrim) return true;
+        // 2. "Ch.1 方程求解" matches filter "Ch.1" (space or end after number)
+        if (qch.startsWith(cTrim + " ") || qch.startsWith(cTrim + "·") || qch.startsWith(cTrim + "-")) return true;
+        // 3. Course-prefixed: "线性代数 Ch.2" filter "线性代数 Ch.2"
+        // NO bare startsWith(c) — that would match Ch.1→Ch.10,Ch.11 etc.
         return false;
       });
     });
@@ -4436,6 +4445,15 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
       <WrongDrill questions={remaining.slice(drillStart)} onExit={() => setDrillMode(false)} onMastered={id => setMastered(s => new Set([...s, id]))} />
     </div>
   );
+  if (aiDrillMode && aiWrongQs.length > 0) return (
+    <div style={{ padding: "2rem", maxWidth: 780, margin: "0 auto" }}>
+      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+        <Btn onClick={() => setAiDrillMode(false)}>← 返回错题本</Btn>
+        <span style={{ fontSize: 16, fontWeight: 700, color: G.blue }}>🤖 AI 变式题专项练习</span>
+      </div>
+      <WrongDrill questions={aiWrongQs} onExit={() => setAiDrillMode(false)} onMastered={() => {}} />
+    </div>
+  );
 
   return (
     <div style={{ padding: "2rem", maxWidth: 900, margin: "0 auto" }}>
@@ -4750,15 +4768,6 @@ function MaterialsPage({ setPage, profile }) {
 function MathText({ text }) {
   if (!text) return <span />;
   const parts = text.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$)/);
-  if (aiDrillMode && aiWrongQs.length > 0) return (
-    <div style={{ padding: "2rem", maxWidth: 780, margin: "0 auto" }}>
-      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-        <Btn onClick={() => setAiDrillMode(false)}>← 返回错题本</Btn>
-        <span style={{ fontSize: 16, fontWeight: 700, color: G.blue }}>🤖 AI 变式题专项练习</span>
-      </div>
-      <WrongDrill questions={aiWrongQs} onExit={() => setAiDrillMode(false)} onMastered={() => {}} />
-    </div>
-  );
   return (
     <span>
       {parts.map((part, i) => {
