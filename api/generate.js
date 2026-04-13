@@ -1,13 +1,19 @@
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { chapter, type, count } = req.body;
+  const {
+    chapter, type, count,
+    userProvider, userKey, userCustomUrl,
+  } = req.body;
 
   const GEMINI_KEY = process.env.GEMINI_KEY;
   const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY;
 
-  if (!GEMINI_KEY && !ANTHROPIC_KEY) {
-    return res.status(500).json({ error: "未配置任何 API Key，请在 Vercel 添加 GEMINI_KEY（免费）" });
+  const hasUserKey = userKey && String(userKey).trim().length > 8;
+  const effectiveProvider = hasUserKey ? (userProvider || "gemini") : null;
+
+  if (!hasUserKey && !GEMINI_KEY && !ANTHROPIC_KEY) {
+    return res.status(500).json({ error: "未配置任何 API Key。请在首页点击「AI 设置」输入你的 API Key。" });
   }
 
   const prompt = `你是数学课程出题专家。请为"${chapter}"这个数学章节生成${count}道${type}。
@@ -21,38 +27,85 @@ export default async function handler(req, res) {
 严格按以下 JSON 数组格式返回，不要有其他文字：
 [{"question":"题目内容","options":["A.选项1","B.选项2","C.选项3","D.选项4"],"answer":"A","explanation":"解析内容","type":"单选题"}]`;
 
-  let responseText = "";
+  // ── OpenAI-compatible helper ───────────────────────────────────────────────
+  const callOpenAICompat = async (baseUrl, key, model) => {
+    try {
+      const r = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.5,
+          max_tokens: 3000,
+        }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        return d?.choices?.[0]?.message?.content || "";
+      }
+      const err = await r.text();
+      console.error(`OpenAI-compat(${model}) HTTP ${r.status}:`, err.slice(0, 200));
+      return null;
+    } catch (e) {
+      console.error(`OpenAI-compat(${model}) exception:`, e.message);
+      return null;
+    }
+  };
 
-  // Try Gemini (free)
-  if (GEMINI_KEY) {
+  // ── Gemini helper ──────────────────────────────────────────────────────────
+  const callGemini = async (key) => {
     try {
       const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.5,
-              maxOutputTokens: 3000,
-            },
+            generationConfig: { temperature: 0.5, maxOutputTokens: 3000 },
           }),
         }
       );
       if (r.ok) {
         const d = await r.json();
-        responseText = d?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      } else {
-        const err = await r.text();
-        console.error("Gemini error:", r.status, err.slice(0, 200));
+        return d?.candidates?.[0]?.content?.parts?.[0]?.text || "";
       }
+      const err = await r.text();
+      console.error("Gemini HTTP error:", r.status, err.slice(0, 200));
+      return null;
     } catch (e) {
-      console.error("Gemini error:", e.message);
+      console.error("Gemini exception:", e.message);
+      return null;
+    }
+  };
+
+  let responseText = "";
+
+  // ── Priority 1: user-supplied key ─────────────────────────────────────────
+  if (hasUserKey) {
+    const k = String(userKey).trim();
+    if (effectiveProvider === "deepseek") {
+      responseText = await callOpenAICompat("https://api.deepseek.com", k, "deepseek-chat") || "";
+    } else if (effectiveProvider === "kimi") {
+      responseText = await callOpenAICompat("https://api.moonshot.cn/v1", k, "moonshot-v1-8k") || "";
+    } else if (effectiveProvider === "custom") {
+      const base = String(userCustomUrl || "").trim().replace(/\/$/, "");
+      if (base) responseText = await callOpenAICompat(base, k, "gpt-3.5-turbo") || "";
+    } else {
+      responseText = await callGemini(k) || "";
     }
   }
 
-  // Anthropic fallback
+  // ── Priority 2: server Gemini key ─────────────────────────────────────────
+  if (!responseText && GEMINI_KEY) {
+    responseText = await callGemini(GEMINI_KEY) || "";
+  }
+
+  // ── Priority 3: server Anthropic key ──────────────────────────────────────
   if (!responseText && ANTHROPIC_KEY) {
     try {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -73,12 +126,12 @@ export default async function handler(req, res) {
         responseText = d.content?.map(b => b.text || "").join("") || "";
       }
     } catch (e) {
-      console.error("Anthropic error:", e.message);
+      console.error("Anthropic exception:", e.message);
     }
   }
 
   if (!responseText) {
-    return res.status(500).json({ error: "AI 服务不可用，请检查 GEMINI_KEY 环境变量配置" });
+    return res.status(500).json({ error: "AI 服务不可用。请在首页「AI 设置」配置 DeepSeek / Kimi / Gemini API Key。" });
   }
 
   const clean = responseText.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
@@ -95,7 +148,6 @@ export default async function handler(req, res) {
     }
   }
 
-  // Validate
   if (!Array.isArray(questions)) {
     return res.status(500).json({ error: "返回格式不是数组" });
   }

@@ -1,45 +1,44 @@
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { text, course, chapter, count = 5 } = req.body;
+  const {
+    text, course, chapter, count = 5,
+    userProvider, userKey, userCustomUrl,
+  } = req.body;
 
   const GEMINI_KEY = process.env.GEMINI_KEY;
   const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY;
 
-  if (!GEMINI_KEY && !ANTHROPIC_KEY) {
-    return res.status(500).json({ error: "未配置 API Key。请在 Vercel → Settings → Environment Variables 添加 GEMINI_KEY（免费获取：aistudio.google.com/apikey）" });
+  // Determine effective API config: user-supplied key takes priority
+  const hasUserKey = userKey && String(userKey).trim().length > 8;
+  const effectiveProvider = hasUserKey ? (userProvider || "gemini") : null;
+
+  if (!hasUserKey && !GEMINI_KEY && !ANTHROPIC_KEY) {
+    return res.status(500).json({ error: "未配置 API Key。请在首页点击「AI 设置」输入你的 API Key，或在 Vercel 环境变量里添加 GEMINI_KEY。" });
   }
 
   if (!text || text.trim().length < 30) {
     return res.status(400).json({ error: "PDF 文字太少（可能是扫描版）。请使用可以选中文字的电子版 PDF。" });
   }
 
-  // Clean and truncate: remove control chars, collapse whitespace, then pick the
-  // most content-dense 8000 chars (skip very short lines that are likely page numbers)
   const preCleaned = text
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, " ")
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  // Filter out lines that are clearly noise (page numbers, lone digits, very short fragments)
   const filteredLines = preCleaned
     .split("\n")
     .filter(l => {
       const t = l.trim();
       if (t.length === 0) return false;
-      // pure page numbers or very short lines (< 4 chars)
       if (/^\d+$/.test(t) && t.length <= 4) return false;
       return true;
     })
     .join("\n");
 
-  // Prefer the first 8000 chars of content (after the above cleaning)
   const cleanText = filteredLines.slice(0, 8000);
-
   const ch = (chapter && chapter !== "全部") ? chapter : (course || "本章节");
-
-  // Detect if content is likely English (helps AI respond in the right style)
   const englishRatio = (cleanText.match(/[a-zA-Z]/g) || []).length / Math.max(cleanText.length, 1);
   const isEnglish = englishRatio > 0.4;
 
@@ -85,15 +84,41 @@ Respond ONLY with valid JSON, no extra text:
   ]
 }`;
 
-  let responseText = "";
-  let apiUsed = "";
-  let quotaExceeded = false;
+  // ── OpenAI-compatible helper (DeepSeek / Kimi / Custom) ────────────────────
+  const callOpenAICompat = async (baseUrl, key, model) => {
+    try {
+      const r = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.3,
+          max_tokens: 4096,
+        }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        return d?.choices?.[0]?.message?.content || "";
+      }
+      const err = await r.text();
+      console.error(`OpenAI-compat(${model}) HTTP ${r.status}:`, err.slice(0, 200));
+      return null;
+    } catch (e) {
+      console.error(`OpenAI-compat(${model}) exception:`, e.message);
+      return null;
+    }
+  };
 
-  // Helper: call one Gemini model, returns text or null; sets quotaExceeded on 429
-  const callGemini = async (model) => {
+  // ── Gemini helper ──────────────────────────────────────────────────────────
+  let quotaExceeded = false;
+  const callGemini = async (model, key) => {
     try {
       const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -107,16 +132,9 @@ Respond ONLY with valid JSON, no extra text:
         const d = await r.json();
         const t = d?.candidates?.[0]?.content?.parts?.[0]?.text || "";
         if (t.length > 20) return t;
-        const reason = d?.candidates?.[0]?.finishReason;
-        console.error(`Gemini(${model}) empty, reason:`, reason);
         return null;
       }
-      if (r.status === 429) {
-        quotaExceeded = true;
-        const err = await r.text();
-        console.error(`Gemini(${model}) 429:`, err.slice(0, 200));
-        return null;
-      }
+      if (r.status === 429) { quotaExceeded = true; return null; }
       const err = await r.text();
       console.error(`Gemini(${model}) HTTP ${r.status}:`, err.slice(0, 200));
       return null;
@@ -126,19 +144,47 @@ Respond ONLY with valid JSON, no extra text:
     }
   };
 
-  // ── Gemini cascade: 2.0-flash → wait 4s → 2.0-flash-lite ─────────────────
-  if (GEMINI_KEY) {
-    responseText = await callGemini("gemini-2.0-flash") || "";
-    if (!responseText && quotaExceeded) {
-      // Wait 4 s then try the lighter model (higher RPM quota)
-      await new Promise(r => setTimeout(r, 4000));
-      quotaExceeded = false;
-      responseText = await callGemini("gemini-2.0-flash-lite") || "";
+  let responseText = "";
+  let apiUsed = "";
+
+  // ── Priority 1: user-supplied key ─────────────────────────────────────────
+  if (hasUserKey) {
+    const k = String(userKey).trim();
+    if (effectiveProvider === "deepseek") {
+      responseText = await callOpenAICompat("https://api.deepseek.com", k, "deepseek-chat") || "";
+      if (responseText) apiUsed = "deepseek(user)";
+    } else if (effectiveProvider === "kimi") {
+      responseText = await callOpenAICompat("https://api.moonshot.cn/v1", k, "moonshot-v1-8k") || "";
+      if (responseText) apiUsed = "kimi(user)";
+    } else if (effectiveProvider === "custom") {
+      const base = String(userCustomUrl || "").trim().replace(/\/$/, "");
+      if (base) {
+        responseText = await callOpenAICompat(base, k, "gpt-3.5-turbo") || "";
+        if (responseText) apiUsed = "custom(user)";
+      }
+    } else {
+      // gemini with user key
+      responseText = await callGemini("gemini-2.0-flash", k) || "";
+      if (!responseText) {
+        await new Promise(r => setTimeout(r, 2000));
+        responseText = await callGemini("gemini-2.0-flash-lite", k) || "";
+      }
+      if (responseText) apiUsed = "gemini(user)";
     }
-    if (responseText) apiUsed = "gemini";
   }
 
-  // ── Anthropic fallback ─────────────────────────────────────────────────────
+  // ── Priority 2: server Gemini key ─────────────────────────────────────────
+  if (!responseText && GEMINI_KEY) {
+    responseText = await callGemini("gemini-2.0-flash", GEMINI_KEY) || "";
+    if (!responseText && quotaExceeded) {
+      await new Promise(r => setTimeout(r, 4000));
+      quotaExceeded = false;
+      responseText = await callGemini("gemini-2.0-flash-lite", GEMINI_KEY) || "";
+    }
+    if (responseText) apiUsed = "gemini(server)";
+  }
+
+  // ── Priority 3: server Anthropic key ──────────────────────────────────────
   if (!responseText && ANTHROPIC_KEY) {
     try {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -157,10 +203,7 @@ Respond ONLY with valid JSON, no extra text:
       if (r.ok) {
         const d = await r.json();
         responseText = d.content?.map(b => b.text || "").join("") || "";
-        if (responseText) apiUsed = "anthropic";
-      } else {
-        const err = await r.text();
-        console.error("Anthropic HTTP error:", r.status, err.slice(0, 300));
+        if (responseText) apiUsed = "anthropic(server)";
       }
     } catch (e) {
       console.error("Anthropic exception:", e.message);
@@ -171,11 +214,11 @@ Respond ONLY with valid JSON, no extra text:
     if (quotaExceeded) {
       return res.status(429).json({
         error: "QUOTA_EXCEEDED",
-        message: "Gemini API 每分钟配额已用完，请等待 1 分钟后重新上传/补题。",
+        message: "Gemini API 每分钟配额已用完，请等待 1 分钟后重新上传/补题。或在首页「AI 设置」换用 DeepSeek / Kimi 等其他 API。",
       });
     }
     return res.status(500).json({
-      error: "AI 调用失败。" + (GEMINI_KEY ? "GEMINI_KEY 已配置，请检查 Key 是否有效（去 aistudio.google.com/apikey 验证）" : "请配置 GEMINI_KEY"),
+      error: "AI 调用失败。请在首页「AI 设置」配置你的 API Key（支持 DeepSeek / Kimi / Gemini）。",
     });
   }
 

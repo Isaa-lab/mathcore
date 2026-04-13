@@ -72,6 +72,128 @@ const getFileExt = (name = "") => {
   return idx >= 0 ? name.slice(idx).toLowerCase() : "";
 };
 
+// ── AI 配置工具（读/写 localStorage）────────────────────────────────────────
+const getAIConfig = () => ({
+  provider: localStorage.getItem("mc_ai_provider") || "gemini",
+  key: localStorage.getItem("mc_ai_key") || "",
+  customUrl: localStorage.getItem("mc_ai_custom_url") || "",
+});
+
+// ── AI 设置弹窗 ───────────────────────────────────────────────────────────────
+function AISettingsModal({ onClose }) {
+  const AI_PROVIDERS = [
+    { id: "gemini",   name: "Gemini",    flag: "🌐", desc: "Google（支持免费 Key）",   placeholder: "AIzaSy...",    link: "https://aistudio.google.com/apikey" },
+    { id: "deepseek", name: "DeepSeek",  flag: "🇨🇳", desc: "国内推荐，价格低廉",      placeholder: "sk-...",       link: "https://platform.deepseek.com/api_keys" },
+    { id: "kimi",     name: "Kimi",      flag: "🇨🇳", desc: "月之暗面，国内可访问",    placeholder: "sk-...",       link: "https://platform.moonshot.cn/console/api-keys" },
+    { id: "custom",   name: "自定义",    flag: "⚙️",  desc: "任意 OpenAI 兼容接口",   placeholder: "sk-...",       link: null },
+  ];
+
+  const [provider, setProvider] = useState(localStorage.getItem("mc_ai_provider") || "gemini");
+  const [key, setKey] = useState(localStorage.getItem("mc_ai_key") || "");
+  const [customUrl, setCustomUrl] = useState(localStorage.getItem("mc_ai_custom_url") || "");
+  const [showKey, setShowKey] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const curProvider = AI_PROVIDERS.find(p => p.id === provider) || AI_PROVIDERS[0];
+
+  const handleSave = () => {
+    if (key.trim()) {
+      localStorage.setItem("mc_ai_provider", provider);
+      localStorage.setItem("mc_ai_key", key.trim());
+      if (provider === "custom") localStorage.setItem("mc_ai_custom_url", customUrl.trim());
+      else localStorage.removeItem("mc_ai_custom_url");
+    } else {
+      localStorage.removeItem("mc_ai_provider");
+      localStorage.removeItem("mc_ai_key");
+      localStorage.removeItem("mc_ai_custom_url");
+    }
+    setSaved(true);
+    setTimeout(() => { setSaved(false); onClose(); }, 800);
+  };
+
+  const handleClear = () => {
+    localStorage.removeItem("mc_ai_provider");
+    localStorage.removeItem("mc_ai_key");
+    localStorage.removeItem("mc_ai_custom_url");
+    setKey(""); setCustomUrl(""); setProvider("gemini");
+    setSaved(true);
+    setTimeout(() => { setSaved(false); onClose(); }, 800);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 500, padding: "2rem", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#111" }}>⚙️ AI 接口设置</div>
+          <button onClick={onClose} style={{ fontSize: 20, background: "none", border: "none", cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
+        </div>
+        <div style={{ fontSize: 13, color: "#888", marginBottom: 22 }}>
+          选择 AI 服务商并输入你自己的 API Key，所有出题功能将优先使用你的 Key。Key 仅存储在本地浏览器中。
+        </div>
+
+        {/* Provider 选择 */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#555", marginBottom: 10 }}>选择服务商</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {AI_PROVIDERS.map(p => (
+              <button key={p.id} onClick={() => setProvider(p.id)} style={{ padding: "10px 12px", borderRadius: 12, border: provider === p.id ? `2px solid ${G.teal}` : "2px solid #e8e8e8", cursor: "pointer", background: provider === p.id ? G.tealLight : "#fafafa", textAlign: "left", fontFamily: "inherit" }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: provider === p.id ? G.tealDark : "#333" }}>{p.flag} {p.name}</div>
+                <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{p.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Custom URL（仅自定义时显示） */}
+        {provider === "custom" && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>接口 Base URL</label>
+            <input value={customUrl} onChange={e => setCustomUrl(e.target.value)} placeholder="https://your-api.com/v1" style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }} />
+            <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>需兼容 OpenAI /chat/completions 接口</div>
+          </div>
+        )}
+
+        {/* API Key 输入 */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>API Key</label>
+            {curProvider.link && (
+              <a href={curProvider.link} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: G.teal, textDecoration: "none" }}>免费获取 →</a>
+            )}
+          </div>
+          <div style={{ position: "relative" }}>
+            <input
+              type={showKey ? "text" : "password"}
+              value={key}
+              onChange={e => setKey(e.target.value)}
+              placeholder={curProvider.placeholder}
+              style={{ width: "100%", padding: "10px 40px 10px 12px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }}
+            />
+            <button onClick={() => setShowKey(v => !v)} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#aaa", fontSize: 16 }}>{showKey ? "🙈" : "👁"}</button>
+          </div>
+          <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>Key 仅保存在你的浏览器本地，不会上传到服务器</div>
+        </div>
+
+        {/* 当前生效提示 */}
+        {localStorage.getItem("mc_ai_key") && (
+          <div style={{ padding: "8px 12px", background: G.tealLight, borderRadius: 8, fontSize: 12, color: G.tealDark, marginBottom: 16 }}>
+            ✓ 当前已配置：{AI_PROVIDERS.find(p => p.id === (localStorage.getItem("mc_ai_provider") || "gemini"))?.name || "Gemini"} Key（已激活）
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={handleSave} style={{ flex: 1, padding: "12px 0", fontSize: 15, fontWeight: 700, fontFamily: "inherit", background: saved ? "#4caf50" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer" }}>
+            {saved ? "✓ 已保存" : "保存设置"}
+          </button>
+          {localStorage.getItem("mc_ai_key") && (
+            <button onClick={handleClear} style={{ padding: "12px 18px", fontSize: 14, fontFamily: "inherit", background: G.redLight, color: G.red, border: "none", borderRadius: 12, cursor: "pointer", fontWeight: 600 }}>清除</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const withTimeout = async (promise, ms = 12000) => {
   let timeoutId;
   const timeoutPromise = new Promise((_, reject) => {
@@ -168,10 +290,14 @@ const buildSeedClaimsFromText = (text, chapter, course, count = 12) => {
 const fetchChapterFallbackQuestions = async (chapter, count = 6) => {
   if (!count || count <= 0) return [];
   try {
+    const aiCfg = getAIConfig();
     const res = await withTimeout(fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chapter: chapter || "资料专题", type: "单选题", count }),
+      body: JSON.stringify({
+        chapter: chapter || "资料专题", type: "单选题", count,
+        userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+      }),
     }), 9000);
     const data = await res.json();
     if (data?.error) return [];
@@ -590,6 +716,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
   // Step 3: Call /api/extract with the extracted text
   if (hasText) {
     try {
+      const aiCfg = getAIConfig();
       const resp = await fetch("/api/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -598,6 +725,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 5 }) => {
           course: material?.course || "数学",
           chapter,
           count: genCount,
+          userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
         }),
       });
       const data = await resp.json();
@@ -2455,6 +2583,29 @@ const ProgressBar = ({ value, max = 100, color = G.teal, height = 8 }) => (
   </div>
 );
 
+// ── Email Confirmed Page ───────────────────────────────────────────────────────
+function EmailConfirmedPage({ onContinue }) {
+  useEffect(() => {
+    const t = setTimeout(onContinue, 4000);
+    return () => clearTimeout(t);
+  }, [onContinue]);
+  return (
+    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #f0fdf8 0%, #e8f4ff 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
+      <div style={{ textAlign: "center", maxWidth: 420 }}>
+        <div style={{ width: 80, height: 80, borderRadius: 24, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, margin: "0 auto 24px" }}>✉️</div>
+        <div style={{ fontSize: 28, fontWeight: 700, color: "#111", marginBottom: 12 }}>邮箱验证成功！</div>
+        <div style={{ fontSize: 16, color: "#555", lineHeight: 1.7, marginBottom: 28 }}>
+          你的账号已通过邮箱验证，现在可以登录 MathCore 开始学习了。
+        </div>
+        <div style={{ ...s.card, padding: "1.2rem 1.5rem", marginBottom: 20, background: G.tealLight }}>
+          <div style={{ fontSize: 14, color: G.tealDark }}>✓ 账号已激活，4 秒后自动跳转到登录页…</div>
+        </div>
+        <button onClick={onContinue} style={{ padding: "12px 36px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", background: G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer" }}>立即登录 →</button>
+      </div>
+    </div>
+  );
+}
+
 // ── Auth Page ─────────────────────────────────────────────────────────────────
 function AuthPage() {
   const [mode, setMode] = useState("login");
@@ -2580,8 +2731,14 @@ function TopNav({ page, setPage, profile, onLogout }) {
 
 // ── Home Page ─────────────────────────────────────────────────────────────────
 function HomePage({ setPage, profile }) {
+  const [showAISettings, setShowAISettings] = useState(false);
+  const aiCfg = getAIConfig();
+  const hasUserKey = aiCfg.key.length > 4;
+  const providerLabel = { gemini: "Gemini", deepseek: "DeepSeek", kimi: "Kimi", custom: "自定义" }[aiCfg.provider] || "Gemini";
+
   return (
     <div style={{ padding: "2rem", maxWidth: 1000, margin: "0 auto" }}>
+      {showAISettings && <AISettingsModal onClose={() => setShowAISettings(false)} />}
       {/* Hero */}
       <div style={{ background: `linear-gradient(135deg, ${G.teal} 0%, #0a7a5a 100%)`, borderRadius: 24, padding: "2.5rem 3rem", marginBottom: 24, color: "#fff", position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", right: -20, top: -20, width: 180, height: 180, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
@@ -2589,9 +2746,12 @@ function HomePage({ setPage, profile }) {
         <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.12em", opacity: 0.7, textTransform: "uppercase", marginBottom: 10 }}>数学与应用数学学习平台</div>
         <div style={{ fontSize: 30, fontWeight: 700, marginBottom: 10, letterSpacing: "-0.5px" }}>你好，{profile?.name || "同学"} 👋</div>
         <div style={{ fontSize: 16, opacity: 0.85, lineHeight: 1.7, marginBottom: 24, maxWidth: 520 }}>涵盖数值分析、线性代数、概率论、数理统计、ODE、最优化六门课程，AI 智能出题与记忆卡片，系统提升数学能力。</div>
-        <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <button onClick={() => setPage("知识点")} style={{ padding: "12px 28px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", background: "#fff", color: G.teal, border: "none", borderRadius: 12, cursor: "pointer" }}>开始学习</button>
           <button onClick={() => setPage("题库练习")} style={{ padding: "12px 28px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", background: "rgba(255,255,255,0.15)", color: "#fff", border: "2px solid rgba(255,255,255,0.3)", borderRadius: 12, cursor: "pointer" }}>进入题库</button>
+          <button onClick={() => setShowAISettings(true)} style={{ padding: "10px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: hasUserKey ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)", color: "#fff", border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+            ⚙️ AI 设置{hasUserKey ? <span style={{ fontSize: 11, background: "rgba(255,255,255,0.2)", padding: "2px 7px", borderRadius: 8 }}>{providerLabel} ✓</span> : <span style={{ fontSize: 11, opacity: 0.7 }}>配置 Key</span>}
+          </button>
         </div>
       </div>
 
@@ -3479,6 +3639,7 @@ function UploadPage({ setPage, profile }) {
   const [chapter, setChapter] = useState("全部");
   const [desc, setDesc] = useState("");
   const [file, setFile] = useState(null);
+  const [isPublic, setIsPublic] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [step, setStep] = useState("");
   const [error, setError] = useState("");
@@ -3537,6 +3698,7 @@ function UploadPage({ setPage, profile }) {
         file_data: publicUrl,
         uploader_name: profile?.name || "用户",
         uploaded_by: profile?.id || null,
+        is_public: isPublic,
       };
       const statusValue = profile?.role === "teacher" ? "approved" : "pending";
       let { data: insertedMaterial, error: dbErr } = await supabase.from("materials").insert({
@@ -3646,6 +3808,19 @@ function UploadPage({ setPage, profile }) {
           </div>
         </div>
 
+        {/* 可见范围 */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ ...s.label }}>可见范围</label>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={() => setIsPublic(true)} style={{ flex: 1, padding: "12px 0", fontSize: 14, fontFamily: "inherit", border: isPublic ? `2px solid ${G.teal}` : "2px solid #e0e0e0", borderRadius: 10, cursor: "pointer", fontWeight: isPublic ? 700 : 400, background: isPublic ? G.tealLight : "#fff", color: isPublic ? G.tealDark : "#666" }}>
+              🌐 公开<div style={{ fontSize: 11, fontWeight: 400, marginTop: 3, color: isPublic ? G.tealDark : "#aaa" }}>所有同学可见</div>
+            </button>
+            <button onClick={() => setIsPublic(false)} style={{ flex: 1, padding: "12px 0", fontSize: 14, fontFamily: "inherit", border: !isPublic ? `2px solid ${G.blue}` : "2px solid #e0e0e0", borderRadius: 10, cursor: "pointer", fontWeight: !isPublic ? 700 : 400, background: !isPublic ? G.blueLight : "#fff", color: !isPublic ? G.blue : "#666" }}>
+              🔒 仅自己<div style={{ fontSize: 11, fontWeight: 400, marginTop: 3, color: !isPublic ? G.blue : "#aaa" }}>只有你能看到</div>
+            </button>
+          </div>
+        </div>
+
         {error && <div style={{ padding: "12px 16px", background: G.redLight, color: G.red, borderRadius: 10, fontSize: 14, marginBottom: 16 }}>{error}</div>}
         {success && (
           <div style={{ padding: "14px 16px", background: G.tealLight, color: G.tealDark, borderRadius: 10, fontSize: 14, marginBottom: 16 }}>
@@ -3656,7 +3831,7 @@ function UploadPage({ setPage, profile }) {
         {uploading && step && <div style={{ padding: "12px 16px", background: G.blueLight, color: G.blue, borderRadius: 10, fontSize: 14, marginBottom: 16 }}>⏳ {step}</div>}
 
         <button disabled={uploading || !file || !title} onClick={handleUpload} style={{ width: "100%", padding: "14px 0", fontSize: 16, fontWeight: 700, fontFamily: "inherit", background: uploading || !file || !title ? "#ccc" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: uploading || !file || !title ? "not-allowed" : "pointer" }}>
-          {uploading ? step || "上传中…" : "📤 发布到资料库"}
+          {uploading ? step || "上传中…" : isPublic ? "📤 发布到资料库（公开）" : "🔒 上传到我的私有资料"}
         </button>
       </div>
     </div>
@@ -3906,7 +4081,13 @@ function MaterialsPage({ setPage, profile }) {
     }
     const visible = profile?.role === "teacher"
       ? dataRows
-      : dataRows.filter(m => (m.status || "approved") === "approved" || m.uploaded_by === profile?.id);
+      : dataRows.filter(m => {
+          const approved = (m.status || "approved") === "approved";
+          const isOwner = m.uploaded_by === profile?.id;
+          // is_public 字段不存在时（旧数据）默认视为公开
+          const pub = m.is_public !== false;
+          return isOwner || (approved && pub);
+        });
     setMaterials(visible);
     setLoading(false);
   };
@@ -4077,6 +4258,7 @@ function MaterialsPage({ setPage, profile }) {
               <Badge color={getCourseColor(m.course)}>{m.course}</Badge>
               {m.chapter && <Badge color="amber">{m.chapter}</Badge>}
               {(m.status || "approved") !== "approved" && <Badge color="red">待审核</Badge>}
+              {m.is_public === false && <Badge color="blue">🔒 仅自己</Badge>}
             </div>
             <div style={{ fontSize: 12, color: "#aaa", borderTop: "1px solid #f5f5f5", paddingTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span>{m.uploader_name || "用户"} 上传 · {new Date(m.created_at).toLocaleDateString("zh-CN")}</span>
@@ -4113,7 +4295,9 @@ function MaterialChatPage({ setPage, profile }) {
         data = fallback.data;
       }
       rows = data || [];
-      const visible = profile?.role === "teacher" ? rows : rows.filter(m => (m.status || "approved") === "approved" || m.uploaded_by === profile?.id);
+      const visible = profile?.role === "teacher"
+        ? rows
+        : rows.filter(m => m.uploaded_by === profile?.id || ((m.status || "approved") === "approved" && m.is_public !== false));
       setMaterials(visible);
       if (visible[0]?.id) setMaterialId(visible[0].id);
     };
@@ -4839,6 +5023,7 @@ export default function App() {
   const [retryQuestion, setRetryQuestion] = useState(null);
   const [chapterFilter, setChapterFilter] = useState(null);
   const [sessionAnswers, setSessionAnswers] = useState({});
+  const [emailJustConfirmed, setEmailJustConfirmed] = useState(false);
   const recordAnswer = async (qid, correct, chapter, questionPayload = null) => {
     try {
       const updated = { ...sessionAnswers, [qid]: { correct, chapter } };
@@ -4866,12 +5051,29 @@ export default function App() {
   };
 
   useEffect(() => {
+    // 检测邮箱确认回调（Supabase 会在 URL hash 或 query 中注入 type=signup）
+    const hash = window.location.hash || "";
+    const search = window.location.search || "";
+    const isEmailCallback =
+      hash.includes("type=signup") || hash.includes("type=email_change") ||
+      search.includes("type=signup") || search.includes("type=email_change") ||
+      (hash.includes("access_token") && hash.includes("type=signup")) ||
+      search.includes("confirmation_url");
+    if (isEmailCallback) {
+      setEmailJustConfirmed(true);
+      // 清除 URL 中的 token 参数，避免刷新重复触发
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) loadProfile(session.user.id);
       else setLoading(false);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "EMAIL_CONFIRMED" || event === "SIGNED_IN") {
+        if (event === "EMAIL_CONFIRMED") setEmailJustConfirmed(true);
+      }
       setSession(session);
       if (session) loadProfile(session.user.id);
       else { setProfile(null); setLoading(false); }
@@ -4901,6 +5103,7 @@ export default function App() {
     </div>
   );
 
+  if (!session && emailJustConfirmed) return <EmailConfirmedPage onContinue={() => setEmailJustConfirmed(false)} />;
   if (!session) return <AuthPage />;
 
   const renderPage = () => {
