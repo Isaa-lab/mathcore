@@ -3,6 +3,43 @@ import { createClient } from "@supabase/supabase-js";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 
+// Inject global CSS animations
+(() => {
+  if (document.getElementById("mc-global-styles")) return;
+  const style = document.createElement("style");
+  style.id = "mc-global-styles";
+  style.textContent = `
+    @keyframes popIn {
+      0% { transform: scale(0.5); opacity: 0; }
+      70% { transform: scale(1.08); opacity: 1; }
+      100% { transform: scale(1); }
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  `;
+  document.head.appendChild(style);
+})();
+
+
+// Update daily streak in localStorage
+(() => {
+  try {
+    const today = new Date().toDateString();
+    const data = JSON.parse(localStorage.getItem("mc_streak") || "{}");
+    if (data.lastVisit !== today) {
+      const yesterday = new Date(Date.now() - 86400000).toDateString();
+      const days = data.lastVisit === yesterday ? (data.days || 0) + 1 : 1;
+      localStorage.setItem("mc_streak", JSON.stringify({ days, lastVisit: today }));
+    }
+  } catch(e) {}
+})();
+
 const supabase = createClient(
   "https://kadjwgslbpklwbpvpsze.supabase.co",
   "sb_publishable_TvfRCNQCSs92EmZ02J5H1A_yM3FrFUp"
@@ -3307,6 +3344,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [wrongList, setWrongList] = useState([]);
   const [finished, setFinished] = useState(false);
   const [timer, setTimer] = useState(0);
+  const [correctStreak, setCorrectStreak] = useState(0);
+  const [showWin, setShowWin] = useState(false);
   const [materialFilterFallback, setMaterialFilterFallback] = useState(false);
   const [materialGenerating, setMaterialGenerating] = useState(false);
   const [materialGenerateMsg, setMaterialGenerateMsg] = useState("");
@@ -3455,14 +3494,31 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     const correct = opts
       ? letters[selected] === q.answer
       : (selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误");
-    if (correct) setScore(s => s + 1);
-    else setWrongList(w => [...w, q]);
+    if (correct) {
+      setScore(s => s + 1);
+      setCorrectStreak(s => {
+        const next = s + 1;
+        if (next === 3 || next === 5 || next % 5 === 0) {
+          setShowWin(true);
+          setTimeout(() => setShowWin(false), 2200);
+        }
+        return next;
+      });
+    } else {
+      setCorrectStreak(0);
+      setWrongList(w => [...w, q]);
+    }
     if (onAnswer && q) onAnswer(q.id || q.question, correct, q.chapter || "Unknown", q);
   };
 
   const handleNext = () => {
     if (current >= displayQ.length - 1) { setFinished(true); return; }
     setCurrent(c => c + 1); setSelected(null); setAnswered(false); setShowHint(false);
+  };
+  // Reset streak on quiz restart
+  const handleRestartQuiz = () => {
+    setCorrectStreak(0); setShowWin(false); setFinished(false);
+    setCurrent(0); setSelected(null); setAnswered(false); setScore(0); setWrongList([]);
   };
 
   // Keyboard shortcuts
@@ -3480,6 +3536,19 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     return () => window.removeEventListener("keydown", handler);
   }, [quizMode, finished, q, answered, selected]);
 
+
+  {/* Micro-win celebration overlay */}
+  {showWin && (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, pointerEvents: "none" }}>
+      <div style={{ background: "linear-gradient(135deg,#10b981,#059669)", color: "#fff", borderRadius: 24, padding: "28px 48px", textAlign: "center", boxShadow: "0 20px 60px rgba(0,0,0,0.25)", animation: "popIn 0.3s ease" }}>
+        <div style={{ fontSize: 56, marginBottom: 8 }}>{correctStreak >= 5 ? "🔥" : "⭐"}</div>
+        <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 4 }}>
+          {correctStreak >= 5 ? "连续 " + correctStreak + " 题全对！" : "连续三题全对！"}
+        </div>
+        <div style={{ fontSize: 14, opacity: 0.9 }}>{correctStreak >= 5 ? "你真的太厉害了！🏆" : "棒极了，继续保持！💪"}</div>
+      </div>
+    </div>
+  )}
   if (loading) return <div style={{ padding: "4rem", textAlign: "center", color: "#888" }}>加载题目中…</div>;
 
   // ── Setup screen ──
@@ -3805,7 +3874,13 @@ function FlashcardPage({ setPage }) {
 
 // ── Report Page ───────────────────────────────────────────────────────────────
 function ReportPage({ setPage }) {
-  const stats = [
+  const savedAnswers = (() => {
+    try { return JSON.parse(localStorage.getItem("mc_answers") || "{}"); } catch { return {}; }
+  })();
+  const chapterStats = getChapterStats(savedAnswers);
+  const hasRealData = Object.keys(chapterStats).length > 0;
+
+  const demoStats = [
     { name: "Ch.1 方程求解", correct: 7, total: 10 },
     { name: "Ch.2 线性方程组", correct: 6, total: 10 },
     { name: "Ch.3 插值", correct: 4, total: 10 },
@@ -3813,76 +3888,192 @@ function ReportPage({ setPage }) {
     { name: "Ch.5 数值微积分", correct: 5, total: 8 },
     { name: "最优化 Ch.1", correct: 5, total: 10 },
   ];
+  const stats = hasRealData
+    ? Object.entries(chapterStats).map(([name, s]) => ({ name, correct: s.correct, total: s.total }))
+    : demoStats;
+
   const tc = stats.reduce((a, c) => a + c.correct, 0);
   const tq = stats.reduce((a, c) => a + c.total, 0);
-  const pct = Math.round(tc / tq * 100);
+  const pct = tq > 0 ? Math.round(tc / tq * 100) : 0;
   const weak = [...stats].sort((a, b) => (a.correct / a.total) - (b.correct / b.total)).slice(0, 3);
+  const strong = [...stats].sort((a, b) => (b.correct / b.total) - (a.correct / a.total)).slice(0, 2);
+
+  const streak = (() => {
+    try { return JSON.parse(localStorage.getItem("mc_streak") || "{}").days || 0; } catch { return 0; }
+  })();
+
+  const getLevel = (p) => {
+    if (p >= 90) return { label: "大师级", emoji: "🏆", color: G.amber, desc: "超越了90%的同学！" };
+    if (p >= 75) return { label: "熟练级", emoji: "⭐", color: G.teal, desc: "掌握扎实，继续保持！" };
+    if (p >= 60) return { label: "进阶中", emoji: "📈", color: G.blue, desc: "你在快速进步！" };
+    return { label: "学习中", emoji: "🌱", color: G.purple, desc: "每天一小步，坚持就是胜利！" };
+  };
+  const level = getLevel(pct);
+
+  // SVG Radar Chart
+  const radarData = stats.slice(0, 6).map(s => ({ label: s.name.split(" ")[0], value: s.correct / s.total }));
+  const N = radarData.length || 1;
+  const cx = 110, cy = 110, R = 80;
+  const angleStep = (2 * Math.PI) / N;
+  const toXY = (i, r) => ({
+    x: cx + r * Math.sin(i * angleStep),
+    y: cy - r * Math.cos(i * angleStep),
+  });
+  const radarPoints = radarData.map((d, i) => toXY(i, d.value * R));
+  const radarPath = radarPoints.map((p, i) => (i === 0 ? "M" + p.x + "," + p.y : "L" + p.x + "," + p.y)).join(" ") + " Z";
+  const gridLevels = [0.25, 0.5, 0.75, 1.0];
 
   return (
     <div style={{ padding: "2rem", maxWidth: 960, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
         <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
-        <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>学习报告</div>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>📊 学习报告</div>
+        {!hasRealData && <span style={{ fontSize: 12, background: G.amberLight, color: G.amber, padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>演示数据 — 完成题库练习后显示真实数据</span>}
         <div style={{ marginLeft: "auto" }}>
           <Btn size="sm" onClick={() => { if (window.confirm("确定重置本地答题记录？")) { localStorage.removeItem("mc_answers"); window.location.reload(); } }}>重置记录</Btn>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 24 }}>
-        <StatCard icon="🎯" label="总体正确率" value={`${pct}%`} sub={`${tc}/${tq} 题`} color={pct >= 80 ? G.teal : pct >= 60 ? G.amber : G.red} />
-        <StatCard icon="📖" label="已练习章节" value={stats.length} sub="共 12 章" color={G.blue} />
-        <StatCard icon="✏️" label="答题总数" value={tq} sub="累计" color={G.amber} />
-        <StatCard icon="🃏" label="记忆卡片" value={`${Math.round(FLASHCARDS.length * 0.4)}/${FLASHCARDS.length}`} sub="已掌握" color={G.purple} />
+      {/* 顶部：级别 + 统计卡片 */}
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 14, marginBottom: 24 }}>
+        <div style={{ background: "linear-gradient(135deg," + level.color + "22," + level.color + "11)", borderRadius: 16, padding: "20px 24px", border: "1.5px solid " + level.color + "44", display: "flex", alignItems: "center", gap: 16 }}>
+          <div style={{ fontSize: 48 }}>{level.emoji}</div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: level.color, letterSpacing: "0.1em", marginBottom: 4 }}>当前熟练度</div>
+            <div style={{ fontSize: 28, fontWeight: 900, color: level.color, lineHeight: 1 }}>{level.label}</div>
+            <div style={{ fontSize: 13, color: "#555", marginTop: 4 }}>{level.desc}</div>
+            <div style={{ marginTop: 8, fontSize: 12, color: "#888" }}>总正确率 {pct}% · 已答 {tq} 题</div>
+          </div>
+        </div>
+        <StatCard icon="✏️" label="答题总数" value={tq} sub={"正确 " + tc + " 题"} color={G.blue} />
+        <div style={{ background: streak >= 3 ? "linear-gradient(135deg,#fef3c7,#fde68a)" : "#f8fafc", borderRadius: 16, padding: "18px 20px", border: "1.5px solid " + (streak >= 3 ? "#fcd34d" : "#eee"), textAlign: "center" }}>
+          <div style={{ fontSize: 32, marginBottom: 4 }}>{streak >= 7 ? "🔥" : streak >= 3 ? "⚡" : "📅"}</div>
+          <div style={{ fontSize: 24, fontWeight: 900, color: streak >= 3 ? G.amber : "#999" }}>{streak}</div>
+          <div style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>天连续学习</div>
+          {streak === 0 && <div style={{ fontSize: 11, color: "#bbb", marginTop: 4 }}>今天开始打卡吧！</div>}
+          {streak >= 3 && <div style={{ fontSize: 11, color: G.amber, marginTop: 4, fontWeight: 600 }}>坚持得很好！🎉</div>}
+        </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+        {/* 雷达图 */}
         <div style={{ ...s.card }}>
-          <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 18, paddingBottom: 14, borderBottom: "1px solid #f0f0f0" }}>各章节正确率</div>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>📡 能力雷达图</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <svg width="220" height="220" viewBox="0 0 220 220">
+              {gridLevels.map((lv, gi) => (
+                <polygon key={gi}
+                  points={Array.from({ length: N }, (_, i) => { const p = toXY(i, lv * R); return p.x + "," + p.y; }).join(" ")}
+                  fill="none" stroke="#e5e7eb" strokeWidth="1"
+                />
+              ))}
+              {radarData.map((_, i) => {
+                const outer = toXY(i, R);
+                return <line key={i} x1={cx} y1={cy} x2={outer.x} y2={outer.y} stroke="#e5e7eb" strokeWidth="1" />;
+              })}
+              <path d={radarPath} fill={G.teal + "55"} stroke={G.teal} strokeWidth="2" />
+              {radarPoints.map((p, i) => (
+                <circle key={i} cx={p.x} cy={p.y} r="4" fill={G.teal} stroke="#fff" strokeWidth="1.5" />
+              ))}
+              {radarData.map((d, i) => {
+                const p = toXY(i, R + 18);
+                return <text key={i} x={p.x} y={p.y} textAnchor="middle" dominantBaseline="middle" fontSize="10" fill="#555" fontFamily="system-ui,sans-serif">{d.label}</text>;
+              })}
+            </svg>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {radarData.map((d, i) => (
+                <div key={i} style={{ marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
+                    <span style={{ color: "#555", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "70%" }}>{d.label}</span>
+                    <span style={{ fontWeight: 700, color: d.value >= 0.8 ? G.teal : d.value >= 0.6 ? G.amber : G.red, flexShrink: 0 }}>{Math.round(d.value * 100)}%</span>
+                  </div>
+                  <ProgressBar value={Math.round(d.value * 100)} max={100} color={d.value >= 0.8 ? G.teal : d.value >= 0.6 ? G.amber : G.red} height={5} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* 章节掌握度 */}
+        <div style={{ ...s.card }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>📚 章节掌握度</div>
           {stats.map((c, i) => {
             const p = Math.round(c.correct / c.total * 100);
             const col = p >= 80 ? G.teal : p >= 60 ? G.amber : G.red;
+            const badge = p >= 80 ? "✅" : p >= 60 ? "📈" : "⚠️";
             return (
-              <div key={i} style={{ marginBottom: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <span style={{ fontSize: 14, color: "#333" }}>{c.name}</span>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: col }}>{p}%</span>
+              <div key={i} style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <span style={{ fontSize: 13, color: "#333" }}>{c.name}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: col }}>{badge} {p}%</span>
                 </div>
-                <ProgressBar value={c.correct} max={c.total} color={col} height={8} />
+                <ProgressBar value={c.correct} max={c.total} color={col} height={6} />
               </div>
             );
           })}
         </div>
+      </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ ...s.card }}>
-            <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>⚠️ 薄弱章节</div>
-            {weak.map((c, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: i < weak.length - 1 ? "1px solid #f5f5f5" : "none" }}>
-                <span style={{ fontSize: 15, color: "#333" }}>{c.name}</span>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <Badge color="red">{Math.round(c.correct / c.total * 100)}%</Badge>
-                  <Btn size="sm" onClick={() => { if (setChapterFilter) setChapterFilter(c.name.split(" ")[0]); setPage("题库练习"); }}>练习</Btn>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        {/* 薄弱章节 */}
+        <div style={{ ...s.card }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>⚠️ 薄弱章节（优先复习）</div>
+          {weak.map((c, i) => {
+            const p = Math.round(c.correct / c.total * 100);
+            return (
+              <div key={i} style={{ padding: "12px 0", borderBottom: i < weak.length-1 ? "1px solid #f5f5f5" : "none" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, color: "#333", fontSize: 14 }}>{c.name}</div>
+                    <div style={{ fontSize: 12, color: "#aaa", marginTop: 2 }}>建议：先复习知识点再做题</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Badge color="red">{p}%</Badge>
+                    <Btn size="sm" onClick={() => setPage("题库练习")}>练习</Btn>
+                  </div>
                 </div>
               </div>
+            );
+          })}
+          <div style={{ marginTop: 14, padding: "12px 14px", background: G.amberLight, borderRadius: 10, fontSize: 13, color: "#92400e", lineHeight: 1.7 }}>
+            💡 <strong>建议：</strong>从 <strong>{weak[0]?.name.split(" ")[0] || "薄弱章节"}</strong> 开始，先看知识点卡片，再做 5 题巩固！
+          </div>
+        </div>
+
+        {/* 优势 + 学习计划 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ ...s.card }}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>🌟 优势章节</div>
+            {strong.map((c, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: i < strong.length-1 ? "1px solid #f5f5f5" : "none" }}>
+                <span style={{ fontSize: 14, color: "#333" }}>{c.name}</span>
+                <Badge color="teal">{Math.round(c.correct / c.total * 100)}% 🎉</Badge>
+              </div>
             ))}
+            <div style={{ marginTop: 12, padding: "10px 12px", background: G.tealLight, borderRadius: 10, fontSize: 13, color: "#065f46" }}>
+              🎊 {strong[0]?.name.split(" ")[0]} 已达优秀水平！
+            </div>
           </div>
 
           <div style={{ ...s.card }}>
-            <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>📅 近期活动</div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>🗓️ 今日计划</div>
             {[
-              { day: "今天", action: "每日练习 · 5题", score: "4/5", good: false },
-              { day: "昨天", action: "Ch.2 线性方程组", score: "6/10", good: true },
-              { day: "3天前", action: "Ch.1 方程求解", score: "7/10", good: true },
+              { day: "🔥 现在", task: "复习 " + (weak[0]?.name.split(" ")[0] || "薄弱章节"), urgent: true },
+              { day: "✏️ 今天", task: "完成 10 道练习题", urgent: false },
+              { day: "🃏 今晚", task: "记忆卡片复习 15 张", urgent: false },
             ].map((a, i) => (
-              <div key={i} style={{ display: "flex", gap: 12, padding: "10px 0", borderBottom: i < 2 ? "1px solid #f5f5f5" : "none" }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: a.good ? G.teal : G.amber, marginTop: 6, flexShrink: 0 }} />
+              <div key={i} style={{ display: "flex", gap: 12, padding: "9px 0", borderBottom: i < 2 ? "1px solid #f5f5f5" : "none", alignItems: "center" }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, color: "#aaa" }}>{a.day}</div>
-                  <div style={{ fontSize: 15, color: "#333" }}>{a.action}</div>
+                  <div style={{ fontSize: 11, color: "#aaa", fontWeight: 600 }}>{a.day}</div>
+                  <div style={{ fontSize: 14, color: "#333" }}>{a.task}</div>
                 </div>
-                <Badge color={a.good ? "teal" : "amber"}>{a.score}</Badge>
+                {a.urgent && <Badge color="red">今日必做</Badge>}
               </div>
             ))}
+            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+              <Btn variant="primary" onClick={() => setPage("题库练习")} style={{ flex: 1 }}>开始练习</Btn>
+              <Btn onClick={() => setPage("知识点")} style={{ flex: 1 }}>知识点</Btn>
+            </div>
           </div>
         </div>
       </div>
@@ -4198,6 +4389,7 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
   const [aiWrongQs, setAiWrongQs] = useState([]);
   const [regenLoading, setRegenLoading] = useState(false);
   const [regenMsg, setRegenMsg] = useState("");
+  const [aiDrillMode, setAiDrillMode] = useState(false);
   const mergedWrong = [...WRONG_QS, ...aiWrongQs];
   const remaining = mergedWrong.filter(q => !mastered.has(q.id || q.question));
 
@@ -4205,44 +4397,36 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
     setRegenLoading(true);
     setRegenMsg("");
     try {
-      const chapter = weakChapters[0]?.[0] || "综合";
+      // 针对最弱章节生成变式题
+      const targetChapters = weakChapters.slice(0, 2).map(([ch]) => ch);
+      const chapter = targetChapters.length > 0
+        ? targetChapters.join(" 和 ")
+        : (WRONG_QS[0]?.chapter || "数学综合");
       const aiCfg = getAIConfig();
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chapter, type: "单选题", count: 5,
+          chapter, type: "单选题", count: 8,
           userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
         }),
       });
       const data = await res.json();
       if (data?.error) throw new Error(data.error);
-      const rows = (data.questions || []).map((q, idx) => ({
-        id: "ai_wrong_" + Date.now() + "_" + idx,
+      const rows = (data.questions || []).map((q, idx2) => ({
+        id: "ai_wrong_" + Date.now() + "_" + idx2,
         chapter,
-        type: "单选题",
+        type: q.type || "单选题",
         question: q.question,
         options: q.options || null,
         answer: q.answer,
         explanation: q.explanation || "",
       }));
+      if (rows.length === 0) throw new Error("AI 未返回题目，请检查 API Key 配置");
       setAiWrongQs(rows);
-      setRegenMsg(`已生成 ${rows.length} 道变式题，可立即重练。`);
-      try {
-        const { data: userData } = await supabase.auth.getUser();
-        const uid = userData?.user?.id;
-        if (uid) {
-          await supabase.from("questions") /* wrong_drill_logs stub */.insert(rows.map((q) => ({
-            user_id: uid,
-            chapter: q.chapter,
-            question: q.question,
-            correct_answer: q.answer,
-            explanation: q.explanation,
-          })));
-        }
-      } catch (e) {}
+      setRegenMsg(`✅ 已针对薄弱章节生成 ${rows.length} 道变式题！点击下方"专项练习"开始练习。`);
     } catch (err) {
-      setRegenMsg("生成失败：" + (err?.message || "未知错误"));
+      setRegenMsg("❌ 生成失败：" + (err?.message || "请检查 API 设置"));
     }
     setRegenLoading(false);
   };
@@ -4299,6 +4483,24 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
           </div>
         </div>
         {regenMsg && <div style={{ padding: "10px 12px", borderRadius: 10, background: G.blueLight, color: G.blue, marginBottom: 12, fontSize: 14 }}>{regenMsg}</div>}
+        {aiWrongQs.length > 0 && (
+          <div style={{ marginBottom: 14, padding: "14px 16px", background: "linear-gradient(135deg,#eff6ff,#dbeafe)", borderRadius: 12, border: "1px solid #bfdbfe", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 700, color: G.blue, fontSize: 14, marginBottom: 2 }}>🤖 AI 变式题已就绪 — {aiWrongQs.length} 道</div>
+              <div style={{ fontSize: 12, color: "#64748b" }}>针对薄弱章节量身定制，点击右侧开始专项练习</div>
+            </div>
+            <button onClick={() => setAiDrillMode(true)} style={{ padding: "10px 20px", background: G.blue, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap" }}>🎯 专项练习</button>
+          </div>
+        )}
+        {aiWrongQs.length > 0 && (
+          <div style={{ marginBottom: 14, padding: "14px 16px", background: "linear-gradient(135deg,#eff6ff,#dbeafe)", borderRadius: 12, border: "1px solid #bfdbfe", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontWeight: 700, color: G.blue, fontSize: 14, marginBottom: 2 }}>🤖 AI 变式题已生成 {aiWrongQs.length} 道</div>
+              <div style={{ fontSize: 12, color: "#64748b" }}>针对你的薄弱点量身定制，点击右侧开始专项练习</div>
+            </div>
+            <button onClick={() => setAiDrillMode(true)} style={{ padding: "10px 20px", background: G.blue, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>🎯 专项练习</button>
+          </div>
+        )}
         {remaining.length === 0 && <div style={{ textAlign: "center", padding: "3rem", color: "#888" }}><div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div><div style={{ fontSize: 18, fontWeight: 600 }}>所有错题已掌握！</div></div>}
         {remaining.map((q, i) => (
           <div key={i} style={{ padding: "16px 0", borderBottom: i < remaining.length-1 ? "1px solid #f5f5f5" : "none", display: "flex", alignItems: "flex-start", gap: 14 }}>
@@ -4548,6 +4750,15 @@ function MaterialsPage({ setPage, profile }) {
 function MathText({ text }) {
   if (!text) return <span />;
   const parts = text.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$)/);
+  if (aiDrillMode && aiWrongQs.length > 0) return (
+    <div style={{ padding: "2rem", maxWidth: 780, margin: "0 auto" }}>
+      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+        <Btn onClick={() => setAiDrillMode(false)}>← 返回错题本</Btn>
+        <span style={{ fontSize: 16, fontWeight: 700, color: G.blue }}>🤖 AI 变式题专项练习</span>
+      </div>
+      <WrongDrill questions={aiWrongQs} onExit={() => setAiDrillMode(false)} onMastered={() => {}} />
+    </div>
+  );
   return (
     <span>
       {parts.map((part, i) => {
