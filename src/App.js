@@ -5453,13 +5453,134 @@ function MaterialsPage({ setPage, profile }) {
 }
 
 // ── MathText: 渲染含 LaTeX 公式的文本 ────────────────────────────────────────
+// ── SimpleChart: renders math function curves as inline SVG ──────────────
+function evalMathExpr(expr, x) {
+  try {
+    const e = expr
+      .replace(/\^/g, "**")
+      .replace(/\bexp\b/g, "Math.exp")
+      .replace(/\bsin\b/g, "Math.sin")
+      .replace(/\bcos\b/g, "Math.cos")
+      .replace(/\btan\b/g, "Math.tan")
+      .replace(/\bsqrt\b/g, "Math.sqrt")
+      .replace(/\bln\b/g, "Math.log")
+      .replace(/\blog\b/g, "Math.log10")
+      .replace(/\babs\b/g, "Math.abs")
+      .replace(/\bpi\b/g, "Math.PI")
+      .replace(/(?<![a-zA-Z])e(?![a-zA-Z0-9_])/g, "Math.E");
+    // eslint-disable-next-line no-new-func
+    return new Function("x", "return (" + e + ")")(x);
+  } catch { return NaN; }
+}
+
+function SimpleChart({ config }) {
+  const { functions: fns = [], xRange = [-5, 5], yRange = null, title = "" } = config || {};
+  const W = 340, H = 220;
+  const pad = { top: title ? 28 : 14, right: 14, bottom: 28, left: 38 };
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+  const [xMin, xMax] = xRange;
+  const COLORS = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed", "#0891b2"];
+  const N = 250;
+
+  const allPoints = fns.map(fn => {
+    const pts = [];
+    for (let i = 0; i <= N; i++) {
+      const x = xMin + (i / N) * (xMax - xMin);
+      const y = evalMathExpr(fn.expr, x);
+      pts.push(isFinite(y) ? { x, y } : null);
+    }
+    return pts;
+  });
+
+  const allY = allPoints.flat().filter(Boolean).map(p => p.y);
+  if (allY.length === 0) return <div style={{ color: "#888", fontSize: 13 }}>图示加载失败</div>;
+  let yMin = yRange ? yRange[0] : Math.max(-12, Math.min(...allY) - 0.5);
+  let yMax = yRange ? yRange[1] : Math.min(12, Math.max(...allY) + 0.5);
+  if (yMax - yMin < 0.1) { yMin -= 1; yMax += 1; }
+
+  const toX = x => pad.left + ((x - xMin) / (xMax - xMin)) * plotW;
+  const toY = y => pad.top + ((yMax - y) / (yMax - yMin)) * plotH;
+  const inBounds = y => y >= yMin && y <= yMax;
+
+  const paths = allPoints.map((pts, fi) => {
+    let d = "";
+    let prev = null;
+    pts.forEach(p => {
+      if (!p) { prev = null; return; }
+      if (!inBounds(p.y)) { prev = null; return; }
+      const sx = toX(p.x), sy = toY(p.y);
+      if (!prev) d += `M ${sx.toFixed(1)} ${sy.toFixed(1)} `;
+      else d += `L ${sx.toFixed(1)} ${sy.toFixed(1)} `;
+      prev = p;
+    });
+    return { d, color: fns[fi].color || COLORS[fi % COLORS.length], label: fns[fi].label || fns[fi].expr };
+  });
+
+  // axis tick values
+  const nTicks = 5;
+  const xTicks = Array.from({ length: nTicks }, (_, i) => xMin + (i / (nTicks - 1)) * (xMax - xMin));
+  const yTicks = Array.from({ length: 5 }, (_, i) => yMin + (i / 4) * (yMax - yMin)).reverse();
+  const x0 = xMin <= 0 && xMax >= 0 ? toX(0) : null;
+  const y0 = yMin <= 0 && yMax >= 0 ? toY(0) : null;
+
+  return (
+    <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: "10px 10px 8px", margin: "10px 0", display: "inline-block", maxWidth: "100%" }}>
+      {title && <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", marginBottom: 6, textAlign: "center" }}>{title}</div>}
+      <svg width={W} height={H} style={{ display: "block" }}>
+        <rect x={pad.left} y={pad.top} width={plotW} height={plotH} fill="#fff" stroke="#e2e8f0" strokeWidth={1} />
+        {/* Grid lines */}
+        {xTicks.map((t, i) => (
+          <line key={"gx"+i} x1={toX(t)} y1={pad.top} x2={toX(t)} y2={pad.top + plotH} stroke="#f1f5f9" strokeWidth={1} />
+        ))}
+        {yTicks.map((t, i) => (
+          <line key={"gy"+i} x1={pad.left} y1={toY(t)} x2={pad.left + plotW} y2={toY(t)} stroke="#f1f5f9" strokeWidth={1} />
+        ))}
+        {/* Axes */}
+        {x0 !== null && <line x1={x0} y1={pad.top} x2={x0} y2={pad.top + plotH} stroke="#94a3b8" strokeWidth={1.2} />}
+        {y0 !== null && <line x1={pad.left} y1={y0} x2={pad.left + plotW} y2={y0} stroke="#94a3b8" strokeWidth={1.2} />}
+        {/* X ticks */}
+        {xTicks.map((t, i) => (
+          <text key={"tx"+i} x={toX(t)} y={pad.top + plotH + 14} textAnchor="middle" fontSize={8.5} fill="#94a3b8">
+            {Math.abs(t) < 0.01 ? "0" : t.toFixed(Math.abs(t) < 1 ? 1 : 0)}
+          </text>
+        ))}
+        {/* Y ticks */}
+        {yTicks.map((t, i) => (
+          <text key={"ty"+i} x={pad.left - 4} y={toY(t) + 3} textAnchor="end" fontSize={8.5} fill="#94a3b8">
+            {Math.abs(t) < 0.01 ? "0" : t.toFixed(Math.abs(t) < 1 ? 1 : 0)}
+          </text>
+        ))}
+        {/* Curves */}
+        {paths.map((p, i) => (
+          p.d ? <path key={i} d={p.d} stroke={p.color} strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" /> : null
+        ))}
+      </svg>
+      {/* Legend */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center", marginTop: 6 }}>
+        {paths.map((p, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#475569" }}>
+            <div style={{ width: 18, height: 2.5, background: p.color, borderRadius: 2 }} />
+            <MathText text={p.label} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MathText({ text }) {
   if (!text) return <span />;
-  const clean = text
-    .replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g,
-      '「📊 图示区域，建议前往『知识点』页面查看可视化」')
-    .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/g, '');
-  const parts = clean.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$)/);
+  // Pre-process: extract [CHART:...] blocks and strip tikzpicture
+  const chartBlocks = [];
+  const prepped = text
+    .replace(/\[CHART:\s*([\s\S]*?)\]/g, (_, json) => {
+      chartBlocks.push(json.trim());
+      return `__CHART_${chartBlocks.length - 1}__`;
+    })
+    .replace(/\\\\begin\{tikzpicture\}[\s\S]*?\\\\end\{tikzpicture\}/g, "")
+    .replace(/\\\\begin\{figure\}[\s\S]*?\\\\end\{figure\}/g, "");
+  const parts = prepped.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$|__CHART_\d+__)/);
   return (
     <span>
       {parts.map((part, i) => {
@@ -5476,8 +5597,15 @@ function MathText({ text }) {
             return <span key={i} dangerouslySetInnerHTML={{ __html: html }} />;
           } catch(e) { return <code key={i}>{part}</code>; }
         }
-        if (part.startsWith('「📊')) {
-          return <div key={i} style={{ background: '#f0fdf4', border: '1px dashed #86efac', borderRadius: 8, padding: '8px 12px', margin: '8px 0', color: '#166534', fontSize: 13 }}>{part}</div>;
+        const chartMatch = part.match(/^__CHART_(\d+)__$/);
+        if (chartMatch) {
+          const idx = parseInt(chartMatch[1]);
+          try {
+            const cfg = JSON.parse(chartBlocks[idx]);
+            return <div key={i}><SimpleChart config={cfg} /></div>;
+          } catch(e) {
+            return <div key={i} style={{ color: "#dc2626", fontSize: 12 }}>图表解析失败: {chartBlocks[idx].substring(0, 60)}</div>;
+          }
         }
         return <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{part}</span>;
       })}
