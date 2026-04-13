@@ -2662,14 +2662,16 @@ function AuthPage() {
     });
     if (error) {
       if (/rate.limit|over.*email|too many|email.*rate/i.test(error.message)) {
-        setError("邮件发送太频繁，请等待 60 秒后再试。");
+        // 服务器端频率限制：不锁前端按钮，告知用户稍等即可重试
+        setError("Supabase 邮件冷却中（每个邮箱 60 秒限一封），请稍等片刻后再点注册，或换一个邮箱测试。");
+      } else if (/already registered|user already/i.test(error.message)) {
+        setError("该邮箱已注册，请直接登录，或在 Supabase 后台删除账号后稍等 60 秒再试。");
       } else {
         setError(error.message);
       }
     } else {
       setSuccess("注册成功！验证邮件已发送，请查收。");
       setCooldown(60);
-      // 打标记：下次 SIGNED_IN 事件来自邮箱确认
       localStorage.setItem("mc_confirm_pending", String(Date.now()));
     }
     setLoading(false);
