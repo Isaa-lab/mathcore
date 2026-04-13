@@ -197,7 +197,7 @@ const getFileExt = (name = "") => {
 
 // ── AI 配置工具（读/写 localStorage）────────────────────────────────────────
 const getAIConfig = () => ({
-  provider: localStorage.getItem("mc_ai_provider") || "gemini",
+  provider: localStorage.getItem("mc_ai_provider") || "groq",
   key: localStorage.getItem("mc_ai_key") || "",
   customUrl: localStorage.getItem("mc_ai_custom_url") || "",
 });
@@ -212,7 +212,7 @@ function AISettingsModal({ onClose }) {
     { id: "custom",   name: "自定义",    flag: "⚙️",  desc: "任意 OpenAI 兼容接口",     placeholder: "sk-...",       link: null },
   ];
 
-  const [provider, setProvider] = useState(localStorage.getItem("mc_ai_provider") || "gemini");
+  const [provider, setProvider] = useState(localStorage.getItem("mc_ai_provider") || "groq");
   const [key, setKey] = useState(localStorage.getItem("mc_ai_key") || "");
   const [customUrl, setCustomUrl] = useState(localStorage.getItem("mc_ai_custom_url") || "");
   const [showKey, setShowKey] = useState(false);
@@ -239,7 +239,7 @@ function AISettingsModal({ onClose }) {
     localStorage.removeItem("mc_ai_provider");
     localStorage.removeItem("mc_ai_key");
     localStorage.removeItem("mc_ai_custom_url");
-    setKey(""); setCustomUrl(""); setProvider("gemini");
+    setKey(""); setCustomUrl(""); setProvider("groq");
     setSaved(true);
     setTimeout(() => { setSaved(false); onClose(); }, 800);
   };
@@ -252,7 +252,11 @@ function AISettingsModal({ onClose }) {
           <button onClick={onClose} style={{ fontSize: 20, background: "none", border: "none", cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
         </div>
         <div style={{ fontSize: 13, color: "#888", marginBottom: 22 }}>
-          选择 AI 服务商并输入你自己的 API Key，所有出题功能将优先使用你的 Key。Key 仅存储在本地浏览器中。
+          <div style={{ padding: "10px 12px", background: G.tealLight, borderRadius: 9, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 18 }}>⚡</span>
+            <div><strong style={{ color: G.tealDark }}>平台已内置 AI，无需配置即可使用！</strong><div style={{ fontSize: 11, color: G.teal, marginTop: 1 }}>若想切换模型或使用更高额度，可填入自己的 Key</div></div>
+          </div>
+          所有 Key 仅存在本地浏览器，不上传服务器。
         </div>
 
         {/* Provider 选择 */}
@@ -3249,7 +3253,20 @@ function KnowledgePage({ setPage, setChapterFilter }) {
       status,
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id,topic_id" });
-    setTopicMastery((prev) => ({ ...prev, [topic.id]: { ...(prev[topic.id] || {}), status } }));
+    setTopicMastery((prev) => {
+      const next = { ...prev, [topic.id]: { ...(prev[topic.id] || {}), status } };
+      const toast = document.createElement('div');
+      if (status === 'done') {
+        toast.style.cssText = 'position:fixed;top:20px;right:20px;z-index:9999;background:linear-gradient(135deg,#1D9E75,#0a7a5a);color:#fff;padding:14px 24px;border-radius:16px;font-size:14px;font-weight:700;box-shadow:0 8px 32px rgba(29,158,117,0.4);animation:popIn 0.3s ease;font-family:system-ui,sans-serif;display:flex;align-items:center;gap:10px';
+        toast.innerHTML = '<span style="font-size:22px">🎉</span><div><div>知识点已掌握！</div><div style="font-size:11px;opacity:0.85;margin-top:2px">太棒了，继续前进💪</div></div>';
+      } else {
+        toast.style.cssText = 'position:fixed;top:20px;right:20px;z-index:9999;background:#555;color:#fff;padding:12px 20px;border-radius:14px;font-size:13px;font-family:system-ui,sans-serif';
+        toast.textContent = '已重置，加油！';
+      }
+      document.body.appendChild(toast);
+      setTimeout(() => { toast.style.opacity = '0'; toast.style.transition = 'opacity 0.4s'; setTimeout(() => toast.remove(), 400); }, 2200);
+      return next;
+    });
   };
 
   const [selectedTopic, setSelectedTopic] = useState(null);
@@ -4090,6 +4107,124 @@ function FlashcardPage({ setPage }) {
 }
 
 // ── Report Page ───────────────────────────────────────────────────────────────
+
+// ── ExamPlanSection: 考试倒计时 + 个性化复习日历 ─────────────────────────────
+function ExamPlanSection({ weak }) {
+  const [showForm, setShowForm] = useState(false);
+  const [examDate, setExamDate] = useState(() => localStorage.getItem("mc_exam_date") || "");
+  const [examSubject, setExamSubject] = useState(() => localStorage.getItem("mc_exam_subject") || "");
+  const [examChapters, setExamChapters] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("mc_exam_chapters") || "[]"); } catch { return []; }
+  });
+  const allChaptersOpts = ["Ch.1 方程求解","Ch.2 线性方程组","Ch.3 插值","Ch.4 最小二乘","Ch.5 数值微积分","最优化 Ch.1","ODE 基础","概率论基础"];
+
+  const daysLeft = examDate ? Math.ceil((new Date(examDate) - new Date()) / 86400000) : null;
+
+  const saveExam = () => {
+    localStorage.setItem("mc_exam_date", examDate);
+    localStorage.setItem("mc_exam_subject", examSubject);
+    localStorage.setItem("mc_exam_chapters", JSON.stringify(examChapters));
+    setShowForm(false);
+  };
+
+  const generatePlan = () => {
+    const scope = examChapters.length > 0 ? examChapters : weak.map(w => w.name);
+    return Array.from({ length: 7 }, (_, di) => {
+      const date = new Date(Date.now() + di * 86400000);
+      const dayNames = ["日","一","二","三","四","五","六"];
+      const dLeft = daysLeft !== null ? daysLeft - di : null;
+      const isExamDay = daysLeft !== null && dLeft === 0;
+      const isPast = dLeft !== null && dLeft < 0;
+      let tasks = [];
+      if (isExamDay) tasks = ["🎓 考试日！加油！", "相信自己，沉着作答"];
+      else if (isPast) tasks = ["已过考试日"];
+      else if (dLeft !== null && dLeft === 1) tasks = ["轻松回顾重点", "早睡！保持状态"];
+      else if (dLeft !== null && dLeft <= 3) tasks = ["重点公式快速过", scope[0] ? scope[0].split(" ")[0] + " 冲刺" : "总复习"];
+      else {
+        const topic = scope[di % Math.max(scope.length, 1)] || (weak[di % Math.max(weak.length,1)]?.name?.split(" ")[0]) || "综合";
+        if (di % 3 === 0) tasks = ["复习 " + topic, "练习 8 道题"];
+        else if (di % 3 === 1) tasks = ["记忆卡片 15 张", "错题本回顾"];
+        else tasks = [topic + " AI对话提问", "巩固薄弱点"];
+      }
+      const intensity = isExamDay ? "exam" : (dLeft !== null && dLeft <= 1) ? "light" : (di % 3 === 0 ? "high" : "normal");
+      const bg = isExamDay ? "linear-gradient(135deg,#fef3c7,#fde68a)" : isPast ? "#f1f5f9" :
+                 intensity === "light" ? G.tealLight : intensity === "high" ? G.blueLight : "#f8fafc";
+      const border = isExamDay ? "#fcd34d" : isPast ? "#e2e8f0" : intensity === "high" ? G.blue+"88" : G.teal+"44";
+      return { date, dayName: dayNames[date.getDay()], tasks, bg, border, isExamDay, isPast, dLeft };
+    });
+  };
+  const plan = generatePlan();
+
+  return (
+    <div style={{ ...s.card, marginTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>📅 个性化备考计划</div>
+          {daysLeft !== null && (
+            <div style={{ fontSize: 13, color: daysLeft <= 3 ? G.red : G.blue, marginTop: 3, fontWeight: 600 }}>
+              {daysLeft > 0 ? "距 " + (examSubject || "考试") + " 还有 " + daysLeft + " 天" : daysLeft === 0 ? "今天就是考试日！加油！🎓" : "考试已结束"}
+            </div>
+          )}
+        </div>
+        <button onClick={() => setShowForm(v => !v)} style={{ padding: "8px 16px", background: G.blue, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
+          {showForm ? "取消" : examDate ? "✏️ 修改考试" : "⚙️ 设置考试"}
+        </button>
+      </div>
+
+      {showForm && (
+        <div style={{ background: G.blueLight, borderRadius: 12, padding: "16px", marginBottom: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>📚 科目名称</label>
+              <input value={examSubject} onChange={e => setExamSubject(e.target.value)} placeholder="如：数值分析期末" style={{ width: "100%", padding: "9px 12px", borderRadius: 9, border: "1.5px solid #ddd", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 4 }}>📅 考试日期</label>
+              <input type="date" value={examDate} onChange={e => setExamDate(e.target.value)} style={{ width: "100%", padding: "9px 12px", borderRadius: 9, border: "1.5px solid #ddd", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }} />
+            </div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>📖 考试范围（可多选，留空则自动安排）</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {allChaptersOpts.map(ch => (
+                <button key={ch} onClick={() => setExamChapters(prev => prev.includes(ch) ? prev.filter(x => x !== ch) : [...prev, ch])}
+                  style={{ padding: "6px 12px", borderRadius: 20, border: "1.5px solid " + (examChapters.includes(ch) ? G.blue : "#ddd"), background: examChapters.includes(ch) ? G.blue : "#fff", color: examChapters.includes(ch) ? "#fff" : "#555", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                  {ch}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={saveExam} style={{ flex: 1, padding: "10px 0", background: G.teal, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 700, fontFamily: "inherit" }}>✓ 保存计划</button>
+            {examDate && <button onClick={() => { localStorage.removeItem("mc_exam_date"); localStorage.removeItem("mc_exam_subject"); localStorage.removeItem("mc_exam_chapters"); setExamDate(""); setExamSubject(""); setExamChapters([]); setShowForm(false); }} style={{ padding: "10px 16px", background: G.redLight, color: G.red, border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>删除</button>}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 8 }}>
+        {plan.map(({ date, dayName, tasks, bg, border, isExamDay, isPast, dLeft }, di) => (
+          <div key={di} style={{ background: bg, border: "1.5px solid " + border, borderRadius: 12, padding: "10px 6px", textAlign: "center", opacity: isPast ? 0.5 : 1 }}>
+            <div style={{ fontSize: 11, color: "#888", fontWeight: 600, marginBottom: 3 }}>{"周" + dayName}</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: isExamDay ? G.amber : "#333", marginBottom: 5 }}>
+              {date.getDate()}{di === 0 && <span style={{ fontSize: 9, marginLeft: 2, color: G.blue, fontWeight: 700 }}>今</span>}
+            </div>
+            {dLeft !== null && dLeft > 0 && !isExamDay && (
+              <div style={{ fontSize: 9, color: "#999", marginBottom: 3 }}>{"剩" + dLeft + "天"}</div>
+            )}
+            {tasks.map((t, ti) => (
+              <div key={ti} style={{ fontSize: 10, color: isExamDay ? "#92400e" : "#555", lineHeight: 1.5, background: "rgba(255,255,255,0.6)", borderRadius: 5, padding: "2px 3px", marginBottom: 3, wordBreak: "break-all" }}>{t}</div>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 10, fontSize: 12, color: "#aaa", textAlign: "center" }}>
+        {daysLeft !== null ? "根据考试时间自动安排 · " : ""}设置考试日期后生成精准备考计划 · 每天 20-30 分钟
+      </div>
+    </div>
+  );
+}
+
+
 function ReportPage({ setPage }) {
   const savedAnswers = (() => {
     try { return JSON.parse(localStorage.getItem("mc_answers") || "{}"); } catch { return {}; }
@@ -4295,43 +4430,7 @@ function ReportPage({ setPage }) {
         </div>
       </div>
 
-      {/* 7-day Study Plan */}
-      <div style={{ ...s.card, marginTop: 16 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>📅 本周学习计划（艾宾浩斯间隔复习）</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 8 }}>
-          {Array.from({ length: 7 }, (_, di) => {
-            const date = new Date(Date.now() + di * 86400000);
-            const dayNames = ["日","一","二","三","四","五","六"];
-            const dayName = dayNames[date.getDay()];
-            const isToday = di === 0;
-            const tasks = di === 0 ? (weak[0] ? ["复习 " + weak[0].name.split(" ")[0], "练习 5 题"] : ["每日练习"]) :
-                          di === 1 ? ["记忆卡片 15 张", "巩固薄弱点"] :
-                          di === 2 ? (weak[1] ? ["复习 " + weak[1].name.split(" ")[0]] : ["综合练习"]) :
-                          di === 3 ? ["错题本复习"] :
-                          di === 4 ? ["AI 对话提问", "知识点梳理"] :
-                          di === 5 ? (weak[2] ? ["复习 " + weak[2].name.split(" ")[0], "记忆卡片"] : ["章节总结"]) :
-                          ["综合练习", "查看学习报告"];
-            const intensity = di === 0 || di === 5 ? "high" : di === 3 ? "rest" : "normal";
-            const bg = intensity === "high" ? G.blueLight : intensity === "rest" ? G.tealLight : "#f8fafc";
-            const border = intensity === "high" ? G.blue : intensity === "rest" ? G.teal : "#e2e8f0";
-            return (
-              <div key={di} style={{ background: bg, border: "1.5px solid " + border + (isToday ? "" : "88"), borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
-                <div style={{ fontSize: 11, color: "#888", fontWeight: 600, marginBottom: 4 }}>周{dayName}</div>
-                <div style={{ fontSize: 14, fontWeight: 800, color: isToday ? G.blue : "#333", marginBottom: 8 }}>
-                  {date.getDate()}
-                  {isToday && <span style={{ fontSize: 10, marginLeft: 3, color: G.blue }}>今</span>}
-                </div>
-                {tasks.map((t, ti) => (
-                  <div key={ti} style={{ fontSize: 10, color: "#555", lineHeight: 1.5, background: "rgba(255,255,255,0.6)", borderRadius: 6, padding: "2px 4px", marginBottom: 4 }}>{t}</div>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-        <div style={{ marginTop: 12, fontSize: 12, color: "#888", textAlign: "center" }}>
-          💡 基于你的薄弱章节自动生成 · 每天 20-30 分钟 · 间隔复习效果最佳
-        </div>
-      </div>
+            <ExamPlanSection weak={weak} />v>
     </div>
   );
 }
@@ -5830,24 +5929,24 @@ const SKILL_TREE = [
   { id: "方程求解",      label: "方程求解",    emoji: "🔍", deps: ["浮点数系统"],           course: "数值分析", x: 80,  y: 280 },
   { id: "插值方法",      label: "插值法",      emoji: "📈", deps: ["方程求解"],             course: "数值分析", x: 80,  y: 390 },
   { id: "数值积分",      label: "数值积分",    emoji: "∫",  deps: ["插值方法"],             course: "数值分析", x: 80,  y: 500 },
-  { id: "数值微分",      label: "数值微分",    emoji: "d/dx",deps: ["插值方法"],            course: "数值分析", x: 240, y: 500 },
+  { id: "数值微分",      label: "数值微分",    emoji: "Δ",deps: ["插值方法"],            course: "数值分析", x: 240, y: 500 },
   // 线性代数链
   { id: "矩阵运算",      label: "矩阵运算",    emoji: "🔢", deps: [],                      course: "线性代数", x: 440, y: 60 },
   { id: "线性方程组",    label: "线性方程组",  emoji: "📐", deps: ["矩阵运算"],             course: "线性代数", x: 440, y: 170 },
-  { id: "行列式",        label: "行列式",      emoji: "det", deps: ["矩阵运算"],            course: "线性代数", x: 580, y: 170 },
-  { id: "向量空间",      label: "向量空间",    emoji: "→",  deps: ["线性方程组","行列式"],  course: "线性代数", x: 510, y: 280 },
-  { id: "特征值",        label: "特征值/特征向量", emoji: "λ", deps: ["向量空间"],         course: "线性代数", x: 510, y: 390 },
+  { id: "行列式",        label: "行列式",      emoji: "▣", deps: ["矩阵运算"],            course: "线性代数", x: 580, y: 170 },
+  { id: "向量空间",      label: "向量空间",    emoji: "↗",  deps: ["线性方程组","行列式"],  course: "线性代数", x: 510, y: 280 },
+  { id: "特征值",        label: "特征值", emoji: "λ", deps: ["向量空间"],         course: "线性代数", x: 510, y: 390 },
   // 微分方程链
-  { id: "一阶ODE",       label: "一阶 ODE",    emoji: "dy/dx", deps: [],                  course: "ODE",      x: 780, y: 60 },
-  { id: "分离变量法",    label: "分离变量法",  emoji: "÷", deps: ["一阶ODE"],              course: "ODE",      x: 680, y: 170 },
+  { id: "一阶ODE",       label: "一阶ODE",    emoji: "🔄", deps: [],                  course: "ODE",      x: 780, y: 60 },
+  { id: "分离变量法",    label: "分离变量法",  emoji: "⊕", deps: ["一阶ODE"],              course: "ODE",      x: 680, y: 170 },
   { id: "积分因子",      label: "积分因子法",  emoji: "μ", deps: ["一阶ODE"],              course: "ODE",      x: 870, y: 170 },
-  { id: "二阶ODE",       label: "二阶常系数ODE", emoji: "y''", deps: ["分离变量法","积分因子"], course: "ODE", x: 780, y: 280 },
-  { id: "拉普拉斯变换",  label: "Laplace变换", emoji: "ℒ", deps: ["二阶ODE"],             course: "ODE",      x: 780, y: 390 },
+  { id: "二阶ODE",       label: "二阶ODE", emoji: "y''", deps: ["分离变量法","积分因子"], course: "ODE", x: 780, y: 280 },
+  { id: "拉普拉斯变换",  label: "Laplace变换", emoji: "ʟ", deps: ["二阶ODE"],             course: "ODE",      x: 780, y: 390 },
   // 概率统计链
   { id: "概率基础",      label: "概率基础",    emoji: "🎲", deps: [],                      course: "概率论",   x: 1060, y: 60 },
   { id: "随机变量",      label: "随机变量",    emoji: "X",  deps: ["概率基础"],            course: "概率论",   x: 1060, y: 170 },
-  { id: "期望与方差",    label: "期望与方差",  emoji: "E[]", deps: ["随机变量"],           course: "概率论",   x: 1060, y: 280 },
-  { id: "大数定律",      label: "大数定律/CLT", emoji: "∞", deps: ["期望与方差"],          course: "概率论",   x: 1060, y: 390 },
+  { id: "期望与方差",    label: "期望方差",  emoji: "𝔼", deps: ["随机变量"],           course: "概率论",   x: 1060, y: 280 },
+  { id: "大数定律",      label: "大数定律", emoji: "∞", deps: ["期望与方差"],          course: "概率论",   x: 1060, y: 390 },
 ];
 
 const COURSE_COLORS_TREE = {
