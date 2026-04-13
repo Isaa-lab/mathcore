@@ -5571,43 +5571,60 @@ function SimpleChart({ config }) {
 
 function MathText({ text }) {
   if (!text) return <span />;
-  // Pre-process: extract [CHART:...] blocks and strip tikzpicture
+  // Extract [CHART:{...}] blocks tracking bracket depth to handle nested arrays
   const chartBlocks = [];
-  const prepped = text
-    .replace(/\[CHART:\s*([\s\S]*?)\]/g, (_, json) => {
-      chartBlocks.push(json.trim());
-      return `__CHART_${chartBlocks.length - 1}__`;
-    })
-    .replace(/\\\\begin\{tikzpicture\}[\s\S]*?\\\\end\{tikzpicture\}/g, "")
-    .replace(/\\\\begin\{figure\}[\s\S]*?\\\\end\{figure\}/g, "");
+  let prepped = "";
+  let i = 0;
+  while (i < text.length) {
+    if (text.slice(i, i + 7) === "[CHART:") {
+      let depth = 1, j = i + 7;
+      while (j < text.length && depth > 0) {
+        if (text[j] === "[") depth++;
+        else if (text[j] === "]") depth--;
+        j++;
+      }
+      chartBlocks.push(text.slice(i + 7, j - 1).trim());
+      prepped += "__CHART_" + (chartBlocks.length - 1) + "__";
+      i = j;
+    } else {
+      prepped += text[i];
+      i++;
+    }
+  }
+  // Strip remaining tikzpicture blocks
+  prepped = prepped
+    .replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, "")
+    .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/g, "");
   const parts = prepped.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$|__CHART_\d+__)/);
   return (
     <span>
       {parts.map((part, i) => {
-        if (part.startsWith('$$') && part.endsWith('$$') && part.length > 4) {
+        if (part.startsWith("$$") && part.endsWith("$$") && part.length > 4) {
           const inner = part.slice(2, -2).trim();
           try {
             const html = katex.renderToString(inner, { throwOnError: false, displayMode: true });
-            return <div key={i} style={{ overflowX: 'auto', margin: '6px 0' }} dangerouslySetInnerHTML={{ __html: html }} />;
-          } catch(e) { return <code key={i}>{part}</code>; }
-        } else if (part.startsWith('$') && part.endsWith('$') && part.length > 2) {
+            return <div key={i} style={{ overflowX: "auto", margin: "6px 0" }} dangerouslySetInnerHTML={{ __html: html }} />;
+          } catch(e2) { return <code key={i}>{part}</code>; }
+        } else if (part.startsWith("$") && part.endsWith("$") && part.length > 2) {
           const inner = part.slice(1, -1).trim();
           try {
             const html = katex.renderToString(inner, { throwOnError: false, displayMode: false });
             return <span key={i} dangerouslySetInnerHTML={{ __html: html }} />;
-          } catch(e) { return <code key={i}>{part}</code>; }
+          } catch(e2) { return <code key={i}>{part}</code>; }
         }
         const chartMatch = part.match(/^__CHART_(\d+)__$/);
         if (chartMatch) {
-          const idx = parseInt(chartMatch[1]);
+          const cidx = parseInt(chartMatch[1]);
           try {
-            const cfg = JSON.parse(chartBlocks[idx]);
+            const cfg = JSON.parse(chartBlocks[cidx]);
             return <div key={i}><SimpleChart config={cfg} /></div>;
-          } catch(e) {
-            return <div key={i} style={{ color: "#dc2626", fontSize: 12 }}>图表解析失败: {chartBlocks[idx].substring(0, 60)}</div>;
+          } catch(e2) {
+            return <div key={i} style={{ color: "#dc2626", fontSize: 12, padding: "6px 8px", background: "#fff5f5", borderRadius: 6 }}>
+              图表解析失败: {String(e2.message)}
+            </div>;
           }
         }
-        return <span key={i} style={{ whiteSpace: 'pre-wrap' }}>{part}</span>;
+        return <span key={i} style={{ whiteSpace: "pre-wrap" }}>{part}</span>;
       })}
     </span>
   );
