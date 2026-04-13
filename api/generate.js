@@ -165,19 +165,26 @@ ${materialContext ? `\n以下是资料中的相关知识点摘要供参考：\n$
     }
   }
 
+  // Normalise: accept array directly or wrapped in an object
   if (!Array.isArray(questions)) {
-    return res.status(500).json({ error: "返回格式不是数组" });
+    const wrapped = questions?.questions || questions?.problems || questions?.exercises;
+    if (Array.isArray(wrapped)) questions = wrapped;
+    else return res.status(500).json({ error: "返回格式不是数组" });
   }
 
   const cleaned = questions
-    .filter(q => q && q.question)
-    .map(q => ({
-      question: q.question,
-      options: q.options || null,
-      answer: q.answer || (q.options ? "A" : "正确"),
-      explanation: q.explanation || "",
-      type: q.type || (q.options ? "单选题" : "判断题"),
-    }));
+    .filter(q => q && (q.question || q.text || q.content))
+    .map(q => {
+      const qText = q.question || q.text || q.content || "";
+      const opts = Array.isArray(q.options) && q.options.length >= 2 ? q.options : null;
+      return {
+        question: String(qText),
+        options: opts,
+        answer: String(q.answer || q.correct_answer || (opts ? "A" : "正确")),
+        explanation: String(q.explanation || q.rationale || ""),
+        type: String(q.type || (opts ? "单选题" : "判断题")),
+      };
+    });
 
   res.status(200).json({ questions: cleaned });
 }

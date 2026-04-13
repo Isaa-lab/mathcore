@@ -42,45 +42,41 @@ export default async function handler(req, res) {
   const englishRatio = (cleanText.match(/[a-zA-Z]/g) || []).length / Math.max(cleanText.length, 1);
   const isEnglish = englishRatio > 0.4;
 
-  const prompt = `You are an expert mathematics professor. Based ONLY on the textbook excerpt below, complete two tasks.
+  const prompt = `You are an expert mathematics professor generating study materials from a textbook excerpt.
 
-=== TEXTBOOK CONTENT (${isEnglish ? "English" : "Chinese"}) ===
+CRITICAL WARNING — The text below was extracted from a PDF and may contain GARBLED mathematical notation:
+- Superscripts/subscripts may be broken: "x 2" means x², "d t 2" means d²/dt², "x n" means xₙ
+- Operators may be separated by spaces: "d y / d x" means dy/dx
+- Greek letters may appear as: "theta", "θ", "α", "β", "λ", "μ" etc.
+YOU MUST reconstruct all formulas correctly in standard mathematical notation before using them.
+NEVER copy garbled text verbatim into questions or topic names.
+
+=== TEXTBOOK EXCERPT (${isEnglish ? "English" : "Chinese"}) ===
 ${cleanText}
 === END ===
 
-Course: ${course || "Mathematics"}, Topic: ${ch}
+Course: ${course || "Mathematics"} | Topic: ${ch}
 
-TASK 1: Extract 3–5 key concepts from the text. Each concept needs a name and a one-sentence summary that directly references the text.
+TASK 1 — Extract exactly 3 to 5 key concepts (topics). Each must have:
+  - "name": short concept name (3–6 words, clean, no garbled text)
+  - "summary": one sentence explaining the concept clearly
 
-TASK 2: Generate exactly ${count} exam questions based STRICTLY on the textbook content above.
-Rules:
-- Every question must test a SPECIFIC concept, definition, theorem, formula, or numerical method from the text
-- Multiple-choice: provide 4 options (A/B/C/D). All distractors must be plausible mathematical alternatives — NEVER use "none of the above", "opposite of the text", or placeholder options
-- True/False: set options to null, answer is "True"/"False" (English) or "正确"/"错误" (Chinese)
-- Include at least one computational or application question if the text contains formulas/algorithms
-- Explanation must cite the specific part of the text that justifies the answer (≤60 words)
-- DO NOT invent theorems, formulas, or values not present in the text
+TASK 2 — Generate exactly ${count} exam questions from the text. Rules:
+- Base every question on a SPECIFIC definition, theorem, method, or result in the text
+- REWRITE all mathematical expressions in clean standard notation (fix garbled text)
+- Multiple-choice (单选题): exactly 4 options A/B/C/D, all plausible distractors
+- True/False (判断题): options=null, answer="正确" or "错误"
+- Mix types: at least ${Math.max(1, Math.floor(count * 0.6))} multiple-choice and at least 1 true/false
+- Explanation ≤ 50 words, must justify the answer
 
-Respond ONLY with valid JSON, no extra text:
+Output ONLY this JSON, no markdown, no extra text:
 {
   "topics": [
-    { "name": "concept name", "summary": "one-sentence summary citing the text" }
+    { "name": "Separation of Variables", "summary": "A method to solve ODEs by separating x and y terms to opposite sides." }
   ],
   "questions": [
-    {
-      "type": "单选题",
-      "question": "Question text (specific, grounded in the textbook)",
-      "options": ["A. option", "B. option", "C. option", "D. option"],
-      "answer": "A",
-      "explanation": "Why A is correct, citing the text (≤60 words)"
-    },
-    {
-      "type": "判断题",
-      "question": "True or False: [specific claim from the text]",
-      "options": null,
-      "answer": "正确",
-      "explanation": "Explanation citing the text (≤40 words)"
-    }
+    { "type": "单选题", "question": "Which condition must hold for a first-order ODE dy/dx = f(x,y) to be solvable by separation of variables?", "options": ["A. f can be written as g(x)·h(y)", "B. f is linear in y", "C. f is constant", "D. f depends only on x"], "answer": "A", "explanation": "Separation of variables requires f(x,y) = g(x)·h(y) so each side can be integrated independently." },
+    { "type": "判断题", "question": "判断：dy/dx = x·y² 可以用分离变量法求解。", "options": null, "answer": "正确", "explanation": "该方程可改写为 dy/y² = x dx，两侧分别对 x 和 y 积分即可求解。" }
   ]
 }`;
 
@@ -232,28 +228,60 @@ Respond ONLY with valid JSON, no extra text:
   try {
     result = JSON.parse(clean);
   } catch {
+    // Try to extract the outermost JSON object
     const m = clean.match(/\{[\s\S]*\}/);
     if (!m) return res.status(500).json({ error: "AI 返回格式错误，请重试", raw: clean.slice(0, 300) });
     try { result = JSON.parse(m[0]); }
     catch { return res.status(500).json({ error: "JSON 解析失败", raw: m[0].slice(0, 300) }); }
   }
 
-  const questions = (Array.isArray(result.questions) ? result.questions : [])
-    .filter(q => q?.question?.length > 5)
-    .map(q => ({
-      question: String(q.question),
-      options: Array.isArray(q.options) && q.options.length >= 2 ? q.options : null,
-      answer: String(q.answer || (q.options ? "A" : "正确")),
-      explanation: String(q.explanation || ""),
-      type: String(q.type || (q.options ? "单选题" : "判断题")),
-      chapter: ch,
+  // ── Normalise questions (field name variants across models) ───────────────
+  const rawQuestions = Array.isArray(result.questions) ? result.questions
+    : Array.isArray(result.problems) ? result.problems
+    : Array.isArray(result.exercises) ? result.exercises
+    : [];
+
+  const questions = rawQuestions
+    .filter(q => q && String(q.question || q.text || q.content || "").length > 5)
+    .map(q => {
+      const qText = String(q.question || q.text || q.content || "");
+      const opts = Array.isArray(q.options) && q.options.length >= 2 ? q.options : null;
+      return {
+        question: qText,
+        options: opts,
+        answer: String(q.answer || q.correct_answer || (opts ? "A" : "正确")),
+        explanation: String(q.explanation || q.rationale || q.reason || ""),
+        type: String(q.type || (opts ? "单选题" : "判断题")),
+        chapter: ch,
+      };
+    });
+
+  // ── Normalise topics (field name variants across models) ──────────────────
+  const rawTopics = Array.isArray(result.topics) ? result.topics
+    : Array.isArray(result.concepts) ? result.concepts
+    : Array.isArray(result.key_concepts) ? result.key_concepts
+    : Array.isArray(result.knowledge_points) ? result.knowledge_points
+    : [];
+
+  const topics = rawTopics
+    .filter(t => t && String(t.name || t.title || t.concept || "").length > 1)
+    .map(t => ({
+      name: String(t.name || t.title || t.concept || ""),
+      summary: String(t.summary || t.description || t.explanation || ""),
     }));
 
-  const topics = (Array.isArray(result.topics) ? result.topics : [])
-    .filter(t => t?.name?.length > 0)
-    .map(t => ({ name: String(t.name), summary: String(t.summary || "") }));
+  // ── Fallback: if AI returned no topics, synthesise from questions ─────────
+  const finalTopics = topics.length > 0 ? topics : (() => {
+    const seen = new Set();
+    return questions.slice(0, 3).map((q, i) => {
+      const name = ch + ` 知识点 ${i + 1}`;
+      if (seen.has(name)) return null;
+      seen.add(name);
+      return { name, summary: q.explanation || q.question.slice(0, 60) };
+    }).filter(Boolean);
+  })();
 
-  console.log(`[extract] api=${apiUsed} text_len=${cleanText.length} topics=${topics.length} questions=${questions.length}`);
+  console.log(`[extract] api=${apiUsed} text=${cleanText.length}ch topics=${finalTopics.length} questions=${questions.length}`);
 
-  return res.status(200).json({ topics, questions, apiUsed });
+  return res.status(200).json({ topics: finalTopics, questions, apiUsed });
 }
