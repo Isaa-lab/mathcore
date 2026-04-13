@@ -2617,6 +2617,13 @@ function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setInterval(() => setCooldown(c => c <= 1 ? 0 : c - 1), 1000);
+    return () => clearInterval(t);
+  }, [cooldown]);
 
   const handleLogin = async () => {
     setLoading(true); setError("");
@@ -2636,8 +2643,16 @@ function AuthPage() {
         emailRedirectTo: "https://mathcore-theta.vercel.app",
       },
     });
-    if (error) setError(error.message);
-    else setSuccess("注册成功！请检查邮箱完成验证后登录。");
+    if (error) {
+      if (/rate.limit|over.*email|too many|email.*rate/i.test(error.message)) {
+        setError("邮件发送太频繁，请等待 60 秒后再试。");
+      } else {
+        setError(error.message);
+      }
+    } else {
+      setSuccess("注册成功！验证邮件已发送，请查收。");
+      setCooldown(60);
+    }
     setLoading(false);
   };
 
@@ -2660,7 +2675,19 @@ function AuthPage() {
           </div>
 
           {error && <div style={{ padding: "12px 16px", background: G.redLight, color: G.red, borderRadius: 10, fontSize: 14, marginBottom: 16 }}>{error}</div>}
-          {success && <div style={{ padding: "12px 16px", background: G.tealLight, color: G.tealDark, borderRadius: 10, fontSize: 14, marginBottom: 16 }}>{success}</div>}
+          {success && (
+            <div style={{ padding: "14px 16px", background: G.tealLight, color: G.tealDark, borderRadius: 10, fontSize: 14, marginBottom: 16, lineHeight: 1.7 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>✉️ 验证邮件已发送！</div>
+              <div>请打开你注册时填写的邮箱，点击邮件中的链接完成验证后即可登录。</div>
+              <div style={{ marginTop: 6, color: "#2d7a5f", fontSize: 13 }}>
+                没收到？请检查<strong>垃圾邮件</strong>文件夹。
+                {cooldown > 0
+                  ? <span style={{ marginLeft: 6, color: "#888" }}>重新发送需等待 <strong style={{ color: G.tealDark }}>{cooldown}s</strong></span>
+                  : <span style={{ marginLeft: 6 }}>如仍未收到，可重新注册触发再次发送（每封邮件有 60 秒冷却）。</span>
+                }
+              </div>
+            </div>
+          )}
 
           {mode === "register" && (
             <>
@@ -2688,8 +2715,12 @@ function AuthPage() {
             <input style={s.input} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={mode === "register" ? "至少 6 位" : "输入密码"} onKeyDown={e => { if (e.key === "Enter") { if (mode === "login") handleLogin(); else handleRegister(); }}} />
           </div>
 
-          <button disabled={loading} onClick={mode === "login" ? handleLogin : handleRegister} style={{ width: "100%", padding: "14px 0", fontSize: 16, fontWeight: 600, fontFamily: "inherit", background: loading ? "#9FE1CB" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: loading ? "not-allowed" : "pointer" }}>
-            {loading ? "处理中…" : mode === "login" ? "登录" : "注册账号"}
+          <button
+            disabled={loading || (mode === "register" && cooldown > 0)}
+            onClick={mode === "login" ? handleLogin : handleRegister}
+            style={{ width: "100%", padding: "14px 0", fontSize: 16, fontWeight: 600, fontFamily: "inherit", background: loading || (mode === "register" && cooldown > 0) ? "#9FE1CB" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: loading || (mode === "register" && cooldown > 0) ? "not-allowed" : "pointer" }}
+          >
+            {loading ? "处理中…" : mode === "register" && cooldown > 0 ? `重新发送（${cooldown}s）` : mode === "login" ? "登录" : "注册账号"}
           </button>
           <div style={{ textAlign: "center", marginTop: 16, fontSize: 14, color: "#888" }}>
             {mode === "login" ? <>还没有账号？<span onClick={() => setMode("register")} style={{ color: G.teal, cursor: "pointer", fontWeight: 500 }}>立即注册</span></> : <>已有账号？<span onClick={() => setMode("login")} style={{ color: G.teal, cursor: "pointer", fontWeight: 500 }}>直接登录</span></>}
