@@ -53,6 +53,92 @@ const G = {
   purple: "#534AB7", purpleLight: "#EEEDFE",
 };
 
+// ── Badge System ─────────────────────────────────────────────────────────────
+const BADGES = [
+  { id: "first_answer",   emoji: "🌱", name: "初学者",    desc: "完成第一道题",          check: (st) => st.totalAnswered >= 1 },
+  { id: "perfect_score",  emoji: "🎯", name: "神枪手",    desc: "单次练习全部答对",       check: (st) => st.hadPerfect },
+  { id: "streak3",        emoji: "🔥", name: "坚持者",    desc: "连续学习 3 天",          check: (st) => st.streak >= 3 },
+  { id: "streak7",        emoji: "⚡", name: "铁杆学霸",  desc: "连续学习 7 天",          check: (st) => st.streak >= 7 },
+  { id: "wrong_killer",   emoji: "💪", name: "错题杀手",  desc: "攻克 5 道错题",          check: (st) => st.masteredWrong >= 5 },
+  { id: "ace",            emoji: "🏆", name: "数学达人",  desc: "总正确率超过 80%",       check: (st) => st.overallAccuracy >= 80 },
+  { id: "scholar",        emoji: "📚", name: "博学者",    desc: "累计学习时长超 60 分钟", check: (st) => st.totalMinutes >= 60 },
+  { id: "all_chapters",   emoji: "🌈", name: "全能学霸",  desc: "练习 5 个及以上章节",    check: (st) => st.chaptersAttempted >= 5 },
+  { id: "century",        emoji: "💯", name: "百题王",    desc: "累计答对 100 道题",      check: (st) => st.totalCorrect >= 100 },
+  { id: "speed",          emoji: "⚡", name: "闪电答题",  desc: "30 秒内完成一题",        check: (st) => st.hadSpeedAnswer },
+];
+
+const getBadgeStats = () => {
+  try {
+    const answers = JSON.parse(localStorage.getItem("mc_answers") || "{}");
+    const streak = JSON.parse(localStorage.getItem("mc_streak") || "{}").days || 0;
+    const timeData = JSON.parse(localStorage.getItem("mc_study_time") || "{}");
+    const wrongMastered = JSON.parse(localStorage.getItem("mc_wrong_mastered") || "0");
+    const sessions = JSON.parse(localStorage.getItem("mc_sessions") || "[]");
+    const totalMinutes = Math.round((timeData.totalSeconds || 0) / 60);
+    const allAnswers = Object.values(answers);
+    const totalAnswered = allAnswers.length;
+    const totalCorrect = allAnswers.filter(Boolean).length;
+    const overallAccuracy = totalAnswered > 0 ? Math.round(totalCorrect / totalAnswered * 100) : 0;
+    const chaptersAttempted = new Set(Object.keys(JSON.parse(localStorage.getItem("mc_chapter_answers") || "{}"))).size;
+    const hadPerfect = sessions.some(s => s.correct === s.total && s.total >= 5);
+    const hadSpeedAnswer = JSON.parse(localStorage.getItem("mc_had_speed") || "false");
+    return { totalAnswered, totalCorrect, overallAccuracy, streak, totalMinutes, masteredWrong: Number(wrongMastered), chaptersAttempted, hadPerfect, hadSpeedAnswer };
+  } catch { return { totalAnswered: 0, totalCorrect: 0, overallAccuracy: 0, streak: 0, totalMinutes: 0, masteredWrong: 0, chaptersAttempted: 0, hadPerfect: false, hadSpeedAnswer: false }; }
+};
+
+const getUnlockedBadges = () => {
+  const stats = getBadgeStats();
+  return BADGES.filter(b => b.check(stats));
+};
+
+// Study time tracker helper (call on quiz start/end)
+const recordStudyTime = (seconds) => {
+  try {
+    const data = JSON.parse(localStorage.getItem("mc_study_time") || "{}");
+    data.totalSeconds = (data.totalSeconds || 0) + seconds;
+    localStorage.setItem("mc_study_time", JSON.stringify(data));
+  } catch {}
+};
+
+
+// ── SM-2 Spaced Repetition ───────────────────────────────────────────────────
+const SM2 = {
+  get(cardId) {
+    try {
+      const all = JSON.parse(localStorage.getItem("mc_sr") || "{}");
+      return all[cardId] || { interval: 1, repetitions: 0, easeFactor: 2.5, dueDate: null };
+    } catch { return { interval: 1, repetitions: 0, easeFactor: 2.5, dueDate: null }; }
+  },
+  update(cardId, quality) { // quality: 0=完全忘记, 3=模糊记得, 5=完全记得
+    try {
+      const all = JSON.parse(localStorage.getItem("mc_sr") || "{}");
+      let { interval, repetitions, easeFactor } = this.get(cardId);
+      if (quality < 3) {
+        repetitions = 0;
+        interval = 1;
+      } else {
+        if (repetitions === 0) interval = 1;
+        else if (repetitions === 1) interval = 6;
+        else interval = Math.round(interval * easeFactor);
+        repetitions += 1;
+      }
+      easeFactor = Math.max(1.3, easeFactor + 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+      const dueDate = new Date(Date.now() + interval * 86400000).toISOString();
+      all[cardId] = { interval, repetitions, easeFactor, dueDate };
+      localStorage.setItem("mc_sr", JSON.stringify(all));
+    } catch {}
+  },
+  isDue(cardId) {
+    const d = this.get(cardId);
+    if (!d.dueDate) return true;
+    return new Date(d.dueDate) <= new Date();
+  },
+  getDueCount(cards) {
+    return cards.filter(c => this.isDue(c.front || c.id || c.question)).length;
+  }
+};
+
+
 // Course → color mapping for consistent UI theming
 const COURSE_COLOR = {
   "数值分析": "teal",
@@ -2920,8 +3006,8 @@ function AuthPage() {
 // ── Nav ───────────────────────────────────────────────────────────────────────
 function TopNav({ page, setPage, profile, onLogout }) {
   const links = profile?.role === "teacher"
-    ? ["首页", "资料库", "上传资料", "资料对话", "知识点", "题库练习", "记忆卡片", "学习报告", "错题本", "教师管理"]
-    : ["首页", "资料库", "上传资料", "资料对话", "知识点", "题库练习", "记忆卡片", "学习报告", "错题本"];
+    ? ["首页", "资料库", "上传资料", "资料对话", "知识点", "技能树", "题库练习", "记忆卡片", "学习报告", "错题本", "教师管理"]
+    : ["首页", "资料库", "上传资料", "资料对话", "知识点", "技能树", "题库练习", "记忆卡片", "学习报告", "错题本"];
   return (
     <div style={{ background: "#fff", borderBottom: "1px solid #f0f0f0", padding: "0 2rem", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 12px rgba(0,0,0,0.04)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -3074,7 +3160,8 @@ function HomePage({ setPage, profile }) {
           { icon: "📊", title: "学习报告", desc: "查看正确率与薄弱知识点", page: "学习报告", bg: G.amberLight, accent: G.amber, tag: null },
           { icon: "🔖", title: "错题本", desc: "收录错题，针对性复习", page: "错题本", bg: G.redLight, accent: G.red, tag: null },
         ].map(q => (
-          <div key={q.title} onClick={() => setPage(q.page)} style={{ background: q.bg, borderRadius: 16, padding: "1.5rem", cursor: "pointer", display: "flex", gap: 16, alignItems: "flex-start", border: `1px solid ${q.accent}22`, transition: "transform .15s" }}>
+          <div key={q.title} onClick={() => setPage(q.page)} style={{ background: q.bg, borderRadius: 16, padding: "1.5rem", cursor: "pointer", display: "flex", gap: 16, alignItems: "flex-start", border: `1px solid ${q.accent}22`, transition: "transform .15s" },
+          { icon: "🌳", title: "技能树", desc: "可视化知识点依赖，解锁学习路径", page: "技能树", bg: "#f0fdf4", accent: G.teal, tag: null }}>
             <div style={{ width: 48, height: 48, borderRadius: 14, background: q.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>{q.icon}</div>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 16, fontWeight: 600, color: "#111", marginBottom: 4 }}>{q.title}</div>
@@ -3086,6 +3173,30 @@ function HomePage({ setPage, profile }) {
       </div>
 
       <JoinClassCard profile={profile} />
+      {/* Badge Showcase */}
+      {(() => {
+        const unlocked = getUnlockedBadges();
+        if (unlocked.length === 0) return null;
+        return (
+          <div style={{ marginTop: 20 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>🏅 我的成就</div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {unlocked.map(b => (
+                <div key={b.id} title={b.desc} style={{ background: "linear-gradient(135deg,#fef3c7,#fde68a)", border: "1.5px solid #fcd34d", borderRadius: 12, padding: "8px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 20 }}>{b.emoji}</span>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e" }}>{b.name}</div>
+                    <div style={{ fontSize: 11, color: "#b45309" }}>{b.desc}</div>
+                  </div>
+                </div>
+              ))}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", border: "1.5px dashed #ddd", borderRadius: 12, color: "#aaa", fontSize: 12 }}>
+                <span>🔒</span> 还有 {BADGES.length - unlocked.length} 个成就待解锁
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -3346,6 +3457,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [timer, setTimer] = useState(0);
   const [correctStreak, setCorrectStreak] = useState(0);
   const [showWin, setShowWin] = useState(false);
+  const sessionStartRef = useRef(Date.now());
   const [materialFilterFallback, setMaterialFilterFallback] = useState(false);
   const [materialGenerating, setMaterialGenerating] = useState(false);
   const [materialGenerateMsg, setMaterialGenerateMsg] = useState("");
@@ -3521,7 +3633,21 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   };
 
   const handleNext = () => {
-    if (current >= displayQ.length - 1) { setFinished(true); return; }
+    if (current >= displayQ.length - 1) {
+      setFinished(true);
+      // Record study time
+      const seconds = Math.round((Date.now() - sessionStartRef.current) / 1000);
+      recordStudyTime(seconds);
+      // Record session for badge checks
+      try {
+        const sessions = JSON.parse(localStorage.getItem("mc_sessions") || "[]");
+        const curScore = displayQ.filter((_, qi) => qi < current).length; // approx
+        sessions.push({ correct: score, total: displayQ.length, ts: Date.now() });
+        localStorage.setItem("mc_sessions", JSON.stringify(sessions.slice(-20)));
+        if (score === displayQ.length) localStorage.setItem("mc_had_perfect", "true");
+      } catch {}
+      return;
+    }
     setCurrent(c => c + 1); setSelected(null); setAnswered(false); setShowHint(false);
   };
   // Reset streak on quiz restart
@@ -3787,24 +3913,67 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           </div>
         )}
       </div>
-      {(showHint || answered) && (
-        <div style={{ ...s.card, marginBottom: 14, borderLeft: "4px solid "+G.teal, background: "#fafffe" }}>
-          <div style={{ display: "flex", gap: 14 }}>
-            <div style={{ width: 34, height: 34, borderRadius: "50%", background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>AI</span>
-            </div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#111", marginBottom: 6 }}>{answered ? "正确答案："+q.answer : "解题提示"}</div>
-              <div style={{ fontSize: 15, color: "#444", lineHeight: 1.7 }}>{q.explanation}</div>
-              {q.source_quote ? (
-                <div style={{ marginTop: 8, fontSize: 12, color: "#666", lineHeight: 1.6 }}>
-                  资料依据：{String(q.source_quote).slice(0, 140)}
+      {(showHint || answered) && (() => {
+        // Error root cause analysis
+        const isWrong = answered && (() => {
+          if (opts) return letters[selected] !== q.answer;
+          return !((selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误"));
+        })();
+        const rootCause = isWrong ? (() => {
+          const exp = String(q.explanation || "");
+          if (/计算|乘|除|加|减|代入|化简/.test(exp)) return { type: "计算失误", color: G.amber, icon: "🔢", tip: "本题考察计算能力，建议重新推导一遍验证" };
+          if (/公式|定理|定义|法则/.test(exp)) return { type: "公式误用", color: G.red, icon: "📐", tip: "建议回顾相关公式定理，加深记忆" };
+          return { type: "概念理解", color: G.purple, icon: "💡", tip: "建议查看知识点卡片，理解底层概念" };
+        })() : null;
+
+        // Multi-step hints (split explanation into steps)
+        const hintSteps = (() => {
+          const exp = String(q.explanation || "");
+          // Split by period/semicolon into max 3 steps
+          const parts = exp.split(/[。；;]/).map(s => s.trim()).filter(s => s.length > 4).slice(0, 3);
+          if (parts.length >= 2) return parts;
+          return [exp]; // single step
+        })();
+
+        return (
+          <div style={{ ...s.card, marginBottom: 14, borderLeft: "4px solid " + (isWrong ? G.red : G.teal), background: isWrong ? "#fff8f8" : "#fafffe" }}>
+            {isWrong && rootCause && (
+              <div style={{ marginBottom: 10, padding: "8px 12px", background: rootCause.color + "18", borderRadius: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 18 }}>{rootCause.icon}</span>
+                <div>
+                  <span style={{ fontWeight: 700, color: rootCause.color, fontSize: 13 }}>错误类型：{rootCause.type}</span>
+                  <div style={{ fontSize: 12, color: "#666", marginTop: 2 }}>{rootCause.tip}</div>
                 </div>
-              ) : null}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 14 }}>
+              <div style={{ width: 34, height: 34, borderRadius: "50%", background: isWrong ? G.red : G.teal, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>{isWrong ? "❌" : "AI"}</span>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#111", marginBottom: 8 }}>
+                  {answered ? "正确答案：" + q.answer : "🔍 分步提示"}
+                </div>
+                {hintSteps.length > 1 ? hintSteps.map((step, si) => (
+                  <div key={si} style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "flex-start" }}>
+                    <div style={{ width: 22, height: 22, borderRadius: "50%", background: G.teal + "22", border: "1.5px solid " + G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: G.teal, flexShrink: 0, marginTop: 1 }}>
+                      {si + 1}
+                    </div>
+                    <div style={{ fontSize: 14, color: "#444", lineHeight: 1.7 }}>{step}</div>
+                  </div>
+                )) : (
+                  <div style={{ fontSize: 15, color: "#444", lineHeight: 1.7 }}>{q.explanation}</div>
+                )}
+                {q.source_quote && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: "#666", lineHeight: 1.6, padding: "6px 10px", background: "#f8fafc", borderRadius: 6 }}>
+                    📄 资料依据：{String(q.source_quote).slice(0, 140)}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <Btn onClick={() => { if (current > 0) { setCurrent(c => c-1); setSelected(null); setAnswered(false); setShowHint(false); } }}>← 上一题</Btn>
         <div style={{ display: "flex", gap: 10 }}>
@@ -3822,10 +3991,21 @@ function FlashcardPage({ setPage }) {
   const [idx, setIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const [filter, setFilter] = useState("全部");
+  const [srMode, setSrMode] = useState(false); // spaced repetition mode
   const [known, setKnown] = useState(new Set());
+  const [showWinFlash, setShowWinFlash] = useState(false);
   const chapters = ["全部", ...new Set(FLASHCARDS.map(f => f.chapter))];
-  const filtered = filter === "全部" ? FLASHCARDS : FLASHCARDS.filter(f => f.chapter === filter);
+  const allFiltered = filter === "全部" ? FLASHCARDS : FLASHCARDS.filter(f => f.chapter === filter);
+  // SR mode: show due cards first
+  const filtered = srMode
+    ? [...allFiltered].sort((a, b) => {
+        const aDue = SM2.isDue(a.front || a.id || "");
+        const bDue = SM2.isDue(b.front || b.id || "");
+        return bDue - aDue;
+      })
+    : allFiltered;
   const card = filtered[idx];
+  const dueCount = SM2.getDueCount(allFiltered);
 
   useEffect(() => {
     const handler = (e) => {
@@ -3853,6 +4033,24 @@ function FlashcardPage({ setPage }) {
         ))}
       </div>
 
+      {/* SM-2 info bar */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+        {dueCount > 0 && (
+          <div style={{ background: G.amberLight, borderRadius: 10, padding: "8px 14px", fontSize: 13, color: G.amber, fontWeight: 600, flex: 1 }}>
+            📅 今日待复习 <strong>{dueCount}</strong> 张卡片（艾宾浩斯间隔）
+          </div>
+        )}
+        <button onClick={() => setSrMode(v => !v)} style={{ padding: "8px 16px", borderRadius: 10, border: "1.5px solid " + (srMode ? G.purple : "#ddd"), background: srMode ? G.purple : "#fff", color: srMode ? "#fff" : "#666", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+          {srMode ? "🔀 间隔模式" : "📚 顺序模式"}
+        </button>
+      </div>
+      {showWinFlash && (
+        <div style={{ position: "fixed", top: "30%", left: "50%", transform: "translateX(-50%)", background: "linear-gradient(135deg,#8b5cf6,#7c3aed)", color: "#fff", borderRadius: 20, padding: "20px 40px", textAlign: "center", zIndex: 9999, boxShadow: "0 20px 60px rgba(0,0,0,0.2)", animation: "popIn 0.3s ease", pointerEvents: "none" }}>
+          <div style={{ fontSize: 40, marginBottom: 6 }}>🎉</div>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>太棒了！又掌握 {known.size} 张！</div>
+          <div style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>坚持复习，记忆更持久！</div>
+        </div>
+      )}
       <div style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 14, color: "#888" }}>
           <span>{idx + 1} / {filtered.length}</span>
@@ -3874,7 +4072,17 @@ function FlashcardPage({ setPage }) {
       <div style={{ display: "flex", justifyContent: "center", gap: 12 }}>
         <Btn onClick={() => { setIdx(i => Math.max(0, i - 1)); setFlipped(false); }}>← 上一张</Btn>
         {flipped && <Btn variant="danger" onClick={() => { setIdx(i => Math.min(filtered.length - 1, i + 1)); setFlipped(false); }}>还不熟悉</Btn>}
-        {flipped && <Btn variant="primary" onClick={() => { setKnown(k => new Set([...k, card.front])); if (idx < filtered.length - 1) { setIdx(i => i + 1); setFlipped(false); } }}>✓ 已掌握</Btn>}
+        {flipped && <Btn variant="danger" onClick={() => {
+              SM2.update(card.front || card.id || "", 1);
+              if (idx < filtered.length - 1) { setIdx(i => i + 1); setFlipped(false); }
+            }}>😕 不熟悉</Btn>}
+        {flipped && <Btn variant="primary" onClick={() => {
+              SM2.update(card.front || card.id || "", 5);
+              setKnown(k => new Set([...k, card.front]));
+              const newKnownSize = known.size + 1;
+              if (newKnownSize % 5 === 0 || newKnownSize === 1) { setShowWinFlash(true); setTimeout(() => setShowWinFlash(false), 1800); }
+              if (idx < filtered.length - 1) { setIdx(i => i + 1); setFlipped(false); }
+            }}>✓ 已掌握</Btn>}
         {!flipped && <Btn onClick={() => { setIdx(i => Math.min(filtered.length - 1, i + 1)); setFlipped(false); }}>下一张 →</Btn>}
       </div>
     </div>
@@ -4084,6 +4292,44 @@ function ReportPage({ setPage }) {
               <Btn onClick={() => setPage("知识点")} style={{ flex: 1 }}>知识点</Btn>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* 7-day Study Plan */}
+      <div style={{ ...s.card, marginTop: 16 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>📅 本周学习计划（艾宾浩斯间隔复习）</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 8 }}>
+          {Array.from({ length: 7 }, (_, di) => {
+            const date = new Date(Date.now() + di * 86400000);
+            const dayNames = ["日","一","二","三","四","五","六"];
+            const dayName = dayNames[date.getDay()];
+            const isToday = di === 0;
+            const tasks = di === 0 ? (weak[0] ? ["复习 " + weak[0].name.split(" ")[0], "练习 5 题"] : ["每日练习"]) :
+                          di === 1 ? ["记忆卡片 15 张", "巩固薄弱点"] :
+                          di === 2 ? (weak[1] ? ["复习 " + weak[1].name.split(" ")[0]] : ["综合练习"]) :
+                          di === 3 ? ["错题本复习"] :
+                          di === 4 ? ["AI 对话提问", "知识点梳理"] :
+                          di === 5 ? (weak[2] ? ["复习 " + weak[2].name.split(" ")[0], "记忆卡片"] : ["章节总结"]) :
+                          ["综合练习", "查看学习报告"];
+            const intensity = di === 0 || di === 5 ? "high" : di === 3 ? "rest" : "normal";
+            const bg = intensity === "high" ? G.blueLight : intensity === "rest" ? G.tealLight : "#f8fafc";
+            const border = intensity === "high" ? G.blue : intensity === "rest" ? G.teal : "#e2e8f0";
+            return (
+              <div key={di} style={{ background: bg, border: "1.5px solid " + border + (isToday ? "" : "88"), borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
+                <div style={{ fontSize: 11, color: "#888", fontWeight: 600, marginBottom: 4 }}>周{dayName}</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: isToday ? G.blue : "#333", marginBottom: 8 }}>
+                  {date.getDate()}
+                  {isToday && <span style={{ fontSize: 10, marginLeft: 3, color: G.blue }}>今</span>}
+                </div>
+                {tasks.map((t, ti) => (
+                  <div key={ti} style={{ fontSize: 10, color: "#555", lineHeight: 1.5, background: "rgba(255,255,255,0.6)", borderRadius: 6, padding: "2px 4px", marginBottom: 4 }}>{t}</div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 12, fontSize: 12, color: "#888", textAlign: "center" }}>
+          💡 基于你的薄弱章节自动生成 · 每天 20-30 分钟 · 间隔复习效果最佳
         </div>
       </div>
     </div>
@@ -5575,6 +5821,195 @@ function TeacherPage({ setPage, profile }) {
 }
 
 // ── Root App ──────────────────────────────────────────────────────────────────
+
+// ── Skill Tree Page ───────────────────────────────────────────────────────────
+const SKILL_TREE = [
+  // 数值分析链
+  { id: "误差分析",      label: "误差分析",    emoji: "📏", deps: [],                      course: "数值分析", x: 80,  y: 60 },
+  { id: "浮点数系统",    label: "浮点数系统",  emoji: "💾", deps: ["误差分析"],             course: "数值分析", x: 80,  y: 170 },
+  { id: "方程求解",      label: "方程求解",    emoji: "🔍", deps: ["浮点数系统"],           course: "数值分析", x: 80,  y: 280 },
+  { id: "插值方法",      label: "插值法",      emoji: "📈", deps: ["方程求解"],             course: "数值分析", x: 80,  y: 390 },
+  { id: "数值积分",      label: "数值积分",    emoji: "∫",  deps: ["插值方法"],             course: "数值分析", x: 80,  y: 500 },
+  { id: "数值微分",      label: "数值微分",    emoji: "d/dx",deps: ["插值方法"],            course: "数值分析", x: 240, y: 500 },
+  // 线性代数链
+  { id: "矩阵运算",      label: "矩阵运算",    emoji: "🔢", deps: [],                      course: "线性代数", x: 440, y: 60 },
+  { id: "线性方程组",    label: "线性方程组",  emoji: "📐", deps: ["矩阵运算"],             course: "线性代数", x: 440, y: 170 },
+  { id: "行列式",        label: "行列式",      emoji: "det", deps: ["矩阵运算"],            course: "线性代数", x: 580, y: 170 },
+  { id: "向量空间",      label: "向量空间",    emoji: "→",  deps: ["线性方程组","行列式"],  course: "线性代数", x: 510, y: 280 },
+  { id: "特征值",        label: "特征值/特征向量", emoji: "λ", deps: ["向量空间"],         course: "线性代数", x: 510, y: 390 },
+  // 微分方程链
+  { id: "一阶ODE",       label: "一阶 ODE",    emoji: "dy/dx", deps: [],                  course: "ODE",      x: 780, y: 60 },
+  { id: "分离变量法",    label: "分离变量法",  emoji: "÷", deps: ["一阶ODE"],              course: "ODE",      x: 680, y: 170 },
+  { id: "积分因子",      label: "积分因子法",  emoji: "μ", deps: ["一阶ODE"],              course: "ODE",      x: 870, y: 170 },
+  { id: "二阶ODE",       label: "二阶常系数ODE", emoji: "y''", deps: ["分离变量法","积分因子"], course: "ODE", x: 780, y: 280 },
+  { id: "拉普拉斯变换",  label: "Laplace变换", emoji: "ℒ", deps: ["二阶ODE"],             course: "ODE",      x: 780, y: 390 },
+  // 概率统计链
+  { id: "概率基础",      label: "概率基础",    emoji: "🎲", deps: [],                      course: "概率论",   x: 1060, y: 60 },
+  { id: "随机变量",      label: "随机变量",    emoji: "X",  deps: ["概率基础"],            course: "概率论",   x: 1060, y: 170 },
+  { id: "期望与方差",    label: "期望与方差",  emoji: "E[]", deps: ["随机变量"],           course: "概率论",   x: 1060, y: 280 },
+  { id: "大数定律",      label: "大数定律/CLT", emoji: "∞", deps: ["期望与方差"],          course: "概率论",   x: 1060, y: 390 },
+];
+
+const COURSE_COLORS_TREE = {
+  "数值分析": { bg: "#dbeafe", border: "#3b82f6", text: "#1d4ed8" },
+  "线性代数": { bg: "#dcfce7", border: "#22c55e", text: "#15803d" },
+  "ODE":      { bg: "#fce7f3", border: "#ec4899", text: "#be185d" },
+  "概率论":   { bg: "#fef3c7", border: "#f59e0b", text: "#b45309" },
+};
+
+function SkillTreePage({ setPage }) {
+  const [mastery, setMastery] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("mc_skill_mastery") || "{}"); } catch { return {}; }
+  });
+  const [tooltip, setTooltip] = useState(null);
+  const [selectedCourse, setSelectedCourse] = useState("全部");
+
+  const courses = ["全部", ...new Set(SKILL_TREE.map(s => s.course))];
+
+  const getNodeStatus = (node) => {
+    if (mastery[node.id] === 2) return "mastered";
+    if (mastery[node.id] === 1) return "learning";
+    const allDepsOk = node.deps.every(d => mastery[d] >= 1);
+    return allDepsOk ? "unlocked" : "locked";
+  };
+
+  const handleNodeClick = (node) => {
+    const status = getNodeStatus(node);
+    if (status === "locked") return;
+    setMastery(prev => {
+      const cur = prev[node.id] || 0;
+      const next = { ...prev, [node.id]: (cur + 1) % 3 };
+      localStorage.setItem("mc_skill_mastery", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const filteredNodes = selectedCourse === "全部" ? SKILL_TREE : SKILL_TREE.filter(n => n.course === selectedCourse);
+
+  const nodeStatusStyle = (status) => {
+    if (status === "mastered") return { bg: G.teal, border: G.tealDark, text: "#fff", shadow: "0 4px 16px " + G.teal + "66" };
+    if (status === "learning") return { bg: G.amber, border: G.amber, text: "#fff", shadow: "0 4px 12px " + G.amber + "55" };
+    if (status === "unlocked") return { bg: "#fff", border: G.blue, text: G.blue, shadow: "0 2px 8px rgba(0,0,0,0.1)" };
+    return { bg: "#f1f5f9", border: "#cbd5e1", text: "#94a3b8", shadow: "none" };
+  };
+
+  const masteredCount = SKILL_TREE.filter(n => mastery[n.id] === 2).length;
+  const learningCount = SKILL_TREE.filter(n => mastery[n.id] === 1).length;
+
+  // Calculate SVG viewport
+  const maxX = Math.max(...filteredNodes.map(n => n.x)) + 160;
+  const maxY = Math.max(...filteredNodes.map(n => n.y)) + 100;
+
+  return (
+    <div style={{ padding: "2rem", maxWidth: 1200, margin: "0 auto" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
+        <div style={{ fontSize: 22, fontWeight: 700 }}>🌳 知识技能树</div>
+        <div style={{ display: "flex", gap: 10, marginLeft: 12 }}>
+          <span style={{ fontSize: 13, background: G.tealLight, color: G.teal, padding: "4px 12px", borderRadius: 20, fontWeight: 600 }}>✅ 已掌握 {masteredCount}</span>
+          <span style={{ fontSize: 13, background: G.amberLight, color: G.amber, padding: "4px 12px", borderRadius: 20, fontWeight: 600 }}>📖 学习中 {learningCount}</span>
+          <span style={{ fontSize: 13, background: "#f1f5f9", color: "#64748b", padding: "4px 12px", borderRadius: 20, fontWeight: 600 }}>🔒 未解锁 {SKILL_TREE.length - masteredCount - learningCount}</span>
+        </div>
+      </div>
+
+      {/* Course filter */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+        {courses.map(c => (
+          <button key={c} onClick={() => setSelectedCourse(c)} style={{ padding: "7px 16px", borderRadius: 20, border: "1.5px solid " + (selectedCourse === c ? G.teal : "#ddd"), background: selectedCourse === c ? G.teal : "#fff", color: selectedCourse === c ? "#fff" : "#555", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{c}</button>
+        ))}
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 16, marginBottom: 16, fontSize: 12, color: "#666" }}>
+        {[["✅", G.teal, "已掌握（点击重置）"], ["📖", G.amber, "学习中（点击升级）"], ["🔓", G.blue, "可解锁（点击开始）"], ["🔒", "#999", "前置未完成"]].map(([ico, col, label]) => (
+          <span key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ color: col, fontWeight: 700 }}>{ico}</span>{label}
+          </span>
+        ))}
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#aaa" }}>点击节点切换状态 · 完成前置节点后解锁后续</span>
+      </div>
+
+      {/* SVG Tree */}
+      <div style={{ ...s.card, padding: 0, overflowX: "auto", overflowY: "auto", maxHeight: 620 }}>
+        <svg width={Math.max(maxX, 400)} height={Math.max(maxY, 300)} style={{ minWidth: "100%", display: "block" }}>
+          {/* Draw dependency edges */}
+          {filteredNodes.map(node =>
+            node.deps.filter(d => filteredNodes.find(n => n.id === d)).map(depId => {
+              const dep = filteredNodes.find(n => n.id === depId);
+              if (!dep) return null;
+              const status = getNodeStatus(node);
+              const depStatus = getNodeStatus({ ...dep, deps: [] });
+              const lineColor = (status === "locked") ? "#e2e8f0" : G.teal + "88";
+              return (
+                <line key={depId + "->" + node.id}
+                  x1={dep.x + 60} y1={dep.y + 36}
+                  x2={node.x + 60} y2={node.y}
+                  stroke={lineColor} strokeWidth="2" strokeDasharray={status === "locked" ? "5,5" : "0"}
+                />
+              );
+            })
+          )}
+          {/* Draw nodes */}
+          {filteredNodes.map(node => {
+            const status = getNodeStatus(node);
+            const st = nodeStatusStyle(status);
+            const courseColor = COURSE_COLORS_TREE[node.course] || {};
+            return (
+              <g key={node.id} transform={"translate(" + node.x + "," + node.y + ")"}
+                onClick={() => handleNodeClick(node)}
+                onMouseEnter={() => setTooltip(node.id)}
+                onMouseLeave={() => setTooltip(null)}
+                style={{ cursor: status === "locked" ? "not-allowed" : "pointer" }}>
+                {/* Shadow */}
+                <rect x="2" y="3" width="118" height="70" rx="14" fill="rgba(0,0,0,0.06)" />
+                {/* Card */}
+                <rect x="0" y="0" width="118" height="70" rx="14"
+                  fill={st.bg} stroke={st.border} strokeWidth="2"
+                />
+                {/* Course color bar */}
+                <rect x="0" y="0" width="5" height="70" rx="3" fill={courseColor.border || "#ccc"} />
+                {/* Emoji */}
+                <text x="22" y="30" fontSize="16" textAnchor="middle" dominantBaseline="middle">{node.emoji}</text>
+                {/* Label */}
+                <text x="66" y="27" fontSize="11" fontWeight="700" fill={st.text} textAnchor="middle" dominantBaseline="middle" fontFamily="system-ui,sans-serif">{node.label}</text>
+                {/* Status */}
+                <text x="66" y="52" fontSize="10" fill={st.text} textAnchor="middle" dominantBaseline="middle" fontFamily="system-ui,sans-serif" opacity="0.8">
+                  {status === "mastered" ? "✅ 已掌握" : status === "learning" ? "📖 学习中" : status === "unlocked" ? "🔓 点击开始" : "🔒 待解锁"}
+                </text>
+                {/* Tooltip */}
+                {tooltip === node.id && (
+                  <g>
+                    <rect x="10" y="-50" width="120" height="38" rx="8" fill="#1e293b" />
+                    <text x="70" y="-37" fontSize="11" fill="#fff" textAnchor="middle" fontFamily="system-ui,sans-serif">{node.course}</text>
+                    <text x="70" y="-22" fontSize="10" fill="#94a3b8" textAnchor="middle" fontFamily="system-ui,sans-serif">{node.deps.length === 0 ? "无前置要求" : "前置：" + node.deps.join("、")}</text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Progress summary */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12, marginTop: 16 }}>
+        {[...new Set(SKILL_TREE.map(n => n.course))].map(course => {
+          const courseNodes = SKILL_TREE.filter(n => n.course === course);
+          const courseMastered = courseNodes.filter(n => mastery[n.id] === 2).length;
+          const col = COURSE_COLORS_TREE[course];
+          return (
+            <div key={course} style={{ background: col?.bg || "#f8fafc", borderRadius: 12, padding: "14px 16px", border: "1.5px solid " + (col?.border || "#ddd") + "66" }}>
+              <div style={{ fontWeight: 700, color: col?.text || "#333", fontSize: 14, marginBottom: 6 }}>{course}</div>
+              <ProgressBar value={courseMastered} max={courseNodes.length} color={col?.border || G.teal} height={6} />
+              <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>{courseMastered}/{courseNodes.length} 个知识点已掌握</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -5680,6 +6115,7 @@ export default function App() {
     }
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} />;
+    if (page === "技能树") return <SkillTreePage setPage={handleSetPage} />;
     if (page === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} />;
     if (page === "教师管理") return <TeacherPage setPage={handleSetPage} profile={profile} />;
     return null;
