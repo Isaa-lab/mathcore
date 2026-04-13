@@ -2628,9 +2628,8 @@ function AuthPage() {
   const handleRegister = async () => {
     if (!name.trim()) { setError("请输入姓名"); return; }
     if (password.length < 6) { setError("密码至少 6 位"); return; }
-    if (role === "student" && !classCode.trim()) { setError("学生需要输入班级邀请码"); return; }
     setLoading(true); setError("");
-    const { error } = await supabase.auth.signUp({ email, password, options: { data: { name, role, classCode } } });
+    const { error } = await supabase.auth.signUp({ email, password, options: { data: { name, role } } });
     if (error) setError(error.message);
     else setSuccess("注册成功！请检查邮箱完成验证后登录。");
     setLoading(false);
@@ -2671,12 +2670,6 @@ function AuthPage() {
                   ))}
                 </div>
               </div>
-              {role === "student" && (
-                <div style={{ marginBottom: 14 }}>
-                  <label style={s.label}>班级邀请码</label>
-                  <input style={s.input} value={classCode} onChange={e => setClassCode(e.target.value)} placeholder="请向老师获取（如：MATH2024）" />
-                </div>
-              )}
             </>
           )}
 
@@ -2730,6 +2723,87 @@ function TopNav({ page, setPage, profile, onLogout }) {
 }
 
 // ── Home Page ─────────────────────────────────────────────────────────────────
+function JoinClassCard({ profile }) {
+  const [code, setCode] = useState("");
+  const [msg, setMsg] = useState("");
+  const [msgType, setMsgType] = useState(""); // "ok" | "err"
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const currentCode = profile?.class_code || localStorage.getItem("mc_class_code") || "";
+
+  const handleJoin = async () => {
+    const trimmed = code.trim().toUpperCase();
+    if (!trimmed) { setMsg("请输入邀请码"); setMsgType("err"); return; }
+    setLoading(true); setMsg(""); 
+    try {
+      const { error } = await supabase.from("profiles").update({ class_code: trimmed }).eq("id", profile.id);
+      if (error) {
+        // class_code 列可能尚未建立，退回到 localStorage
+        localStorage.setItem("mc_class_code", trimmed);
+        setMsg(`已加入班级 ${trimmed}（本地保存）`); setMsgType("ok");
+      } else {
+        localStorage.setItem("mc_class_code", trimmed);
+        setMsg(`成功加入班级 ${trimmed}！`); setMsgType("ok");
+      }
+      setCode(""); setExpanded(false);
+    } catch (e) {
+      setMsg("加入失败，请稍后重试"); setMsgType("err");
+    }
+    setLoading(false);
+  };
+
+  if (profile?.role === "teacher") return null;
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14 }}>我的班级</div>
+      <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #f0f0f0", padding: "1.25rem 1.5rem", boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
+        {currentCode ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontSize: 14, color: "#555", marginBottom: 2 }}>当前班级</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: G.teal, letterSpacing: "0.06em" }}>{currentCode}</div>
+            </div>
+            <button onClick={() => setExpanded(v => !v)} style={{ padding: "8px 16px", fontSize: 13, fontFamily: "inherit", background: G.tealLight, color: G.tealDark, border: "none", borderRadius: 10, cursor: "pointer", fontWeight: 600 }}>
+              {expanded ? "取消" : "更换班级"}
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: G.blueLight, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>🏫</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#111", marginBottom: 2 }}>还未加入班级</div>
+              <div style={{ fontSize: 13, color: "#888" }}>输入老师提供的邀请码即可加入</div>
+            </div>
+            <button onClick={() => setExpanded(v => !v)} style={{ padding: "10px 18px", fontSize: 14, fontFamily: "inherit", background: G.blue, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontWeight: 600 }}>
+              {expanded ? "取消" : "加入班级"}
+            </button>
+          </div>
+        )}
+
+        {expanded && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid #f0f0f0" }}>
+            <div style={{ display: "flex", gap: 10 }}>
+              <input
+                value={code}
+                onChange={e => setCode(e.target.value.toUpperCase())}
+                onKeyDown={e => e.key === "Enter" && handleJoin()}
+                placeholder="输入班级邀请码（如 MATH2024）"
+                style={{ flex: 1, padding: "10px 14px", fontSize: 14, border: "1.5px solid #e0e0e0", borderRadius: 10, fontFamily: "inherit", letterSpacing: "0.06em" }}
+              />
+              <button onClick={handleJoin} disabled={loading} style={{ padding: "10px 20px", fontSize: 14, fontWeight: 700, fontFamily: "inherit", background: loading ? "#aaa" : G.blue, color: "#fff", border: "none", borderRadius: 10, cursor: loading ? "not-allowed" : "pointer" }}>
+                {loading ? "…" : "确认"}
+              </button>
+            </div>
+            {msg && <div style={{ marginTop: 10, fontSize: 13, color: msgType === "ok" ? G.tealDark : G.red }}>{msgType === "ok" ? "✓ " : "✕ "}{msg}</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function HomePage({ setPage, profile }) {
   const [showAISettings, setShowAISettings] = useState(false);
   const aiCfg = getAIConfig();
@@ -2787,6 +2861,8 @@ function HomePage({ setPage, profile }) {
           </div>
         ))}
       </div>
+
+      <JoinClassCard profile={profile} />
     </div>
   );
 }
