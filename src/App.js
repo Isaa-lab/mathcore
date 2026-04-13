@@ -9,6 +9,8 @@ import "katex/dist/katex.min.css";
   const style = document.createElement("style");
   style.id = "mc-global-styles";
   style.textContent = `
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
     @keyframes popIn {
       0% { transform: scale(0.5); opacity: 0; }
       70% { transform: scale(1.08); opacity: 1; }
@@ -22,7 +24,11 @@ import "katex/dist/katex.min.css";
       from { opacity: 0; transform: translateY(20px); }
       to { opacity: 1; transform: translateY(0); }
     }
-  `;
+    button:focus-visible { outline: 2px solid #1D9E75; outline-offset: 2px; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
+  `
   document.head.appendChild(style);
 })();
 
@@ -3009,33 +3015,48 @@ function AuthPage() {
 
 // ── Nav ───────────────────────────────────────────────────────────────────────
 function TopNav({ page, setPage, profile, onLogout }) {
-  const links = profile?.role === "teacher"
-    ? ["首页", "资料库", "上传资料", "资料对话", "知识点", "技能树", "题库练习", "记忆卡片", "学习报告", "错题本", "教师管理"]
-    : ["首页", "资料库", "上传资料", "资料对话", "知识点", "技能树", "题库练习", "记忆卡片", "学习报告", "错题本"];
+  const [showMore, setShowMore] = React.useState(false);
+  const primaryLinks = ["首页", "资料库", "知识点", "资料对话", "题库练习", "学习报告"];
+  const moreLinks = profile?.role === "teacher"
+    ? ["上传资料", "技能树", "记忆卡片", "错题本", "教师管理"]
+    : ["上传资料", "技能树", "记忆卡片", "错题本"];
+  const isActive = (l) => page === l;
   return (
-    <div style={{ background: "#fff", borderBottom: "1px solid #f0f0f0", padding: "0 2rem", display: "flex", alignItems: "center", justifyContent: "space-between", height: 64, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 12px rgba(0,0,0,0.04)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 36, height: 36, borderRadius: 10, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>📐</div>
-        <span style={{ fontSize: 18, fontWeight: 700, color: "#111", letterSpacing: "-0.3px" }}>MathCore</span>
+    <div style={{ background: "#fff", borderBottom: "1px solid #eee", padding: "0 2rem", display: "flex", alignItems: "center", justifyContent: "space-between", height: 60, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 1px 8px rgba(0,0,0,0.03)" }}>
+      <div onClick={() => setPage("首页")} style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flexShrink: 0 }}>
+        <div style={{ width: 34, height: 34, borderRadius: 9, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17 }}>&#128784;</div>
+        <span style={{ fontSize: 17, fontWeight: 700, color: "#111", letterSpacing: "-0.3px" }}>MathCore</span>
       </div>
-      <div style={{ display: "flex", gap: 2 }}>
-        {links.map(l => (
-          <button key={l} onClick={() => setPage(l)} style={{ padding: "8px 14px", borderRadius: 10, fontSize: 14, fontFamily: "inherit", border: "none", cursor: "pointer", fontWeight: page === l ? 600 : 400, background: page === l ? G.tealLight : "transparent", color: page === l ? G.tealDark : "#666" }}>{l}</button>
+      <div style={{ display: "flex", gap: 1, alignItems: "center" }}>
+        {primaryLinks.map(l => (
+          <button key={l} onClick={() => setPage(l)} style={{ padding: "7px 13px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", fontWeight: isActive(l) ? 600 : 400, background: isActive(l) ? G.tealLight : "transparent", color: isActive(l) ? G.tealDark : "#555", whiteSpace: "nowrap" }}>
+            {l === "资料对话" ? "🤖 AI助教" : l}
+          </button>
         ))}
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{ width: 36, height: 36, borderRadius: "50%", background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 700, color: "#fff" }}>{(profile?.name || "U")[0].toUpperCase()}</div>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#111" }}>{profile?.name}</div>
-          <div style={{ fontSize: 11, color: "#999" }}>{profile?.role === "teacher" ? "教师" : "学生"}</div>
+        <div style={{ position: "relative" }}>
+          <button onClick={() => setShowMore(v => !v)} style={{ padding: "7px 13px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", background: moreLinks.includes(page) ? G.tealLight : "transparent", color: moreLinks.includes(page) ? G.tealDark : "#555" }}>
+            更多 ▾
+          </button>
+          {showMore && (
+            <div onMouseLeave={() => setShowMore(false)} style={{ position: "absolute", top: "100%", right: 0, background: "#fff", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.12)", border: "1px solid #eee", padding: "8px 6px", minWidth: 140, zIndex: 200 }}>
+              {moreLinks.map(l => (
+                <button key={l} onClick={() => { setPage(l); setShowMore(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", background: page === l ? G.tealLight : "transparent", color: page === l ? G.tealDark : "#555", fontWeight: page === l ? 600 : 400 }}>{l}</button>
+              ))}
+            </div>
+          )}
         </div>
-        <button onClick={onLogout} style={{ fontSize: 13, padding: "7px 14px", border: "1.5px solid #e0e0e0", borderRadius: 8, cursor: "pointer", background: "#fff", color: "#666", fontFamily: "inherit" }}>退出</button>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <div style={{ width: 32, height: 32, borderRadius: "50%", background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff" }}>{(profile?.name || "U")[0].toUpperCase()}</div>
+        <div style={{ lineHeight: 1.2 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#111" }}>{profile?.name}</div>
+          <div style={{ fontSize: 11, color: "#aaa" }}>{profile?.role === "teacher" ? "教师" : "学生"}</div>
+        </div>
+        <button onClick={onLogout} style={{ fontSize: 12, padding: "6px 12px", border: "1px solid #e8e8e8", borderRadius: 7, cursor: "pointer", background: "#fafafa", color: "#888", fontFamily: "inherit" }}>退出</button>
       </div>
     </div>
   );
 }
-
-// ── Home Page ─────────────────────────────────────────────────────────────────
 function JoinClassCard({ profile }) {
   const [code, setCode] = useState("");
   const [msg, setMsg] = useState("");
@@ -3136,6 +3157,7 @@ function HomePage({ setPage, profile }) {
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <button onClick={() => setPage("知识点")} style={{ padding: "12px 28px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", background: "#fff", color: G.teal, border: "none", borderRadius: 12, cursor: "pointer" }}>开始学习</button>
           <button onClick={() => setPage("题库练习")} style={{ padding: "12px 28px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", background: "rgba(255,255,255,0.15)", color: "#fff", border: "2px solid rgba(255,255,255,0.3)", borderRadius: 12, cursor: "pointer" }}>进入题库</button>
+          <button onClick={() => setPage("资料对话")} style={{ padding: "10px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: "rgba(255,255,255,0.12)", color: "#fff", border: "1.5px solid rgba(255,255,255,0.3)", borderRadius: 12, cursor: "pointer" }}>🤖 AI 复习助教</button>
           <button onClick={() => setShowAISettings(true)} style={{ padding: "10px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: hasUserKey ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)", color: "#fff", border: "1.5px solid rgba(255,255,255,0.4)", borderRadius: 12, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             ⚙️ AI 设置{hasUserKey ? <span style={{ fontSize: 11, background: "rgba(255,255,255,0.2)", padding: "2px 7px", borderRadius: 8 }}>{providerLabel} ✓</span> : <span style={{ fontSize: 11, opacity: 0.7 }}>配置 Key</span>}
           </button>
@@ -3146,7 +3168,7 @@ function HomePage({ setPage, profile }) {
       {(() => {
         const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); const today = new Date().toDateString(); if (d.last !== today) { const yesterday = new Date(Date.now()-86400000).toDateString(); const s = d.last === yesterday ? (d.count || 0) + 1 : 1; localStorage.setItem("mc_streak", JSON.stringify({last: today, count: s})); return s; } return d.count || 1; } catch { return 1; } })();
         return (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 24 }}>
             <StatCard icon="📚" label="门课程" value="6" sub="数值分析 · 线代 · 概率 · 统计 · ODE · 最优化" color={G.teal} />
             <StatCard icon="✏️" label="题目" value={ALL_QUESTIONS.length + "+"} sub="持续更新" color={G.amber} />
             <StatCard icon="🃏" label="记忆卡片" value={FLASHCARDS.length} sub="公式定理" color={G.purple} />
@@ -3156,48 +3178,60 @@ function HomePage({ setPage, profile }) {
       })()}
 
       {/* Quick access */}
-      <div style={{ fontSize: 14, fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 14 }}>快速入口</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#444", letterSpacing: "0.04em", marginBottom: 14 }}>快速入口</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
         {[
-          { icon: "⚡", title: "每日练习", desc: "今日推荐 5 道精选题目", page: "题库练习", bg: "#EEF4FF", accent: G.blue, tag: "今日" },
-          { icon: "🃏", title: "记忆卡片", desc: "核心公式与定理快速记忆", page: "记忆卡片", bg: G.purpleLight, accent: G.purple, tag: null },
-          { icon: "📊", title: "学习报告", desc: "查看正确率与薄弱知识点", page: "学习报告", bg: G.amberLight, accent: G.amber, tag: null },
-          { icon: "🔖", title: "错题本", desc: "收录错题，针对性复习", page: "错题本", bg: G.redLight, accent: G.red, tag: null },
+          { icon: "⚡", title: "每日练习", desc: "AI 精选题目", page: "题库练习", bg: "#F0F7FF", accent: G.blue },
+          { icon: "🏃", title: "记忆卡片", desc: "核心公式闪记", page: "记忆卡片", bg: G.purpleLight, accent: G.purple },
+          { icon: "🤖", title: "AI 复习助教", desc: "5步法智能辅导", page: "资料对话", bg: "#F0FDF8", accent: G.teal },
+          { icon: "📊", title: "学习报告", desc: "正确率与薄弱点", page: "学习报告", bg: G.amberLight, accent: G.amber },
+          { icon: "❌", title: "错题本", desc: "针对性攻克错题", page: "错题本", bg: G.redLight, accent: G.red },
+          { icon: "🌳", title: "技能树", desc: "可视化知识路径", page: "技能树", bg: "#f0fdf4", accent: G.teal },
         ].map(q => (
-          <div key={q.title} onClick={() => setPage(q.page)} style={{ background: q.bg, borderRadius: 16, padding: "1.5rem", cursor: "pointer", display: "flex", gap: 16, alignItems: "flex-start", border: `1px solid ${q.accent}22`, transition: "transform .15s" },
-          { icon: "🌳", title: "技能树", desc: "可视化知识点依赖，解锁学习路径", page: "技能树", bg: "#f0fdf4", accent: G.teal, tag: null }}>
-            <div style={{ width: 48, height: 48, borderRadius: 14, background: q.accent, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>{q.icon}</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 600, color: "#111", marginBottom: 4 }}>{q.title}</div>
-              <div style={{ fontSize: 14, color: "#666" }}>{q.desc}</div>
+          <div key={q.title} onClick={() => setPage(q.page)} style={{ background: q.bg, borderRadius: 14, padding: "1.2rem", cursor: "pointer", display: "flex", gap: 12, alignItems: "center", border: "1px solid " + q.accent + "22", transition: "box-shadow .15s, transform .15s" }}
+            onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 4px 16px " + q.accent + "33"; e.currentTarget.style.transform = "translateY(-2px)"; }}
+            onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
+          >
+            <div style={{ width: 42, height: 42, borderRadius: 12, background: q.accent + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>{q.icon}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#111", marginBottom: 2 }}>{q.title}</div>
+              <div style={{ fontSize: 12, color: "#777", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{q.desc}</div>
             </div>
-            {q.tag && <span style={{ background: G.blue, color: "#fff", fontSize: 11, padding: "3px 10px", borderRadius: 20, fontWeight: 600, whiteSpace: "nowrap", height: "fit-content" }}>{q.tag}</span>}
           </div>
         ))}
       </div>
 
       <JoinClassCard profile={profile} />
-      {/* Badge Showcase */}
+      {/* Badge Showcase – always visible */}
       {(() => {
-        const unlocked = getUnlockedBadges();
-        if (unlocked.length === 0) return null;
+        const stats = getBadgeStats();
+        const unlockedIds = new Set(BADGES.filter(b => b.check(stats)).map(b => b.id));
+        const lockedCount = BADGES.length - unlockedIds.size;
         return (
-          <div style={{ marginTop: 20 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#888", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 12 }}>🏅 我的成就</div>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {unlocked.map(b => (
-                <div key={b.id} title={b.desc} style={{ background: "linear-gradient(135deg,#fef3c7,#fde68a)", border: "1.5px solid #fcd34d", borderRadius: 12, padding: "8px 14px", display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 20 }}>{b.emoji}</span>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e" }}>{b.name}</div>
-                    <div style={{ fontSize: 11, color: "#b45309" }}>{b.desc}</div>
-                  </div>
-                </div>
-              ))}
-              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", border: "1.5px dashed #ddd", borderRadius: 12, color: "#aaa", fontSize: 12 }}>
-                <span>🔒</span> 还有 {BADGES.length - unlocked.length} 个成就待解锁
-              </div>
+          <div style={{ marginTop: 28 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#444", letterSpacing: "0.04em" }}>🏅 成就徽章</div>
+              <div style={{ fontSize: 12, color: "#aaa" }}>{unlockedIds.size}/{BADGES.length} 已解锁</div>
             </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10 }}>
+              {BADGES.map(b => {
+                const unlocked = unlockedIds.has(b.id);
+                return (
+                  <div key={b.id} title={b.desc} style={{
+                    background: unlocked ? "linear-gradient(135deg,#fef3c7,#fde68a)" : "#f8f8f8",
+                    border: unlocked ? "1.5px solid #fcd34d" : "1.5px solid #eee",
+                    borderRadius: 14, padding: "12px 8px", display: "flex", flexDirection: "column",
+                    alignItems: "center", gap: 6, opacity: unlocked ? 1 : 0.45, transition: "all .2s",
+                    cursor: "default",
+                  }}>
+                    <span style={{ fontSize: 22, filter: unlocked ? "none" : "grayscale(1)" }}>{b.emoji}</span>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: unlocked ? "#92400e" : "#999", textAlign: "center", lineHeight: 1.3 }}>{b.name}</div>
+                    {!unlocked && <div style={{ fontSize: 10, color: "#bbb", textAlign: "center", lineHeight: 1.3 }}>{b.desc}</div>}
+                  </div>
+                );
+              })}
+            </div>
+            {lockedCount > 0 && <div style={{ marginTop: 10, fontSize: 12, color: "#aaa", textAlign: "center" }}>还有 {lockedCount} 枚徽章待解锁，继续学习吧 💪</div>}
           </div>
         );
       })()}
@@ -5140,6 +5174,7 @@ function MaterialChatPage({ setPage, profile }) {
   const [question, setQuestion] = useState("");
   const [chatting, setChatting] = useState(false);
   const [history, setHistory] = useState([]);
+  const [chatMode, setChatMode] = useState("chat");
   const chatEndRef = useRef(null);
   const selectedMaterial = materials.find(m => m.id === materialId);
 
@@ -5188,7 +5223,7 @@ function MaterialChatPage({ setPage, profile }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode: "chat",
+          mode: chatMode,
           question: askText,
           materialTitle: selected?.title || "本资料",
           materialContext: contextChunks || "",
@@ -5208,9 +5243,20 @@ function MaterialChatPage({ setPage, profile }) {
 
   return (
     <div style={{ padding: "2rem", maxWidth: 980, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-        <Btn size="sm" onClick={() => setPage("资料库")}>← 返回资料库</Btn>
-        <div style={{ fontSize: 22, fontWeight: 700 }}>资料对话学习</div>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+          <Btn size="sm" onClick={() => setPage("资料库")}>← 返回资料库</Btn>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>{chatMode === "tutor" ? "🤖 AI 复习助教" : "💬 资料对话"}</div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => { setChatMode("chat"); setHistory([]); }} style={{ padding: "7px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: chatMode === "chat" ? G.teal : "#f0f0f0", color: chatMode === "chat" ? "#fff" : "#666", border: "none", borderRadius: 20, cursor: "pointer" }}>💬 自由对话</button>
+          <button onClick={() => { setChatMode("tutor"); setHistory([]); }} style={{ padding: "7px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: chatMode === "tutor" ? G.purple : "#f0f0f0", color: chatMode === "tutor" ? "#fff" : "#666", border: "none", borderRadius: 20, cursor: "pointer" }}>🤖 复习助教</button>
+        </div>
+        {chatMode === "tutor" && (
+          <div style={{ marginTop: 12, padding: "12px 16px", background: "#F0F4FF", borderRadius: 12, border: "1px solid #C7D9FF", fontSize: 13, color: "#3B5998", lineHeight: 1.6 }}>
+            <strong>AI 复习助教模式：</strong>逐知识点教学+即时检验，适应你的节奏。试试：「帮我制定复习计划」「我不会XX，从零教我」
+          </div>
+        )}
       </div>
       <div style={{ ...s.card, marginBottom: 12 }}>
         <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>选择资料</div>
@@ -5234,10 +5280,22 @@ function MaterialChatPage({ setPage, profile }) {
           {history.length === 0 && (
             <div style={{ textAlign: "center", paddingTop: 60, color: "#bbb" }}>
               <div style={{ fontSize: 36, marginBottom: 12 }}>💬</div>
-              <div style={{ fontSize: 14, lineHeight: 1.8 }}>
-                可以问我：<br />
-                「这份资料的核心知识点是什么？」<br />
-                「请给我一道例题并详细讲解步骤」
+              <div style={{ fontSize: 14, lineHeight: 1.8, color: "#666" }}>
+                {chatMode === "tutor" ? (
+                  <>
+                    <div style={{ fontWeight: 600, marginBottom: 8, color: "#555" }}>🤖 AI 复习助教就绪</div>
+                    试试说：<br />
+                    「帮我制定 3 天复习计划」<br />
+                    「教我这份资料的第一章」<br />
+                    「我不会插值法，从零教我」
+                  </>
+                ) : (
+                  <>
+                    可以问我：<br />
+                    「这份资料的核心知识点是什么？」<br />
+                    「请给我一道例题并详细讲解步骤」
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -5248,7 +5306,7 @@ function MaterialChatPage({ setPage, profile }) {
                   {(profile?.name || "U")[0].toUpperCase()}
                 </div>
               ) : (
-                <div style={{ width: 34, height: 34, borderRadius: "50%", background: G.purple, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>📐</div>
+                <div style={{ width: 34, height: 34, borderRadius: "50%", background: chatMode === "tutor" ? G.blue : G.purple, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{chatMode === "tutor" ? "🤖" : "📐"}</div>
               )}
               <div style={{ maxWidth: "80%", background: m.role === "user" ? G.teal : "#fff", color: m.role === "user" ? "#fff" : "#222", borderRadius: m.role === "user" ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "10px 14px", fontSize: 14, lineHeight: 1.8, boxShadow: "0 1px 6px rgba(0,0,0,0.07)", border: m.role === "assistant" ? "1px solid #f0f0f0" : "none" }}>
                 <MathText text={m.text} />
@@ -6221,7 +6279,7 @@ export default function App() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f8f9fb" }}>
+    <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #f6fef9 0%, #f0f4ff 50%, #faf8ff 100%)" }}>
       <TopNav page={page} setPage={handleSetPage} profile={profile} onLogout={handleLogout} />
       {renderPage()}
     </div>

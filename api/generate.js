@@ -9,18 +9,40 @@ export default async function handler(req, res) {
 
   const GEMINI_KEY = process.env.GEMINI_KEY;
   const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY;
+  const GROQ_KEY = process.env.GROQ_KEY;
+  const DEEPSEEK_KEY = process.env.DEEPSEEK_KEY;
 
   const hasUserKey = userKey && String(userKey).trim().length > 8;
-  const effectiveProvider = hasUserKey ? (userProvider || "gemini") : null;
+  const effectiveProvider = hasUserKey ? (userProvider || "groq") : null;
+  const hasServerKey = GROQ_KEY || GEMINI_KEY || ANTHROPIC_KEY || DEEPSEEK_KEY;
 
-  if (!hasUserKey && !GEMINI_KEY && !ANTHROPIC_KEY) {
-    return res.status(500).json({ error: "未配置任何 API Key。请在首页点击「AI 设置」输入你的 API Key。" });
+  if (!hasUserKey && !hasServerKey) {
+    return res.status(500).json({ error: "暂无可用 AI 服务。请在首页点击「AI 设置」输入你的 API Key（推荐免费的 Groq）。" });
   }
 
-  // ── Chat 模式 prompt ───────────────────────────────────────────────────────
+  // ── Prompt 构建 ───────────────────────────────────────────────────────────
   const isChatMode = mode === "chat" && chatQuestion;
-  const prompt = isChatMode
-    ? `你是一位亲切、有趣的数学私教，正在陪伴学生一起学习《${materialTitle || "数学教材"}》。你的风格：温暖鼓励、循循善诱、像朋友一样交流。
+  const isTutorMode = mode === "tutor" && chatQuestion;
+
+  let prompt;
+  if (isTutorMode) {
+    prompt = `你是一位专业的数学期末复习助教，名叫"小核"，正在帮学生复习《${materialTitle || "数学课程"}》。
+
+${materialContext ? `【课程知识点】\n${materialContext}\n` : ""}
+【学生输入】${chatQuestion}
+
+【你的行为准则】
+1. 分析资料时，先指出哪些是必考题型、高频考点、低频考点，并用 【必考】【高频】【了解】 标注
+2. 每次只教一个知识点，教完立刻出2-3道检验题，不要一口气讲一整章
+3. 数学公式全部用 LaTeX：行内公式用 $公式$，独立公式用 $$公式$$
+4. 每道题讲解完要问"懂了吗？懂了我们继续，不懂告诉我哪里卡住了"
+5. 绝不直接给题目最终答案，先给提示，等学生回应
+6. 若学生说"我会了/下一个/跳过"，立刻执行不反复确认
+7. 在讲知识点前先展示"这个知识点在考试中长什么样"（真题示例格式），再教做法
+8. 鼓励为主，学生答对了要夸，答错了要分析原因（计算失误/公式误用/概念盲区）
+9. 用中文回复，控制在500字以内，生动有趣`;
+  } else if (isChatMode) {
+    prompt = `你是一位亲切、有趣的数学私教，正在陪伴学生一起学习《${materialTitle || "数学教材"}》。你的风格：温暖鼓励、循循善诱、像朋友一样交流。
 ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
 【学生问题】${chatQuestion}
 
@@ -30,17 +52,19 @@ ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
 3. 适当加入鼓励：如"这个问题问得很好！""你已经掌握了难点！""再理解一下这步就完全通了～"
 4. 如果问题比较复杂，结尾可以追问一下："还有哪里不清楚？" 或 "要不要我再出一道类似的题试试？"
 5. 绝对不要直接给最终答案（如果是在解题），先给提示引导学生思考
-6. 回答控制在 400 字以内，用中文，生动自然，避免机械罗列`
-    : `你是数学课程出题专家。请为"${chapter}"这个数学章节生成${count}道${type}。
+6. 回答控制在 400 字以内，用中文，生动自然，避免机械罗列`;
+  } else {
+    prompt = `你是数学课程出题专家。请为"${chapter}"这个数学章节生成${count}道${type}，所有题目和选项必须用中文。
 
 要求：
 - 题目紧贴数值分析或最优化理论内容，考察具体概念和计算
-- 单选题提供4个选项（A/B/C/D），干扰项合理
+- 单选题提供4个选项（A/B/C/D），干扰项合理，不要出现"与原文相反"或"教材未提及"等无意义选项
 - 判断题 options 设为 null，answer 为"正确"或"错误"
 - 每题附简短解析（40字以内）
 
 严格按以下 JSON 数组格式返回，不要有其他文字：
 [{"question":"题目内容","options":["A.选项1","B.选项2","C.选项3","D.选项4"],"answer":"A","explanation":"解析内容","type":"单选题"}]`;
+  }
 
   // ── OpenAI-compatible helper ───────────────────────────────────────────────
   const callOpenAICompat = async (baseUrl, key, model) => {
@@ -118,12 +142,23 @@ ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
     }
   }
 
-  // ── Priority 2: server Gemini key ─────────────────────────────────────────
+  // ── Priority 2: server Groq key ───────────────────────────────────────────
+  if (!responseText && GROQ_KEY) {
+    responseText = await callOpenAICompat("https://api.groq.com/openai/v1", GROQ_KEY, "llama-3.3-70b-versatile") || "";
+    if (!responseText) responseText = await callOpenAICompat("https://api.groq.com/openai/v1", GROQ_KEY, "llama-3.1-8b-instant") || "";
+  }
+
+  // ── Priority 3: server DeepSeek key ──────────────────────────────────────
+  if (!responseText && DEEPSEEK_KEY) {
+    responseText = await callOpenAICompat("https://api.deepseek.com", DEEPSEEK_KEY, "deepseek-chat") || "";
+  }
+
+  // ── Priority 4: server Gemini key ─────────────────────────────────────────
   if (!responseText && GEMINI_KEY) {
     responseText = await callGemini(GEMINI_KEY) || "";
   }
 
-  // ── Priority 3: server Anthropic key ──────────────────────────────────────
+  // ── Priority 5: server Anthropic key ──────────────────────────────────────
   if (!responseText && ANTHROPIC_KEY) {
     try {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -149,11 +184,11 @@ ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
   }
 
   if (!responseText) {
-    return res.status(500).json({ error: "AI 服务不可用。请在首页「AI 设置」配置 DeepSeek / Kimi / Groq / Gemini API Key。" });
+    return res.status(500).json({ error: "暂无可用 AI 服务。请在首页「AI 设置」配置 API Key（推荐免费的 Groq）。" });
   }
 
-  // Chat 模式：直接返回文本
-  if (isChatMode) {
+  // Chat / Tutor 模式：直接返回文本
+  if (isChatMode || isTutorMode) {
     return res.status(200).json({ answer: responseText.trim() });
   }
 
