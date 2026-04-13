@@ -2586,21 +2586,36 @@ const ProgressBar = ({ value, max = 100, color = G.teal, height = 8 }) => (
 // ── Email Confirmed Page ───────────────────────────────────────────────────────
 function EmailConfirmedPage({ onContinue }) {
   useEffect(() => {
-    const t = setTimeout(onContinue, 4000);
-    return () => clearTimeout(t);
-  }, [onContinue]);
+    // 清除 Supabase 自动建立的 session，要求用户手动登录
+    supabase.auth.signOut();
+  }, []);
+
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #f0fdf8 0%, #e8f4ff 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
-      <div style={{ textAlign: "center", maxWidth: 420 }}>
-        <div style={{ width: 80, height: 80, borderRadius: 24, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, margin: "0 auto 24px" }}>✉️</div>
-        <div style={{ fontSize: 28, fontWeight: 700, color: "#111", marginBottom: 12 }}>邮箱验证成功！</div>
-        <div style={{ fontSize: 16, color: "#555", lineHeight: 1.7, marginBottom: 28 }}>
-          你的账号已通过邮箱验证，现在可以登录 MathCore 开始学习了。
+      <div style={{ textAlign: "center", maxWidth: 440 }}>
+        {/* 图标 */}
+        <div style={{ width: 88, height: 88, borderRadius: 28, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44, margin: "0 auto 28px", boxShadow: "0 8px 32px rgba(29,158,117,0.25)" }}>✅</div>
+
+        <div style={{ fontSize: 28, fontWeight: 700, color: "#111", marginBottom: 12, letterSpacing: "-0.5px" }}>邮箱验证成功！</div>
+        <div style={{ fontSize: 16, color: "#555", lineHeight: 1.8, marginBottom: 32 }}>
+          你的账号已完成邮箱确认，可以关闭此页面，<br />回到 MathCore 网站进行登录。
         </div>
-        <div style={{ ...s.card, padding: "1.2rem 1.5rem", marginBottom: 20, background: G.tealLight }}>
-          <div style={{ fontSize: 14, color: G.tealDark }}>✓ 账号已激活，4 秒后自动跳转到登录页…</div>
+
+        <div style={{ background: "#fff", border: `1.5px solid ${G.teal}33`, borderRadius: 16, padding: "1.2rem 1.5rem", marginBottom: 28, textAlign: "left" }}>
+          <div style={{ fontSize: 13, color: "#666", lineHeight: 1.9 }}>
+            <div>1. 打开 <a href="https://mathcore-theta.vercel.app" style={{ color: G.teal, fontWeight: 600 }}>mathcore-theta.vercel.app</a></div>
+            <div>2. 用你注册时的邮箱和密码登录</div>
+            <div>3. 开始你的数学学习之旅 🎓</div>
+          </div>
         </div>
-        <button onClick={onContinue} style={{ padding: "12px 36px", fontSize: 15, fontWeight: 600, fontFamily: "inherit", background: G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer" }}>立即登录 →</button>
+
+        <button
+          onClick={onContinue}
+          style={{ padding: "14px 40px", fontSize: 16, fontWeight: 700, fontFamily: "inherit", background: G.teal, color: "#fff", border: "none", borderRadius: 14, cursor: "pointer", boxShadow: "0 4px 16px rgba(29,158,117,0.3)" }}
+        >
+          前往登录 →
+        </button>
+        <div style={{ marginTop: 14, fontSize: 13, color: "#aaa" }}>点击按钮或直接访问网站登录</div>
       </div>
     </div>
   );
