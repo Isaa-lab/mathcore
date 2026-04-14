@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 import katex from "katex";
+import { AnimatePresence, motion } from "framer-motion";
 import "katex/dist/katex.min.css";
 
 // Inject global CSS animations
@@ -11,13 +12,13 @@ import "katex/dist/katex.min.css";
   style.textContent = `
     * { box-sizing: border-box; }
     :root{
-      --mc-bg:#f7f8fa;
-      --mc-surface:#ffffff;
-      --mc-surface-soft:#f8fafc;
-      --mc-border:#e5e7eb;
-      --mc-text:#0f172a;
-      --mc-muted:#64748b;
-      --mc-primary:#1D9E75;
+      --mc-bg:#0B0F19;
+      --mc-surface:rgba(255,255,255,0.03);
+      --mc-surface-soft:rgba(255,255,255,0.04);
+      --mc-border:rgba(255,255,255,0.08);
+      --mc-text:#F8FAFC;
+      --mc-muted:#94A3B8;
+      --mc-primary:#8B5CF6;
       --mc-radius-sm:10px;
       --mc-radius-md:14px;
       --mc-radius-lg:18px;
@@ -26,21 +27,62 @@ import "katex/dist/katex.min.css";
       --mc-duration-fast:120ms;
       --mc-duration-normal:220ms;
       --mc-ease:cubic-bezier(.2,.7,.2,1);
-      /* Minimal professional scheme */
-      --bg-primary: #FFFFFF;
-      --bg-surface: #F9FAFB;
-      --text-main: #111827;
-      --text-muted: #6B7280;
-      --border-light: #E5E7EB;
-      --btn-black: #000000;
-      --btn-black-hover: #374151;
-      --btn-disabled-bg: #F3F4F6;
-      --btn-disabled-text: #9CA3AF;
-      --radius-sm: 4px;
-      --radius-md: 6px;
+      --bg-primary: #0B0F19;
+      --bg-surface: rgba(255, 255, 255, 0.03);
+      --text-main: #F8FAFC;
+      --text-muted: #94A3B8;
+      --border-light: rgba(255,255,255,0.08);
+      --btn-black: #111827;
+      --btn-black-hover: #1f2937;
+      --btn-disabled-bg: rgba(148, 163, 184, 0.18);
+      --btn-disabled-text: #94A3B8;
+      --radius-sm: 10px;
+      --radius-md: 14px;
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background:var(--mc-bg); color:var(--mc-text); }
+    body { margin:0; font-family: var(--font-sans); background:transparent; color:var(--mc-text); }
+    .glass-panel {
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 24px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+    .app-shell-dark {
+      min-height: 100vh;
+      display: flex;
+      gap: 16px;
+      padding: 16px;
+    }
+    .app-nav-rail {
+      width: 88px;
+      position: sticky;
+      top: 16px;
+      height: calc(100vh - 32px);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    .app-main-area {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .rail-icon-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.04);
+      color: #dbeafe;
+      font-size: 20px;
+      cursor: pointer;
+    }
     @keyframes popIn {
       0% { transform: scale(0.5); opacity: 0; }
       70% { transform: scale(1.08); opacity: 1; }
@@ -84,21 +126,28 @@ import "katex/dist/katex.min.css";
     }
     .btn-primary:hover { background-color: var(--btn-black-hover); }
     .chat-page-container {
-      max-width: 860px;
+      width: 100%;
       margin: 0 auto;
-      height: calc(100vh - 120px);
-      min-height: 620px;
+      min-height: 640px;
+      display: grid;
+      grid-template-columns: 7fr 3fr;
+      gap: 14px;
+    }
+    .chat-main-pane {
       display: flex;
       flex-direction: column;
-      background: var(--bg-primary);
-      border: 1px solid var(--border-light);
-      border-radius: 10px;
-      overflow: hidden;
+      min-height: 640px;
+    }
+    .chat-side-drawer {
+      padding: 14px;
+      height: 640px;
+      position: sticky;
+      top: 0;
     }
     .chat-header {
       padding: 16px 18px 12px;
       border-bottom: 1px solid var(--border-light);
-      background: #fff;
+      background: transparent;
     }
     .chat-title {
       margin: 0;
@@ -115,13 +164,13 @@ import "katex/dist/katex.min.css";
       flex: 1;
       overflow-y: auto;
       padding: 0 18px;
-      background: #fff;
+      background: transparent;
     }
     .message-block {
       display: flex;
       gap: 14px;
       padding: 18px 0;
-      border-bottom: 1px solid var(--border-light);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
       align-items: flex-start;
     }
     .message-avatar {
@@ -138,6 +187,16 @@ import "katex/dist/katex.min.css";
       font-weight: 700;
       flex-shrink: 0;
     }
+    .message-block.user { justify-content: flex-end; }
+    .message-block.user .message-content { max-width: 86%; color: #c7d2fe; text-align: right; }
+    .message-block.ai .message-content {
+      max-width: 94%;
+      border-left: 2px solid transparent;
+      border-image: linear-gradient(180deg, #a78bfa, #60a5fa) 1;
+      padding-left: 12px;
+      background: transparent;
+      border-radius: 0;
+    }
     .message-block.ai .message-avatar { background: #111827; color: #fff; border-color: #111827; }
     .message-content {
       flex: 1;
@@ -146,15 +205,9 @@ import "katex/dist/katex.min.css";
       line-height: 1.8;
       min-width: 0;
     }
-    .message-block.ai .message-content {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-light);
-      border-radius: var(--radius-md);
-      padding: 12px 14px;
-    }
     .chat-input-area {
       border-top: 1px solid var(--border-light);
-      background: #fff;
+      background: transparent;
       padding: 12px 18px;
     }
     .input-wrapper {
@@ -171,7 +224,7 @@ import "katex/dist/katex.min.css";
       padding: 10px 12px;
       font-family: inherit;
       resize: vertical;
-      background: var(--bg-primary);
+      background: rgba(15,23,42,0.65);
       color: var(--text-main);
       font-size: 14px;
       line-height: 1.6;
@@ -181,6 +234,25 @@ import "katex/dist/katex.min.css";
       background: var(--btn-disabled-bg);
       color: var(--btn-disabled-text);
       cursor: not-allowed;
+    }
+    .quiz-stage {
+      max-width: 980px;
+      margin: 0 auto;
+      padding-bottom: 16px;
+    }
+    .quiz-option-tile {
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.03);
+      border-radius: 16px;
+      padding: 16px 18px;
+      cursor: pointer;
+    }
+    .skill-node-pulse {
+      animation: mcPulse 2.2s ease-in-out infinite;
+    }
+    @keyframes mcPulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.06); opacity: 0.8; }
     }
   `
   document.head.appendChild(style);
@@ -4295,10 +4367,14 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   }
 
   if (!q) return null;
+  const isWrongAnswered = answered && (() => {
+    if (opts) return letters[selected] !== q.answer;
+    return !((selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误"));
+  })();
 
   // ── Quiz screen ──
   return (
-    <div style={{ padding: "0 0 16px", maxWidth: 900, margin: "0 auto" }}>
+    <div className="quiz-stage">
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
         <Btn size="sm" onClick={() => { setQuizMode(null); setFinished(false); }}>← 返回</Btn>
         <SectionCard style={{ flex: 1, padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -4316,12 +4392,12 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         </SectionCard>
       </div>
       <div style={{ fontSize: 12, color: "#ccc", textAlign: "right", marginBottom: 6 }}>⌨️ 1-4 选择 · Enter 提交</div>
-      <div style={{ ...s.card, marginBottom: 14 }}>
+      <div className="glass-panel" style={{ padding: 20, marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           <Badge color="blue">{q.type}</Badge>
           <Badge color="amber">{q.chapter}</Badge>
         </div>
-        <div style={{ fontSize: 18, color: "#111", lineHeight: 1.75, marginBottom: 12 }}><MathText text={q.question} /></div>
+        <div style={{ fontSize: 24, color: "var(--text-main)", lineHeight: 1.6, marginBottom: 16, fontWeight: 700 }}><MathText text={q.question} /></div>
         {/* AI Help button */}
         <div style={{ textAlign: "right", marginBottom: 14 }}>
           <button onClick={() => { setShowAIHelp(!showAIHelp); if (!showAIHelp) { setAIHelpReply(""); setAIHelpInput(""); } }}
@@ -4362,17 +4438,24 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         {opts && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {opts.map((opt, i) => {
-              let border = "2px solid #eee", bg = "#fafafa", col = "#333";
+              let border = "1px solid rgba(255,255,255,0.12)", bg = "rgba(255,255,255,0.03)", col = "#e2e8f0";
               if (answered) {
-                if (letters[i] === q.answer) { bg = G.tealLight; border = "2px solid "+G.teal; col = G.tealDark; }
-                else if (i === selected && letters[i] !== q.answer) { bg = G.redLight; border = "2px solid "+G.red; col = G.red; }
-              } else if (selected === i) { bg = G.tealLight; border = "2px solid "+G.teal; col = G.tealDark; }
+                if (letters[i] === q.answer) { bg = "rgba(16, 185, 129, 0.2)"; border = "1px solid rgba(16,185,129,0.9)"; col = "#a7f3d0"; }
+                else if (i === selected && letters[i] !== q.answer) { bg = "rgba(239, 68, 68, 0.2)"; border = "1px solid rgba(239,68,68,0.9)"; col = "#fecaca"; }
+              } else if (selected === i) { bg = "rgba(79, 70, 229, 0.25)"; border = "1px solid rgba(129,140,248,0.95)"; col = "#e0e7ff"; }
               return (
-                <div key={i} onClick={() => !answered && setSelected(i)} style={{ padding: "14px 18px", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 14, alignItems: "center" }}>
-                  <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid "+col+"44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, background: selected === i ? G.teal : "transparent", color: selected === i ? "#fff" : col }}>{letters[i]}</div>
-                  <span style={{ fontSize: 15, color: col }}><MathText text={opt} /></span>
+                <motion.div
+                  key={i}
+                  className="quiz-option-tile"
+                  whileHover={!answered ? { scale: 1.02 } : undefined}
+                  whileTap={!answered ? { scale: 0.95 } : undefined}
+                  onClick={() => !answered && setSelected(i)}
+                  style={{ border, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 14, alignItems: "center", boxShadow: answered && letters[i] === q.answer ? "0 0 20px rgba(16,185,129,0.35)" : "none" }}
+                >
+                  <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid "+col+"44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, background: selected === i ? "rgba(255,255,255,0.16)" : "transparent", color: col }}>{letters[i]}</div>
+                  <span style={{ fontSize: 16, color: col }}><MathText text={opt} /></span>
                   {answered && letters[i] === q.answer && <span style={{ marginLeft: "auto", color: G.teal }}>✓</span>}
-                </div>
+                </motion.div>
               );
             })}
           </div>
@@ -4387,6 +4470,21 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           </div>
         )}
       </div>
+      <AnimatePresence>
+      {isWrongAnswered && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0 }}
+          transition={{ duration: 0.35, ease: "easeOut" }}
+          className="glass-panel"
+          style={{ marginBottom: 12, padding: 14, overflow: "hidden", borderColor: "rgba(239,68,68,0.5)" }}
+        >
+          <div style={{ color: "#fca5a5", fontWeight: 700, marginBottom: 6 }}>AI 提示</div>
+          <div style={{ color: "var(--text-main)", lineHeight: 1.8 }}><MathText text={q.explanation || "先检查公式匹配关系，再从已知量逆推。"} /></div>
+        </motion.div>
+      )}
+      </AnimatePresence>
       {(showHint || answered) && (() => {
         // Error root cause analysis
         const isWrong = answered && (() => {
@@ -5770,7 +5868,17 @@ function MathText({ text }) {
           const cidx = parseInt(chartMatch[1]);
           try {
             const cfg = JSON.parse(chartBlocks[cidx]);
-            return <div key={i}><SimpleChart config={cfg} /></div>;
+            return (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, height: 0, scale: 0.98 }}
+                animate={{ opacity: 1, height: "auto", scale: 1 }}
+                transition={{ duration: 0.35, ease: "easeOut" }}
+                style={{ overflow: "hidden" }}
+              >
+                <SimpleChart config={cfg} />
+              </motion.div>
+            );
           } catch(e2) {
             return <div key={i} style={{ color: "#dc2626", fontSize: 12, padding: "6px 8px", background: "#fff5f5", borderRadius: 6 }}>
               图表解析失败: {String(e2.message)}
@@ -5865,93 +5973,78 @@ function MaterialChatPage({ setPage, profile }) {
     <div style={{ paddingBottom: 16 }}>
       <PageHeader
         title="AI 复习助教"
-        subtitle="文档流式对话，聚焦数学推导、图表和追问。"
+        subtitle="分屏智能终端：左侧沉浸式推导，右侧侧边抽屉控制。"
         onBack={() => setPage("资料库")}
         backText="返回资料库"
       />
       <div className="chat-page-container">
-        <header className="chat-header">
-          <h2 className="chat-title">AI 复习助教</h2>
-          <div className="chat-status">
-            当前上下文: {selectedMaterial ? `${selectedMaterial.title} · ${selectedMaterial.course || "未分类"}` : "未选择资料"}
-          </div>
-          <div style={{ marginTop: 10, display: "grid", gap: 8, gridTemplateColumns: "1fr auto auto auto auto" }}>
-            <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={{ ...s.input, marginBottom: 0 }}>
-              {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
-            </select>
-            <button className="btn-primary" onClick={() => { setChatMode("chat"); setHistory([]); }} style={{ background: chatMode === "chat" ? "var(--btn-black)" : "#6b7280" }}>
-              自由对话
-            </button>
-            <button className="btn-primary" onClick={() => { setChatMode("tutor"); setHistory([]); }} style={{ background: chatMode === "tutor" ? "var(--btn-black)" : "#6b7280" }}>
-              复习助教
-            </button>
-            <button className="btn-primary" onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))} disabled={!materialId || !selectedMaterial}>
-              去做题
-            </button>
-            <button className="btn-primary" onClick={() => setPage("知识点")}>
-              知识点
-            </button>
-          </div>
-        </header>
-
-        <div className="chat-history-scroll">
-          {history.length === 0 && (
-            <div style={{ padding: "28px 0", color: "var(--text-muted)", fontSize: 14, lineHeight: 1.8 }}>
-              {chatMode === "tutor"
-                ? "你可以直接输入：帮我制定 3 天复习计划；先从第一章讲起；我不会插值法，从零开始。"
-                : "你可以直接输入：这份资料的核心知识点是什么？请给我一道例题并详细讲解步骤。"}
+        <div className="chat-main-pane glass-panel">
+          <header className="chat-header">
+            <h2 className="chat-title">AI 复习助教</h2>
+            <div className="chat-status">
+              当前上下文: {selectedMaterial ? `${selectedMaterial.title} · ${selectedMaterial.course || "未分类"}` : "未选择资料"}
             </div>
-          )}
-          {history.map((m, idx) => {
-            const role = m.role === "user" ? "user" : "ai";
-            const avatarText = role === "user" ? ((profile?.name || "U")[0] || "U").toUpperCase() : "AI";
-            return (
-              <div key={idx} className={`message-block ${role}`}>
-                <div className="message-avatar">{avatarText}</div>
-                <div className="message-content">
-                  <RenderMathAndChart content={m.text} />
-                  {m.role === "assistant" && (
-                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button className="btn-primary" onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))}>
-                        做相关题目
-                      </button>
-                      <button className="btn-primary" onClick={() => setPage("知识点")}>
-                        看知识点
-                      </button>
-                    </div>
-                  )}
-                </div>
+          </header>
+          <div className="chat-history-scroll">
+            {history.length === 0 && (
+              <div style={{ padding: "28px 0", color: "var(--text-muted)", fontSize: 14, lineHeight: 1.8 }}>
+                {chatMode === "tutor"
+                  ? "你可以直接输入：帮我制定 3 天复习计划；先从第一章讲起；我不会插值法，从零开始。"
+                  : "你可以直接输入：这份资料的核心知识点是什么？请给我一道例题并详细讲解步骤。"}
               </div>
-            );
-          })}
-          {chatting && (
-            <div className="message-block ai">
-              <div className="message-avatar">AI</div>
-              <div className="message-content">正在思考...</div>
+            )}
+            {history.map((m, idx) => {
+              const role = m.role === "user" ? "user" : "ai";
+              const avatarText = role === "user" ? ((profile?.name || "U")[0] || "U").toUpperCase() : "AI";
+              return (
+                <div key={idx} className={`message-block ${role}`}>
+                  <div className="message-avatar">{avatarText}</div>
+                  <div className="message-content">
+                    <RenderMathAndChart content={m.text} />
+                  </div>
+                </div>
+              );
+            })}
+            {chatting && (
+              <div className="message-block ai">
+                <div className="message-avatar">AI</div>
+                <div className="message-content">正在思考...</div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+          <div className="chat-input-area">
+            <div className="input-wrapper">
+              <textarea
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !chatting) {
+                    e.preventDefault();
+                    ask();
+                  }
+                }}
+                placeholder="输入数学问题，或让 AI 生成复习提纲..."
+                className="clean-input"
+              />
+              <button className="btn-primary send-btn" onClick={ask} disabled={chatting || !materialId || !question.trim()}>
+                {chatting ? "发送中..." : "发送"}
+              </button>
             </div>
-          )}
-          <div ref={chatEndRef} />
-        </div>
-
-        <div className="chat-input-area">
-          <div className="input-wrapper">
-            <textarea
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !chatting) {
-                  e.preventDefault();
-                  ask();
-                }
-              }}
-              placeholder="输入数学问题，或让 AI 生成复习提纲..."
-              className="clean-input"
-            />
-            <button className="btn-primary send-btn" onClick={ask} disabled={chatting || !materialId || !question.trim()}>
-              {chatting ? "发送中..." : "发送"}
-            </button>
           </div>
         </div>
+        <aside className="chat-side-drawer glass-panel">
+          <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8 }}>侧边抽屉</div>
+          <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={{ ...s.input, marginBottom: 10, background: "rgba(15,23,42,0.5)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,0.12)" }}>
+            {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
+          </select>
+          <div style={{ display: "grid", gap: 8 }}>
+            <button className="btn-primary" onClick={() => { setChatMode("chat"); setHistory([]); }} style={{ background: chatMode === "chat" ? "#4f46e5" : "#1f2937" }}>自由对话</button>
+            <button className="btn-primary" onClick={() => { setChatMode("tutor"); setHistory([]); }} style={{ background: chatMode === "tutor" ? "#10b981" : "#1f2937" }}>复习助教</button>
+            <button className="btn-primary" onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))} disabled={!materialId || !selectedMaterial}>去做题</button>
+            <button className="btn-primary" onClick={() => setPage("知识点")}>知识点</button>
+          </div>
+        </aside>
       </div>
     </div>
   );
@@ -6665,10 +6758,10 @@ function SkillTreePage({ setPage }) {
   const filteredNodes = selectedCourse === "全部" ? SKILL_TREE : SKILL_TREE.filter(n => n.course === selectedCourse);
 
   const nodeStatusStyle = (status) => {
-    if (status === "mastered") return { bg: G.teal, border: G.tealDark, text: "#fff", shadow: "0 4px 16px " + G.teal + "66" };
-    if (status === "learning") return { bg: G.amber, border: G.amber, text: "#fff", shadow: "0 4px 12px " + G.amber + "55" };
-    if (status === "unlocked") return { bg: "#fff", border: G.blue, text: G.blue, shadow: "0 2px 8px rgba(0,0,0,0.1)" };
-    return { bg: "#f1f5f9", border: "#cbd5e1", text: "#94a3b8", shadow: "none" };
+    if (status === "mastered") return { bg: "rgba(6,182,212,0.22)", border: "#06b6d4", text: "#cffafe", shadow: "0 0 20px rgba(6, 182, 212, 0.6)" };
+    if (status === "learning") return { bg: "rgba(139,92,246,0.24)", border: "#8b5cf6", text: "#ede9fe", shadow: "0 0 14px rgba(139,92,246,0.45)" };
+    if (status === "unlocked") return { bg: "rgba(255,255,255,0.06)", border: "rgba(255,255,255,0.5)", text: "#cbd5e1", shadow: "0 0 10px rgba(148,163,184,0.3)" };
+    return { bg: "rgba(148,163,184,0.14)", border: "rgba(148,163,184,0.5)", text: "#94a3b8", shadow: "none" };
   };
 
   const masteredCount = SKILL_TREE.filter(n => mastery[n.id] === 2).length;
@@ -6738,21 +6831,19 @@ function SkillTreePage({ setPage }) {
                 onMouseEnter={() => setTooltip(node.id)}
                 onMouseLeave={() => setTooltip(null)}
                 style={{ cursor: status === "locked" ? "not-allowed" : "pointer" }}>
-                {/* Shadow */}
-                <rect x="2" y="3" width="118" height="70" rx="14" fill="rgba(0,0,0,0.06)" />
-                {/* Card */}
-                <rect x="0" y="0" width="118" height="70" rx="14"
-                  fill={st.bg} stroke={st.border} strokeWidth="2"
+                <circle
+                  cx="56"
+                  cy="56"
+                  r="40"
+                  fill={st.bg}
+                  stroke={st.border}
+                  strokeWidth="2"
+                  style={{ filter: `drop-shadow(${st.shadow})`, opacity: status === "locked" ? 0.3 : 1, animation: status === "learning" ? "mcPulse 2.2s ease-in-out infinite" : "none" }}
                 />
-                {/* Course color bar */}
-                <rect x="0" y="0" width="5" height="70" rx="3" fill={courseColor.border || "#ccc"} />
-                {/* Emoji */}
-                <text x="22" y="30" fontSize="16" textAnchor="middle" dominantBaseline="middle">{node.emoji}</text>
-                {/* Label */}
-                <text x="66" y="27" fontSize="11" fontWeight="700" fill={st.text} textAnchor="middle" dominantBaseline="middle" fontFamily="system-ui,sans-serif">{node.label}</text>
-                {/* Status */}
-                <text x="66" y="52" fontSize="10" fill={st.text} textAnchor="middle" dominantBaseline="middle" fontFamily="system-ui,sans-serif" opacity="0.8">
-                  {status === "mastered" ? "✅ 已掌握" : status === "learning" ? "📖 学习中" : status === "unlocked" ? "🔓 点击开始" : "🔒 待解锁"}
+                <text x="56" y="46" fontSize="18" textAnchor="middle" dominantBaseline="middle">{node.emoji}</text>
+                <text x="56" y="62" fontSize="10" fontWeight="700" fill={st.text} textAnchor="middle" dominantBaseline="middle" fontFamily="system-ui,sans-serif">{node.label}</text>
+                <text x="56" y="76" fontSize="9" fill={st.text} textAnchor="middle" dominantBaseline="middle" fontFamily="system-ui,sans-serif" opacity="0.85">
+                  {status === "mastered" ? "已掌握" : status === "learning" ? "学习中" : status === "unlocked" ? "可学习" : "未解锁"}
                 </text>
                 {/* Tooltip */}
                 {tooltip === node.id && (
@@ -6784,6 +6875,32 @@ function SkillTreePage({ setPage }) {
         })}
       </div>
     </div>
+  );
+}
+
+function GlassSideNav({ page, setPage }) {
+  const items = [
+    ["首页", "🏠"],
+    ["资料库", "📚"],
+    ["资料对话", "🤖"],
+    ["题库练习", "🧩"],
+    ["学习报告", "📈"],
+    ["技能树", "🌌"],
+  ];
+  return (
+    <nav className="app-nav-rail glass-panel">
+      {items.map(([name, icon]) => (
+        <button
+          key={name}
+          className="rail-icon-btn"
+          onClick={() => setPage(name)}
+          title={name}
+          style={page === name ? { outline: "2px solid #8b5cf6", background: "rgba(139,92,246,0.2)" } : undefined}
+        >
+          {icon}
+        </button>
+      ))}
+    </nav>
   );
 }
 
@@ -6900,9 +7017,22 @@ export default function App() {
   };
 
   return (
-    <AppShell>
-      <TopNav page={page} setPage={handleSetPage} profile={profile} onLogout={handleLogout} />
-      {renderPage()}
-    </AppShell>
+    <div className="app-shell-dark">
+      <GlassSideNav page={page} setPage={handleSetPage} />
+      <div className="app-main-area">
+        <TopNav page={page} setPage={handleSetPage} profile={profile} onLogout={handleLogout} />
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={page}
+            initial={{ opacity: 0, y: 20, filter: "blur(10px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: -20, filter: "blur(10px)" }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
+          >
+            {renderPage()}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    </div>
   );
 }
