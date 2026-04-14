@@ -10,7 +10,24 @@ import "katex/dist/katex.min.css";
   style.id = "mc-global-styles";
   style.textContent = `
     * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    :root{
+      --mc-bg:#f4f7fb;
+      --mc-surface:#ffffff;
+      --mc-surface-soft:#f8fafc;
+      --mc-border:#e6edf5;
+      --mc-text:#0f172a;
+      --mc-muted:#64748b;
+      --mc-primary:#1D9E75;
+      --mc-radius-sm:10px;
+      --mc-radius-md:14px;
+      --mc-radius-lg:18px;
+      --mc-shadow-soft:0 2px 14px rgba(15,23,42,0.05);
+      --mc-shadow-elevated:0 10px 30px rgba(15,23,42,0.08);
+      --mc-duration-fast:120ms;
+      --mc-duration-normal:220ms;
+      --mc-ease:cubic-bezier(.2,.7,.2,1);
+    }
+    body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background:var(--mc-bg); color:var(--mc-text); }
     @keyframes popIn {
       0% { transform: scale(0.5); opacity: 0; }
       70% { transform: scale(1.08); opacity: 1; }
@@ -28,6 +45,19 @@ import "katex/dist/katex.min.css";
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
+    .mc-page-enter { animation: fadeIn var(--mc-duration-normal) var(--mc-ease); }
+    .mc-hover-lift { transition: transform var(--mc-duration-fast) var(--mc-ease), box-shadow var(--mc-duration-fast) var(--mc-ease); }
+    .mc-hover-lift:hover { transform: translateY(-2px); box-shadow: var(--mc-shadow-elevated); }
+    .mc-skeleton {
+      background: linear-gradient(100deg,#f1f5f9 20%,#e2e8f0 40%,#f1f5f9 60%);
+      background-size: 200% 100%;
+      animation: mcShimmer 1.2s linear infinite;
+      border-radius: 10px;
+    }
+    @keyframes mcShimmer {
+      from { background-position: 200% 0; }
+      to { background-position: -200% 0; }
+    }
   `
   document.head.appendChild(style);
 })();
@@ -58,6 +88,49 @@ const G = {
   red: "#A32D2D", redLight: "#FCEBEB",
   purple: "#534AB7", purpleLight: "#EEEDFE",
 };
+
+const T = {
+  bg: "#f4f7fb",
+  panel: "#ffffff",
+  panelSoft: "#f8fafc",
+  border: "#e6edf5",
+  text: "#0f172a",
+  muted: "#64748b",
+  radius: { sm: 10, md: 14, lg: 18, xl: 24 },
+  shadow: { soft: "0 2px 14px rgba(15,23,42,0.05)", elevated: "0 10px 30px rgba(15,23,42,0.08)" },
+  gap: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
+};
+
+const AppShell = ({ children }) => (
+  <div style={{ minHeight: "100vh", background: `radial-gradient(1200px 500px at 0% -20%, #dff4ec 0%, transparent 55%), radial-gradient(1200px 500px at 100% -30%, #e4edff 0%, transparent 55%), ${T.bg}` }}>
+    <div style={{ maxWidth: 1240, margin: "0 auto", padding: "0 20px 28px" }} className="mc-page-enter">
+      {children}
+    </div>
+  </div>
+);
+
+const PageHeader = ({ title, subtitle, actions = null, backText = null, onBack = null }) => (
+  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 16, paddingTop: 12, flexWrap: "wrap" }}>
+    <div>
+      {onBack && <Btn size="sm" onClick={onBack} style={{ marginBottom: 10 }}>← {backText || "返回"}</Btn>}
+      <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.02em", color: T.text }}>{title}</div>
+      {subtitle && <div style={{ fontSize: 14, color: T.muted, marginTop: 6 }}>{subtitle}</div>}
+    </div>
+    {actions && <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>{actions}</div>}
+  </div>
+);
+
+const SectionCard = ({ children, style = {} }) => (
+  <div className="mc-hover-lift" style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: T.radius.lg, boxShadow: T.shadow.soft, padding: "1.1rem 1.2rem", ...style }}>
+    {children}
+  </div>
+);
+
+const ActionBar = ({ children }) => (
+  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+    {children}
+  </div>
+);
 
 // ── Badge System ─────────────────────────────────────────────────────────────
 const BADGES = [
@@ -2835,9 +2908,9 @@ const CHAPTERS = [
 
 // ── Shared UI ─────────────────────────────────────────────────────────────────
 const s = {
-  card: { background: "#fff", border: "1px solid #f0f0f0", borderRadius: 20, padding: "1.6rem", boxShadow: "0 2px 16px rgba(0,0,0,0.05)" },
-  input: { width: "100%", fontSize: 15, padding: "13px 16px", border: "1.5px solid #e5e5e7", borderRadius: 12, fontFamily: "inherit", boxSizing: "border-box", outline: "none", color: "#111", background: "#fafafa" },
-  label: { fontSize: 13, color: "#555", marginBottom: 8, display: "block", fontWeight: 600, letterSpacing: "0.01em" },
+  card: { background: T.panel, border: `1px solid ${T.border}`, borderRadius: T.radius.lg, padding: "1.2rem", boxShadow: T.shadow.soft },
+  input: { width: "100%", fontSize: 15, padding: "12px 14px", border: `1.5px solid ${T.border}`, borderRadius: T.radius.md, fontFamily: "inherit", boxSizing: "border-box", outline: "none", color: T.text, background: T.panelSoft },
+  label: { fontSize: 13, color: T.muted, marginBottom: 8, display: "block", fontWeight: 600, letterSpacing: "0.01em" },
 };
 
 const Btn = ({ children, onClick, variant = "outline", size = "md", disabled = false, style = {} }) => {
@@ -3098,35 +3171,40 @@ function TopNav({ page, setPage, profile, onLogout }) {
   const [showMore, setShowMore] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showPwdModal, setShowPwdModal] = useState(false);
-  const primaryLinks = ["首页", "资料库", "知识点", "资料对话", "题库练习", "学习报告"];
+  const primaryLinks = ["首页", "资料对话", "题库练习", "学习报告", "资料库"];
   const moreLinks = profile?.role === "teacher"
-    ? ["上传资料", "技能树", "记忆卡片", "错题本", "教师管理"]
-    : ["上传资料", "技能树", "记忆卡片", "错题本"];
+    ? ["知识点", "记忆卡片", "错题本", "技能树", "上传资料", "教师管理"]
+    : ["知识点", "记忆卡片", "错题本", "技能树", "上传资料"];
   const isActive = (l) => page === l;
   return (
-    <div style={{ background: "rgba(255,255,255,0.92)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", borderBottom: "1px solid rgba(0,0,0,0.06)", padding: "0 2rem", display: "flex", alignItems: "center", justifyContent: "space-between", height: 60, position: "sticky", top: 0, zIndex: 100, boxShadow: "0 2px 16px rgba(0,0,0,0.04)" }}>
+    <div style={{ position: "sticky", top: 0, zIndex: 100, marginBottom: 16 }}>
+      <div style={{ margin: "10px auto 0", background: "rgba(255,255,255,0.86)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)", border: `1px solid ${T.border}`, borderRadius: 18, boxShadow: T.shadow.soft, padding: "8px 12px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, minHeight: 50 }}>
       <div onClick={() => setPage("首页")} style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flexShrink: 0 }}>
-        <div style={{ width: 36, height: 36, borderRadius: 10, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#1D9E75,#185FA5)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
             <path d="M17 4H6L11.5 11L6 18H17" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </div>
-        <span style={{ fontSize: 18, fontWeight: 800, color: "#111", letterSpacing: "-0.5px" }}>MathCore</span>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: "#111", letterSpacing: "-0.5px", lineHeight: 1.1 }}>MathCore</div>
+          <div style={{ fontSize: 11, color: "#8391a1", marginTop: 2 }}>AI 数学学习工作台</div>
+        </div>
       </div>
-      <div style={{ display: "flex", gap: 1, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap", justifyContent: "center" }}>
         {primaryLinks.map(l => (
-          <button key={l} onClick={() => setPage(l)} style={{ padding: "8px 14px", borderRadius: 9, fontSize: 14, fontFamily: "inherit", border: "none", cursor: "pointer", fontWeight: isActive(l) ? 700 : 400, background: isActive(l) ? G.tealLight : "transparent", color: isActive(l) ? G.tealDark : "#444", whiteSpace: "nowrap" }}>
+          <button key={l} onClick={() => setPage(l)} style={{ padding: "8px 13px", borderRadius: 10, fontSize: 14, fontFamily: "inherit", border: "none", cursor: "pointer", fontWeight: isActive(l) ? 700 : 500, background: isActive(l) ? "#e9f5ff" : "transparent", color: isActive(l) ? "#0f5fa8" : "#3a4a5d", whiteSpace: "nowrap" }}>
             {l === "资料对话" ? "🤖 AI助教" : l}
           </button>
         ))}
         <div style={{ position: "relative" }}>
-          <button onClick={() => setShowMore(v => !v)} style={{ padding: "7px 13px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", background: moreLinks.includes(page) ? G.tealLight : "transparent", color: moreLinks.includes(page) ? G.tealDark : "#555" }}>
+          <button onClick={() => setShowMore(v => !v)} style={{ padding: "7px 12px", borderRadius: 9, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", background: moreLinks.includes(page) ? "#eefdf7" : "transparent", color: moreLinks.includes(page) ? G.tealDark : "#5b6677" }}>
             更多 ▾
           </button>
           {showMore && (
-            <div onMouseLeave={() => setShowMore(false)} style={{ position: "absolute", top: "100%", right: 0, background: "#fff", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.12)", border: "1px solid #eee", padding: "8px 6px", minWidth: 140, zIndex: 200 }}>
+            <div onMouseLeave={() => setShowMore(false)} style={{ position: "absolute", top: "100%", right: 0, background: "#fff", borderRadius: 12, boxShadow: T.shadow.elevated, border: `1px solid ${T.border}`, padding: "8px 6px", minWidth: 150, zIndex: 200 }}>
               {moreLinks.map(l => (
-                <button key={l} onClick={() => { setPage(l); setShowMore(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", background: page === l ? G.tealLight : "transparent", color: page === l ? G.tealDark : "#555", fontWeight: page === l ? 600 : 400 }}>{l}</button>
+                <button key={l} onClick={() => { setPage(l); setShowMore(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", background: page === l ? "#f1f5f9" : "transparent", color: page === l ? "#0f172a" : "#555", fontWeight: page === l ? 700 : 500 }}>{l}</button>
               ))}
             </div>
           )}
@@ -3158,6 +3236,15 @@ function TopNav({ page, setPage, profile, onLogout }) {
             >🚪 退出登录</button>
           </div>
         )}
+      </div>
+      </div>
+      <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", paddingLeft: 48 }}>
+        {moreLinks.map(l => (
+          <button key={l} onClick={() => setPage(l)} style={{ padding: "5px 10px", borderRadius: 999, border: `1px solid ${isActive(l) ? "#b9e6d8" : "#e2e8f0"}`, background: isActive(l) ? "#ecfdf5" : "#fff", color: isActive(l) ? G.tealDark : "#64748b", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
+            {l}
+          </button>
+        ))}
+      </div>
       </div>
     </div>
   );
@@ -3552,7 +3639,7 @@ function KnowledgePage({ setPage, setChapterFilter }) {
           course={selectedTopicMeta?.course}
         />
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16, padding: "2rem", maxWidth: 1200, margin: "0 auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16, padding: "0 0 18px", maxWidth: 1200, margin: "0 auto" }}>
         <div style={{ ...s.card, padding: "1rem 0", height: "fit-content" }}>
           <div style={{ padding: "8px 14px 12px", borderBottom: "1px solid #f0f0f0", marginBottom: 8 }}>
             <div style={{ fontSize: 13, color: "#666", fontWeight: 700 }}>资料知识库</div>
@@ -3969,14 +4056,14 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       </div>
     </div>
   )}
-  if (loading) return <div style={{ padding: "4rem", textAlign: "center", color: "#888" }}>加载题目中…</div>;
+  if (loading) return <div style={{ padding: "2rem", maxWidth: 820, margin: "0 auto" }}><div className="mc-skeleton" style={{ height: 180 }} /></div>;
 
   // ── Setup screen ──
   if (!quizMode) return (
-    <div style={{ padding: "2rem", maxWidth: 780, margin: "0 auto" }}>
-      <Btn size="sm" onClick={() => setPage("首页")} style={{ marginBottom: 20 }}>← 返回</Btn>
-      <div style={{ ...s.card, padding: "2rem" }}>
-        <div style={{ fontSize: 22, fontWeight: 700, color: "#111", marginBottom: 4 }}>✏️ 练习设置</div>
+    <div style={{ padding: "0 0 16px", maxWidth: 900, margin: "0 auto" }}>
+      <PageHeader title="题库练习设置" subtitle="沉浸式做题模式，按章节与题型精准训练。" onBack={() => setPage("首页")} />
+      <SectionCard style={{ padding: "1.3rem" }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#111", marginBottom: 4 }}>练习设置</div>
         {materialId ? (
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: G.blueLight, borderRadius: 10, marginBottom: 20, border: "1.5px solid " + G.blue + "44" }}>
             <div style={{ fontSize: 20 }}>📄</div>
@@ -4095,7 +4182,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           </button>
         )}
         <div style={{ fontSize: 12, color: "#aaa", textAlign: "center", marginTop: 10 }}>⌨️ 键盘：1-4 选择 · Enter 提交/下一题</div>
-      </div>
+      </SectionCard>
     </div>
   );
 
@@ -4105,8 +4192,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     const cwrong = {};
     wrongList.forEach(w => { cwrong[w.chapter] = (cwrong[w.chapter] || 0) + 1; });
     return (
-      <div style={{ padding: "2rem", maxWidth: 700, margin: "0 auto" }}>
-        <div style={{ ...s.card, padding: "2.5rem" }}>
+      <div style={{ padding: "0 0 16px", maxWidth: 760, margin: "0 auto" }}>
+        <PageHeader title="练习结果" subtitle="复盘错误原因，继续强化薄弱点。" onBack={() => { setQuizMode(null); setFinished(false); }} backText="返回设置" />
+        <SectionCard style={{ padding: "2rem" }}>
           <div style={{ textAlign: "center", marginBottom: 24 }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>{pct >= 80 ? "🎉" : pct >= 60 ? "👍" : "💪"}</div>
             <div style={{ fontSize: 24, fontWeight: 700, color: "#111", marginBottom: 6 }}>练习完成！</div>
@@ -4137,7 +4225,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             <Btn onClick={() => { setQuizMode(null); setFinished(false); }}>再练一次</Btn>
             <Btn variant="primary" onClick={() => setPage("学习报告")}>查看报告</Btn>
           </div>
-        </div>
+        </SectionCard>
       </div>
     );
   }
@@ -4146,10 +4234,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   // ── Quiz screen ──
   return (
-    <div style={{ padding: "2rem", maxWidth: 820, margin: "0 auto" }}>
+    <div style={{ padding: "0 0 16px", maxWidth: 900, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
         <Btn size="sm" onClick={() => { setQuizMode(null); setFinished(false); }}>← 返回</Btn>
-        <div style={{ ...s.card, flex: 1, padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <SectionCard style={{ flex: 1, padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 600 }}>第 {current + 1} / {displayQ.length} 题</div>
             <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{q.chapter} · {q.type}</div>
@@ -4161,7 +4249,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
               <div style={{ height: 6, background: G.teal, borderRadius: 3, width: ((current+1)/displayQ.length*100)+"%" }} />
             </div>
           </div>
-        </div>
+        </SectionCard>
       </div>
       <div style={{ fontSize: 12, color: "#ccc", textAlign: "right", marginBottom: 6 }}>⌨️ 1-4 选择 · Enter 提交</div>
       <div style={{ ...s.card, marginBottom: 14 }}>
@@ -4341,13 +4429,16 @@ function FlashcardPage({ setPage }) {
   }, [flipped, idx, filtered.length, card]);
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 720, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
-        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
-        <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>记忆卡片</div>
-        <Badge color="purple">{filtered.length} 张</Badge>
-        {known.size > 0 && <Badge color="teal">已掌握 {known.size} 张</Badge>}
-      </div>
+    <div style={{ padding: "0 0 18px", maxWidth: 760, margin: "0 auto" }}>
+      <PageHeader
+        title="记忆卡片"
+        subtitle="基于间隔重复巩固记忆，降低遗忘曲线。"
+        onBack={() => setPage("首页")}
+        actions={<>
+          <Badge color="purple">{filtered.length} 张</Badge>
+          {known.size > 0 && <Badge color="teal">已掌握 {known.size} 张</Badge>}
+        </>}
+      />
 
       <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
         {chapters.map(c => (
@@ -4617,15 +4708,16 @@ function ReportPage({ setPage, setChapterFilter }) {
   const gridLevels = [0.25, 0.5, 0.75, 1.0];
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 960, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
-        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
-        <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>📊 学习报告</div>
-        {!hasRealData && <span style={{ fontSize: 12, background: G.amberLight, color: G.amber, padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>演示数据 — 完成题库练习后显示真实数据</span>}
-        <div style={{ marginLeft: "auto" }}>
+    <div style={{ padding: "0 0 20px", maxWidth: 1040, margin: "0 auto" }}>
+      <PageHeader
+        title="学习报告"
+        subtitle="掌握度、薄弱点与备考行动建议一屏查看。"
+        onBack={() => setPage("首页")}
+        actions={<>
+          {!hasRealData && <span style={{ fontSize: 12, background: G.amberLight, color: G.amber, padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>演示数据 — 完成题库练习后显示真实数据</span>}
           <Btn size="sm" onClick={() => { if (window.confirm("确定重置本地答题记录？")) { localStorage.removeItem("mc_answers"); window.location.reload(); } }}>重置记录</Btn>
-        </div>
-      </div>
+        </>}
+      />
 
       {/* ── 备考计划（页面顶部） ── */}
       <ExamPlanSection weak={weak} setPage={setPage} setChapterFilter={setChapterFilter} />
@@ -4653,7 +4745,7 @@ function ReportPage({ setPage, setChapterFilter }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         {/* 雷达图 */}
-        <div style={{ ...s.card }}>
+        <SectionCard>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>📡 能力雷达图</div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <svg width="220" height="220" viewBox="0 0 220 220">
@@ -4688,10 +4780,10 @@ function ReportPage({ setPage, setChapterFilter }) {
               ))}
             </div>
           </div>
-        </div>
+        </SectionCard>
 
         {/* 章节掌握度 */}
-        <div style={{ ...s.card }}>
+        <SectionCard>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>📚 章节掌握度</div>
           {stats.map((c, i) => {
             const p = Math.round(c.correct / c.total * 100);
@@ -4707,12 +4799,12 @@ function ReportPage({ setPage, setChapterFilter }) {
               </div>
             );
           })}
-        </div>
+        </SectionCard>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         {/* 薄弱章节 */}
-        <div style={{ ...s.card }}>
+        <SectionCard>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>⚠️ 薄弱章节（优先复习）</div>
           {weak.map((c, i) => {
             const p = Math.round(c.correct / c.total * 100);
@@ -4734,11 +4826,11 @@ function ReportPage({ setPage, setChapterFilter }) {
           <div style={{ marginTop: 14, padding: "12px 14px", background: G.amberLight, borderRadius: 10, fontSize: 13, color: "#92400e", lineHeight: 1.7 }}>
             💡 <strong>建议：</strong>从 <strong>{weak[0]?.name.split(" ")[0] || "薄弱章节"}</strong> 开始，先看知识点卡片，再做 5 题巩固！
           </div>
-        </div>
+        </SectionCard>
 
         {/* 优势 + 学习计划 */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ ...s.card }}>
+          <SectionCard>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>🌟 优势章节</div>
             {strong.map((c, i) => (
               <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: i < strong.length-1 ? "1px solid #f5f5f5" : "none" }}>
@@ -4749,7 +4841,7 @@ function ReportPage({ setPage, setChapterFilter }) {
             <div style={{ marginTop: 12, padding: "10px 12px", background: G.tealLight, borderRadius: 10, fontSize: 13, color: "#065f46" }}>
               🎊 {strong[0]?.name.split(" ")[0]} 已达优秀水平！
             </div>
-          </div>
+          </SectionCard>
 
           <div style={{ ...s.card }}>
             <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>🗓️ 今日计划</div>
@@ -4893,14 +4985,8 @@ function UploadPage({ setPage, profile }) {
   };
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 680, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 28 }}>
-        <Btn size="sm" onClick={() => setPage("资料库")}>← 资料库</Btn>
-        <div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: "#111" }}>上传资料</div>
-          <div style={{ fontSize: 14, color: "#888", marginTop: 2 }}>上传后所有用户均可在资料库查看、做笔记</div>
-        </div>
-      </div>
+    <div style={{ padding: "0 0 18px", maxWidth: 760, margin: "0 auto" }}>
+      <PageHeader title="上传资料" subtitle="上传后可自动解析知识点并生成题目。" onBack={() => setPage("资料库")} backText="资料库" />
 
       <div style={{ ...s.card, padding: "2rem" }}>
         {/* 资料名称 */}
@@ -5129,12 +5215,12 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
   };
 
   if (drillMode) return (
-    <div style={{ padding: "2rem", maxWidth: 780, margin: "0 auto" }}>
+    <div style={{ padding: "0 0 18px", maxWidth: 800, margin: "0 auto" }}>
       <WrongDrill questions={remaining.slice(drillStart)} onExit={() => setDrillMode(false)} onMastered={id => setMastered(s => new Set([...s, id]))} />
     </div>
   );
   if (aiDrillMode && aiWrongQs.length > 0) return (
-    <div style={{ padding: "2rem", maxWidth: 780, margin: "0 auto" }}>
+    <div style={{ padding: "0 0 18px", maxWidth: 800, margin: "0 auto" }}>
       <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
         <Btn onClick={() => setAiDrillMode(false)}>← 返回错题本</Btn>
         <span style={{ fontSize: 16, fontWeight: 700, color: G.blue }}>🤖 AI 变式题专项练习</span>
@@ -5144,13 +5230,16 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
   );
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
-        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
-        <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>错题本 & 薄弱分析</div>
-        {remaining.length > 0 && <Badge color="red">{remaining.length} 题</Badge>}
-        {mastered.size > 0 && <Badge color="teal">已掌握 {mastered.size}</Badge>}
-      </div>
+    <div style={{ padding: "0 0 18px", maxWidth: 960, margin: "0 auto" }}>
+      <PageHeader
+        title="错题本与薄弱分析"
+        subtitle="针对错因生成变式训练，闭环强化。"
+        onBack={() => setPage("首页")}
+        actions={<>
+          {remaining.length > 0 && <Badge color="red">{remaining.length} 题</Badge>}
+          {mastered.size > 0 && <Badge color="teal">已掌握 {mastered.size}</Badge>}
+        </>}
+      />
 
       {/* Weak chapter stats from session */}
       {weakChapters.length > 0 && (
@@ -5299,7 +5388,7 @@ function MaterialsPage({ setPage, profile }) {
   const filtered = materials.filter(m => (filter === "全部" || m.course === filter) && (!search.trim() || [m.title, m.course, m.description].some(s => s && s.toLowerCase().includes(search.toLowerCase()))));
 
   if (selected) return (
-    <div style={{ padding: "2rem", maxWidth: 1100, margin: "0 auto" }}>
+    <div style={{ padding: "0 0 18px", maxWidth: 1140, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
         <Btn size="sm" onClick={() => setSelected(null)}>← 返回资料库</Btn>
         <div style={{ fontSize: 20, fontWeight: 700, color: "#111" }}>{selected.title}</div>
@@ -5309,7 +5398,7 @@ function MaterialsPage({ setPage, profile }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 16 }}>
         {/* PDF Viewer */}
-        <div style={{ ...s.card, padding: 0, overflow: "hidden" }}>
+        <SectionCard style={{ padding: 0, overflow: "hidden" }}>
           {selected.file_data ? (
             <iframe
               src={selected.file_data}
@@ -5323,7 +5412,7 @@ function MaterialsPage({ setPage, profile }) {
               <div style={{ fontSize: 13 }}>请联系教师重新上传</div>
             </div>
           )}
-        </div>
+        </SectionCard>
 
         {/* Notes panel */}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -5393,7 +5482,7 @@ function MaterialsPage({ setPage, profile }) {
   );
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 1000, margin: "0 auto" }}>
+    <div style={{ padding: "0 0 18px", maxWidth: 1040, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
           <div style={{ fontSize: 26, fontWeight: 700, color: "#111", marginBottom: 4 }}>📚 教材资料库</div>
@@ -5704,12 +5793,14 @@ function MaterialChatPage({ setPage, profile }) {
   };
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 980, margin: "0 auto" }}>
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-          <Btn size="sm" onClick={() => setPage("资料库")}>← 返回资料库</Btn>
-          <div style={{ fontSize: 20, fontWeight: 700 }}>{chatMode === "tutor" ? "🤖 AI 复习助教" : "💬 资料对话"}</div>
-        </div>
+    <div style={{ padding: "0 0 20px" }}>
+      <PageHeader
+        title={chatMode === "tutor" ? "AI 复习助教" : "资料对话"}
+        subtitle="围绕当前资料连续对话，支持图表、公式与追问。"
+        onBack={() => setPage("资料库")}
+        backText="返回资料库"
+      />
+      <SectionCard style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={() => { setChatMode("chat"); setHistory([]); }} style={{ padding: "7px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: chatMode === "chat" ? G.teal : "#f0f0f0", color: chatMode === "chat" ? "#fff" : "#666", border: "none", borderRadius: 20, cursor: "pointer" }}>💬 自由对话</button>
           <button onClick={() => { setChatMode("tutor"); setHistory([]); }} style={{ padding: "7px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: chatMode === "tutor" ? G.purple : "#f0f0f0", color: chatMode === "tutor" ? "#fff" : "#666", border: "none", borderRadius: 20, cursor: "pointer" }}>🤖 复习助教</button>
@@ -5719,8 +5810,9 @@ function MaterialChatPage({ setPage, profile }) {
             <strong>AI 复习助教模式：</strong>逐知识点教学+即时检验，适应你的节奏。试试：「帮我制定复习计划」「我不会XX，从零教我」
           </div>
         )}
-      </div>
-      <div style={{ ...s.card, marginBottom: 12 }}>
+      </SectionCard>
+      <div style={{ display: "grid", gridTemplateColumns: "290px 1fr", gap: 12 }}>
+      <SectionCard style={{ height: "fit-content" }}>
         <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>选择资料</div>
         <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={s.input}>
           {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
@@ -5736,8 +5828,8 @@ function MaterialChatPage({ setPage, profile }) {
           </Btn>
           <Btn size="sm" onClick={() => setPage("知识点")}>看知识点卡片</Btn>
         </div>
-      </div>
-      <div style={{ ...s.card, padding: 0, overflow: "hidden" }}>
+      </SectionCard>
+      <SectionCard style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 0, minHeight: 400, maxHeight: 480, overflowY: "auto", padding: "16px 16px 8px" }}>
           {history.length === 0 && (
             <div style={{ textAlign: "center", paddingTop: 60, color: "#bbb" }}>
@@ -5793,6 +5885,7 @@ function MaterialChatPage({ setPage, profile }) {
           <input value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !chatting) ask(); }} placeholder="输入你的问题，按 Enter 发送…" style={{ ...s.input, marginBottom: 0, flex: 1 }} />
           <Btn variant="primary" onClick={ask} disabled={chatting || !materialId || !question.trim()}>{chatting ? "…" : "发送"}</Btn>
         </div>
+      </SectionCard>
       </div>
     </div>
   );
@@ -6191,7 +6284,7 @@ function TeacherPage({ setPage, profile }) {
   const sel = { width: "100%", fontSize: 14, padding: "11px 12px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontFamily: "inherit", background: "#fff", color: "#111" };
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 1020, margin: "0 auto" }}>
+    <div style={{ padding: "0 0 18px", maxWidth: 1060, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 24 }}>
         <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
         <div style={{ fontSize: 22, fontWeight: 700, color: "#111" }}>教师管理</div>
@@ -6520,7 +6613,7 @@ function SkillTreePage({ setPage }) {
   const maxY = Math.max(...filteredNodes.map(n => n.y)) + 100;
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 1200, margin: "0 auto" }}>
+    <div style={{ padding: "0 0 18px", maxWidth: 1240, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
         <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
         <div style={{ fontSize: 22, fontWeight: 700 }}>🌳 知识技能树</div>
@@ -6741,9 +6834,9 @@ export default function App() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #f6fef9 0%, #f0f4ff 50%, #faf8ff 100%)" }}>
+    <AppShell>
       <TopNav page={page} setPage={handleSetPage} profile={profile} onLogout={handleLogout} />
       {renderPage()}
-    </div>
+    </AppShell>
   );
 }
