@@ -26,6 +26,19 @@ import "katex/dist/katex.min.css";
       --mc-duration-fast:120ms;
       --mc-duration-normal:220ms;
       --mc-ease:cubic-bezier(.2,.7,.2,1);
+      /* Minimal professional scheme */
+      --bg-primary: #FFFFFF;
+      --bg-surface: #F9FAFB;
+      --text-main: #111827;
+      --text-muted: #6B7280;
+      --border-light: #E5E7EB;
+      --btn-black: #000000;
+      --btn-black-hover: #374151;
+      --btn-disabled-bg: #F3F4F6;
+      --btn-disabled-text: #9CA3AF;
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background:var(--mc-bg); color:var(--mc-text); }
     @keyframes popIn {
@@ -57,6 +70,117 @@ import "katex/dist/katex.min.css";
     @keyframes mcShimmer {
       from { background-position: 200% 0; }
       to { background-position: -200% 0; }
+    }
+    .btn-primary {
+      background-color: var(--btn-black);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 8px 16px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+      font-family: inherit;
+    }
+    .btn-primary:hover { background-color: var(--btn-black-hover); }
+    .chat-page-container {
+      max-width: 860px;
+      margin: 0 auto;
+      height: calc(100vh - 120px);
+      min-height: 620px;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-primary);
+      border: 1px solid var(--border-light);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .chat-header {
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--border-light);
+      background: #fff;
+    }
+    .chat-title {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--text-main);
+    }
+    .chat-status {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .chat-history-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 18px;
+      background: #fff;
+    }
+    .message-block {
+      display: flex;
+      gap: 14px;
+      padding: 18px 0;
+      border-bottom: 1px solid var(--border-light);
+      align-items: flex-start;
+    }
+    .message-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 1px solid var(--border-light);
+      color: #475569;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .message-block.ai .message-avatar { background: #111827; color: #fff; border-color: #111827; }
+    .message-content {
+      flex: 1;
+      color: var(--text-main);
+      font-size: 14px;
+      line-height: 1.8;
+      min-width: 0;
+    }
+    .message-block.ai .message-content {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+    }
+    .chat-input-area {
+      border-top: 1px solid var(--border-light);
+      background: #fff;
+      padding: 12px 18px;
+    }
+    .input-wrapper {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .clean-input {
+      flex: 1;
+      min-height: 44px;
+      max-height: 120px;
+      border: 1px solid var(--border-light);
+      border-radius: var(--radius-md);
+      padding: 10px 12px;
+      font-family: inherit;
+      resize: vertical;
+      background: var(--bg-primary);
+      color: var(--text-main);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .clean-input:focus { outline: none; border-color: var(--text-main); }
+    .send-btn:disabled {
+      background: var(--btn-disabled-bg);
+      color: var(--btn-disabled-text);
+      cursor: not-allowed;
     }
   `
   document.head.appendChild(style);
@@ -5658,6 +5782,11 @@ function MathText({ text }) {
     </span>
   );
 }
+
+function RenderMathAndChart({ content }) {
+  return <MathText text={content || ""} />;
+}
+
 function MaterialChatPage({ setPage, profile }) {
   const [materials, setMaterials] = useState([]);
   const [materialId, setMaterialId] = useState("");
@@ -5733,99 +5862,96 @@ function MaterialChatPage({ setPage, profile }) {
   };
 
   return (
-    <div style={{ padding: "0 0 20px" }}>
+    <div style={{ paddingBottom: 16 }}>
       <PageHeader
-        title={chatMode === "tutor" ? "AI 复习助教" : "资料对话"}
-        subtitle="围绕当前资料连续对话，支持图表、公式与追问。"
+        title="AI 复习助教"
+        subtitle="文档流式对话，聚焦数学推导、图表和追问。"
         onBack={() => setPage("资料库")}
         backText="返回资料库"
       />
-      <SectionCard style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => { setChatMode("chat"); setHistory([]); }} style={{ padding: "7px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: chatMode === "chat" ? G.teal : "#f0f0f0", color: chatMode === "chat" ? "#fff" : "#666", border: "none", borderRadius: 20, cursor: "pointer" }}>💬 自由对话</button>
-          <button onClick={() => { setChatMode("tutor"); setHistory([]); }} style={{ padding: "7px 18px", fontSize: 13, fontWeight: 600, fontFamily: "inherit", background: chatMode === "tutor" ? G.purple : "#f0f0f0", color: chatMode === "tutor" ? "#fff" : "#666", border: "none", borderRadius: 20, cursor: "pointer" }}>🤖 复习助教</button>
-        </div>
-        {chatMode === "tutor" && (
-          <div style={{ marginTop: 12, padding: "12px 16px", background: "#F0F4FF", borderRadius: 12, border: "1px solid #C7D9FF", fontSize: 13, color: "#3B5998", lineHeight: 1.6 }}>
-            <strong>AI 复习助教模式：</strong>逐知识点教学+即时检验，适应你的节奏。试试：「帮我制定复习计划」「我不会XX，从零教我」
+      <div className="chat-page-container">
+        <header className="chat-header">
+          <h2 className="chat-title">AI 复习助教</h2>
+          <div className="chat-status">
+            当前上下文: {selectedMaterial ? `${selectedMaterial.title} · ${selectedMaterial.course || "未分类"}` : "未选择资料"}
           </div>
-        )}
-      </SectionCard>
-      <div style={{ display: "grid", gridTemplateColumns: "290px 1fr", gap: 12 }}>
-      <SectionCard style={{ height: "fit-content" }}>
-        <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>选择资料</div>
-        <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={s.input}>
-          {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
-        </select>
-        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-          <Btn
-            size="sm"
-            variant="primary"
-            onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))}
-            disabled={!materialId || !selectedMaterial}
-          >
-            去做这份资料的题
-          </Btn>
-          <Btn size="sm" onClick={() => setPage("知识点")}>看知识点卡片</Btn>
-        </div>
-      </SectionCard>
-      <SectionCard style={{ padding: 0, overflow: "hidden" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 0, minHeight: 400, maxHeight: 480, overflowY: "auto", padding: "16px 16px 8px" }}>
+          <div style={{ marginTop: 10, display: "grid", gap: 8, gridTemplateColumns: "1fr auto auto auto auto" }}>
+            <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={{ ...s.input, marginBottom: 0 }}>
+              {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
+            </select>
+            <button className="btn-primary" onClick={() => { setChatMode("chat"); setHistory([]); }} style={{ background: chatMode === "chat" ? "var(--btn-black)" : "#6b7280" }}>
+              自由对话
+            </button>
+            <button className="btn-primary" onClick={() => { setChatMode("tutor"); setHistory([]); }} style={{ background: chatMode === "tutor" ? "var(--btn-black)" : "#6b7280" }}>
+              复习助教
+            </button>
+            <button className="btn-primary" onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))} disabled={!materialId || !selectedMaterial}>
+              去做题
+            </button>
+            <button className="btn-primary" onClick={() => setPage("知识点")}>
+              知识点
+            </button>
+          </div>
+        </header>
+
+        <div className="chat-history-scroll">
           {history.length === 0 && (
-            <div style={{ textAlign: "center", paddingTop: 60, color: "#bbb" }}>
-              <div style={{ fontSize: 36, marginBottom: 12 }}>💬</div>
-              <div style={{ fontSize: 14, lineHeight: 1.8, color: "#666" }}>
-                {chatMode === "tutor" ? (
-                  <>
-                    <div style={{ fontWeight: 600, marginBottom: 8, color: "#555" }}>🤖 AI 复习助教就绪</div>
-                    试试说：<br />
-                    「帮我制定 3 天复习计划」<br />
-                    「教我这份资料的第一章」<br />
-                    「我不会插值法，从零教我」
-                  </>
-                ) : (
-                  <>
-                    可以问我：<br />
-                    「这份资料的核心知识点是什么？」<br />
-                    「请给我一道例题并详细讲解步骤」
-                  </>
-                )}
-              </div>
+            <div style={{ padding: "28px 0", color: "var(--text-muted)", fontSize: 14, lineHeight: 1.8 }}>
+              {chatMode === "tutor"
+                ? "你可以直接输入：帮我制定 3 天复习计划；先从第一章讲起；我不会插值法，从零开始。"
+                : "你可以直接输入：这份资料的核心知识点是什么？请给我一道例题并详细讲解步骤。"}
             </div>
           )}
-          {history.map((m, idx) => (
-            <div key={idx} style={{ display: "flex", gap: 10, marginBottom: 16, flexDirection: m.role === "user" ? "row-reverse" : "row", alignItems: "flex-start" }}>
-              {m.role === "user" ? (
-                <div style={{ width: 34, height: 34, borderRadius: "50%", background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff", flexShrink: 0 }}>
-                  {(profile?.name || "U")[0].toUpperCase()}
+          {history.map((m, idx) => {
+            const role = m.role === "user" ? "user" : "ai";
+            const avatarText = role === "user" ? ((profile?.name || "U")[0] || "U").toUpperCase() : "AI";
+            return (
+              <div key={idx} className={`message-block ${role}`}>
+                <div className="message-avatar">{avatarText}</div>
+                <div className="message-content">
+                  <RenderMathAndChart content={m.text} />
+                  {m.role === "assistant" && (
+                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button className="btn-primary" onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))}>
+                        做相关题目
+                      </button>
+                      <button className="btn-primary" onClick={() => setPage("知识点")}>
+                        看知识点
+                      </button>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div style={{ width: 34, height: 34, borderRadius: "50%", background: chatMode === "tutor" ? G.blue : G.purple, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>{chatMode === "tutor" ? "🤖" : "📐"}</div>
-              )}
-              <div style={{ maxWidth: "80%", background: m.role === "user" ? G.teal : "#fff", color: m.role === "user" ? "#fff" : "#222", borderRadius: m.role === "user" ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "10px 14px", fontSize: 14, lineHeight: 1.8, boxShadow: "0 1px 6px rgba(0,0,0,0.07)", border: m.role === "assistant" ? "1px solid #f0f0f0" : "none" }}>
-                <MathText text={m.text} />
-                {m.role === "assistant" && (
-                  <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", borderTop: "1px solid #f0f0f0", paddingTop: 8 }}>
-                    <button onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))} style={{ padding: "4px 10px", background: G.blueLight, color: G.blue, border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>✏️ 做相关题目</button>
-                    <button onClick={() => setPage("知识点")} style={{ padding: "4px 10px", background: G.purpleLight, color: G.purple, border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>📚 知识点卡片</button>
-                  </div>
-                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
           {chatting && (
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 16 }}>
-              <div style={{ width: 34, height: 34, borderRadius: "50%", background: G.purple, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0 }}>📐</div>
-              <div style={{ background: "#fff", border: "1px solid #f0f0f0", borderRadius: "4px 16px 16px 16px", padding: "12px 16px", fontSize: 14, color: "#999" }}>··· 思考中</div>
+            <div className="message-block ai">
+              <div className="message-avatar">AI</div>
+              <div className="message-content">正在思考...</div>
             </div>
           )}
           <div ref={chatEndRef} />
         </div>
-        <div style={{ borderTop: "1px solid #f0f0f0", padding: "12px 16px", display: "flex", gap: 10, background: "#fafafa" }}>
-          <input value={question} onChange={(e) => setQuestion(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !chatting) ask(); }} placeholder="输入你的问题，按 Enter 发送…" style={{ ...s.input, marginBottom: 0, flex: 1 }} />
-          <Btn variant="primary" onClick={ask} disabled={chatting || !materialId || !question.trim()}>{chatting ? "…" : "发送"}</Btn>
+
+        <div className="chat-input-area">
+          <div className="input-wrapper">
+            <textarea
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !chatting) {
+                  e.preventDefault();
+                  ask();
+                }
+              }}
+              placeholder="输入数学问题，或让 AI 生成复习提纲..."
+              className="clean-input"
+            />
+            <button className="btn-primary send-btn" onClick={ask} disabled={chatting || !materialId || !question.trim()}>
+              {chatting ? "发送中..." : "发送"}
+            </button>
+          </div>
         </div>
-      </SectionCard>
       </div>
     </div>
   );
