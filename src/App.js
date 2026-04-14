@@ -12,48 +12,48 @@ import "katex/dist/katex.min.css";
   style.textContent = `
     * { box-sizing: border-box; }
     :root{
-      --mc-bg:#0B0F19;
-      --mc-surface:rgba(255,255,255,0.03);
-      --mc-surface-soft:rgba(255,255,255,0.04);
-      --mc-border:rgba(255,255,255,0.08);
-      --mc-text:#F8FAFC;
-      --mc-muted:#94A3B8;
-      --mc-primary:#8B5CF6;
+      --mc-bg:#FAFAFC;
+      --mc-surface:#FFFFFF;
+      --mc-surface-soft:#F4F4F8;
+      --mc-border:#E8E8EE;
+      --mc-text:#111827;
+      --mc-muted:#6B7280;
+      --mc-primary:#635BFF;
       --mc-radius-sm:10px;
       --mc-radius-md:14px;
       --mc-radius-lg:18px;
-      --mc-shadow-soft:0 1px 2px rgba(15,23,42,0.06);
-      --mc-shadow-elevated:0 8px 24px rgba(15,23,42,0.08);
+      --mc-shadow-soft:0 15px 40px rgba(0,0,0,0.06);
+      --mc-shadow-elevated:0 15px 40px rgba(0,0,0,0.06);
       --mc-duration-fast:120ms;
       --mc-duration-normal:220ms;
       --mc-ease:cubic-bezier(.2,.7,.2,1);
-      --bg-primary: #0B0F19;
-      --bg-surface: rgba(255, 255, 255, 0.03);
-      --text-main: #F8FAFC;
-      --text-muted: #94A3B8;
-      --border-light: rgba(255,255,255,0.08);
+      --bg-primary: #FAFAFC;
+      --bg-surface: #FFFFFF;
+      --text-main: #111827;
+      --text-muted: #6B7280;
+      --border-light: #E8E8EE;
       --btn-black: #111827;
-      --btn-black-hover: #1f2937;
-      --btn-disabled-bg: rgba(148, 163, 184, 0.18);
-      --btn-disabled-text: #94A3B8;
-      --radius-sm: 10px;
-      --radius-md: 14px;
+      --btn-black-hover: #374151;
+      --btn-disabled-bg: #F3F4F6;
+      --btn-disabled-text: #9CA3AF;
+      --radius-sm: 12px;
+      --radius-md: 16px;
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     body { margin:0; font-family: var(--font-sans); background:transparent; color:var(--mc-text); }
-    .glass-panel {
-      background: rgba(255, 255, 255, 0.03);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 24px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    .premium-card {
+      background: #FFFFFF;
+      border-radius: 20px;
+      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.06);
+      border: 1px solid rgba(0,0, 0, 0.04);
     }
-    .app-shell-dark {
+    .app-shell-light {
       min-height: 100vh;
       display: flex;
       gap: 16px;
       padding: 16px;
+      max-width: 1280px;
+      margin: 0 auto;
     }
     .app-nav-rail {
       width: 88px;
@@ -77,11 +77,12 @@ import "katex/dist/katex.min.css";
       width: 48px;
       height: 48px;
       border-radius: 14px;
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.04);
-      color: #dbeafe;
+      border: 1px solid var(--mc-border);
+      background: #FFFFFF;
+      color: #111827;
       font-size: 20px;
       cursor: pointer;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.04);
     }
     @keyframes popIn {
       0% { transform: scale(0.5); opacity: 0; }
@@ -125,24 +126,48 @@ import "katex/dist/katex.min.css";
       font-family: inherit;
     }
     .btn-primary:hover { background-color: var(--btn-black-hover); }
-    .chat-page-container {
-      width: 100%;
+    .chat-page-wrap {
+      max-width: 760px;
       margin: 0 auto;
-      min-height: 640px;
-      display: grid;
-      grid-template-columns: 7fr 3fr;
-      gap: 14px;
+      padding-bottom: 24px;
     }
-    .chat-main-pane {
+    .chat-doc-stream {
+      padding: 8px 0 24px;
+    }
+    .chat-doc-toolbar {
       display: flex;
-      flex-direction: column;
-      min-height: 640px;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 8px;
     }
-    .chat-side-drawer {
-      padding: 14px;
-      height: 640px;
-      position: sticky;
-      top: 0;
+    .chat-doc-row-user {
+      display: flex;
+      justify-content: flex-end;
+      margin: 20px 0;
+    }
+    .chat-doc-user-text {
+      max-width: 92%;
+      text-align: right;
+      font-size: 15px;
+      line-height: 1.75;
+      color: #1e3a5f;
+      font-weight: 500;
+    }
+    .chat-doc-row-ai {
+      display: flex;
+      justify-content: flex-start;
+      margin: 20px 0;
+      padding-left: 2px;
+      border-left: 2px solid #E5E7EB;
+      padding-left: 16px;
+      margin-left: 0;
+    }
+    .chat-doc-ai-text {
+      flex: 1;
+      font-size: 15px;
+      line-height: 1.8;
+      color: var(--text-main);
     }
     .chat-header {
       padding: 16px 18px 12px;
@@ -163,47 +188,8 @@ import "katex/dist/katex.min.css";
     .chat-history-scroll {
       flex: 1;
       overflow-y: auto;
-      padding: 0 18px;
+      padding: 0 8px;
       background: transparent;
-    }
-    .message-block {
-      display: flex;
-      gap: 14px;
-      padding: 18px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
-      align-items: flex-start;
-    }
-    .message-avatar {
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      border: 1px solid var(--border-light);
-      color: #475569;
-      background: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      font-weight: 700;
-      flex-shrink: 0;
-    }
-    .message-block.user { justify-content: flex-end; }
-    .message-block.user .message-content { max-width: 86%; color: #c7d2fe; text-align: right; }
-    .message-block.ai .message-content {
-      max-width: 94%;
-      border-left: 2px solid transparent;
-      border-image: linear-gradient(180deg, #a78bfa, #60a5fa) 1;
-      padding-left: 12px;
-      background: transparent;
-      border-radius: 0;
-    }
-    .message-block.ai .message-avatar { background: #111827; color: #fff; border-color: #111827; }
-    .message-content {
-      flex: 1;
-      color: var(--text-main);
-      font-size: 14px;
-      line-height: 1.8;
-      min-width: 0;
     }
     .chat-input-area {
       border-top: 1px solid var(--border-light);
@@ -224,7 +210,7 @@ import "katex/dist/katex.min.css";
       padding: 10px 12px;
       font-family: inherit;
       resize: vertical;
-      background: rgba(15,23,42,0.65);
+      background: #FFFFFF;
       color: var(--text-main);
       font-size: 14px;
       line-height: 1.6;
@@ -241,11 +227,18 @@ import "katex/dist/katex.min.css";
       padding-bottom: 16px;
     }
     .quiz-option-tile {
-      border: 1px solid rgba(255,255,255,0.12);
-      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border-light);
+      background: #FAFAFC;
       border-radius: 16px;
       padding: 16px 18px;
       cursor: pointer;
+    }
+    @keyframes mcShake {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-8px); }
+      40% { transform: translateX(8px); }
+      60% { transform: translateX(-5px); }
+      80% { transform: translateX(5px); }
     }
     .skill-node-pulse {
       animation: mcPulse 2.2s ease-in-out infinite;
@@ -286,14 +279,14 @@ const G = {
 };
 
 const T = {
-  bg: "#f7f8fa",
+  bg: "#FAFAFC",
   panel: "#ffffff",
   panelSoft: "#f8fafc",
-  border: "#e5e7eb",
-  text: "#0f172a",
-  muted: "#64748b",
+  border: "#e8e8ee",
+  text: "#111827",
+  muted: "#6b7280",
   radius: { sm: 8, md: 10, lg: 12, xl: 16 },
-  shadow: { soft: "0 1px 2px rgba(15,23,42,0.06)", elevated: "0 8px 24px rgba(15,23,42,0.08)" },
+  shadow: { soft: "0 15px 40px rgba(0,0,0,0.06)", elevated: "0 15px 40px rgba(0,0,0,0.06)" },
   gap: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
 };
 
@@ -3363,7 +3356,7 @@ function ChangePasswordModal({ onClose }) {
   );
 }
 
-function TopNav({ page, setPage, profile, onLogout }) {
+function TopNav({ page, setPage, profile, onLogout, onOpenGateway }) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showPwdModal, setShowPwdModal] = useState(false);
   const primaryLinks = ["首页", "资料库", "资料对话", "题库练习", "学习报告"];
@@ -3381,6 +3374,9 @@ function TopNav({ page, setPage, profile, onLogout }) {
             <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-0.02em" }}>MathCore</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
+            {onOpenGateway && (
+              <button type="button" onClick={onOpenGateway} style={{ padding: "7px 12px", borderRadius: 9, border: `1px solid ${T.border}`, background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", color: "#475569" }}>引导入口</button>
+            )}
             <button onClick={() => setShowPwdModal(true)} style={{ padding: "7px 12px", borderRadius: 9, border: `1px solid ${T.border}`, background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", color: "#475569" }}>修改密码</button>
             <div onClick={() => setShowUserMenu(v => !v)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 8px", borderRadius: 10 }}>
               <div style={{ width: 30, height: 30, borderRadius: "50%", background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff" }}>{(profile?.name || "U")[0].toUpperCase()}</div>
@@ -4371,13 +4367,25 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     if (opts) return letters[selected] !== q.answer;
     return !((selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误"));
   })();
+  const springPop = { type: "spring", stiffness: 300, damping: 30 };
+  const expStr = String(q.explanation || "");
+  const hintStepsQuiz = (() => {
+    const parts = expStr.split(/[。；;]/).map(s => s.trim()).filter(s => s.length > 4).slice(0, 3);
+    if (parts.length >= 2) return parts;
+    return [expStr || "再读一遍题干，标出已知与所求。"];
+  })();
+  const rootCauseQuiz = isWrongAnswered ? (() => {
+    if (/计算|乘|除|加|减|代入|化简/.test(expStr)) return { type: "计算失误", color: G.amber, icon: "*", tip: "建议分步代入并验算" };
+    if (/公式|定理|定义|法则/.test(expStr)) return { type: "公式误用", color: G.red, icon: "*", tip: "回顾相关定理的适用条件" };
+    return { type: "概念理解", color: G.purple, icon: "*", tip: "回到知识点卡片理清定义" };
+  })() : null;
 
   // ── Quiz screen ──
   return (
     <div className="quiz-stage">
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
         <Btn size="sm" onClick={() => { setQuizMode(null); setFinished(false); }}>← 返回</Btn>
-        <SectionCard style={{ flex: 1, padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div className="premium-card" style={{ flex: 1, padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 600 }}>第 {current + 1} / {displayQ.length} 题</div>
             <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{q.chapter} · {q.type}</div>
@@ -4389,10 +4397,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
               <div style={{ height: 6, background: G.teal, borderRadius: 3, width: ((current+1)/displayQ.length*100)+"%" }} />
             </div>
           </div>
-        </SectionCard>
+        </div>
       </div>
-      <div style={{ fontSize: 12, color: "#ccc", textAlign: "right", marginBottom: 6 }}>⌨️ 1-4 选择 · Enter 提交</div>
-      <div className="glass-panel" style={{ padding: 20, marginBottom: 14 }}>
+      <div style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "right", marginBottom: 6 }}>⌨️ 1-4 选择 · Enter 提交</div>
+      <div className="premium-card" style={{ padding: 28, marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           <Badge color="blue">{q.type}</Badge>
           <Badge color="amber">{q.chapter}</Badge>
@@ -4438,113 +4446,131 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         {opts && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {opts.map((opt, i) => {
-              let border = "1px solid rgba(255,255,255,0.12)", bg = "rgba(255,255,255,0.03)", col = "#e2e8f0";
+              const isSel = selected === i;
+              const isCorrectLetter = letters[i] === q.answer;
+              const wrongPick = answered && isSel && !isCorrectLetter;
+              let border = "1px solid #E8E8EE";
+              let bg = "#FAFAFC";
+              let col = "#111827";
+              let fw = 400;
+              if (!answered && isSel) {
+                border = "2px solid #111827";
+                bg = "#FFFFFF";
+                fw = 700;
+              }
               if (answered) {
-                if (letters[i] === q.answer) { bg = "rgba(16, 185, 129, 0.2)"; border = "1px solid rgba(16,185,129,0.9)"; col = "#a7f3d0"; }
-                else if (i === selected && letters[i] !== q.answer) { bg = "rgba(239, 68, 68, 0.2)"; border = "1px solid rgba(239,68,68,0.9)"; col = "#fecaca"; }
-              } else if (selected === i) { bg = "rgba(79, 70, 229, 0.25)"; border = "1px solid rgba(129,140,248,0.95)"; col = "#e0e7ff"; }
+                if (isCorrectLetter) {
+                  bg = "rgba(16, 185, 129, 0.12)";
+                  border = "2px solid #10b981";
+                  col = "#065f46";
+                  fw = 600;
+                } else if (wrongPick) {
+                  bg = "rgba(239, 68, 68, 0.1)";
+                  border = "2px solid #ef4444";
+                  col = "#991b1b";
+                  fw = 600;
+                }
+              }
               return (
                 <motion.div
                   key={i}
                   className="quiz-option-tile"
-                  whileHover={!answered ? { scale: 1.02 } : undefined}
-                  whileTap={!answered ? { scale: 0.95 } : undefined}
+                  animate={wrongPick ? { x: [0, -8, 8, -6, 6, 0] } : { x: 0 }}
+                  transition={wrongPick ? { duration: 0.45 } : springPop}
+                  whileHover={!answered ? { scale: 1.02, y: -4 } : undefined}
+                  whileTap={!answered ? { scale: 0.98 } : undefined}
                   onClick={() => !answered && setSelected(i)}
-                  style={{ border, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 14, alignItems: "center", boxShadow: answered && letters[i] === q.answer ? "0 0 20px rgba(16,185,129,0.35)" : "none" }}
+                  style={{ border, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 14, alignItems: "center" }}
                 >
-                  <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid "+col+"44", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, background: selected === i ? "rgba(255,255,255,0.16)" : "transparent", color: col }}>{letters[i]}</div>
-                  <span style={{ fontSize: 16, color: col }}><MathText text={opt} /></span>
-                  {answered && letters[i] === q.answer && <span style={{ marginLeft: "auto", color: G.teal }}>✓</span>}
+                  <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid " + (isSel && !answered ? "#111827" : "#d1d5db"), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, background: isSel && !answered ? "#111827" : "transparent", color: isSel && !answered ? "#fff" : col }}>{letters[i]}</div>
+                  <span style={{ fontSize: 16, color: col, fontWeight: fw }}><MathText text={opt} /></span>
+                  {answered && isCorrectLetter && <span style={{ marginLeft: "auto", color: G.teal }}>{String.fromCharCode(0x2713)}</span>}
                 </motion.div>
               );
-            })}
+            })}            })}
           </div>
         )}
         {!opts && q.type === "判断题" && (
           <div style={{ display: "flex", gap: 12 }}>
             {["正确","错误"].map((opt, i) => {
-              let border = "2px solid #eee", bg = "#fafafa";
-              if (answered) { if (opt === q.answer) { bg = G.tealLight; border = "2px solid "+G.teal; } else if (i === selected) { bg = G.redLight; border = "2px solid "+G.red; } } else if (selected === i) { bg = G.tealLight; border = "2px solid "+G.teal; }
-              return <div key={i} onClick={() => !answered && setSelected(i)} style={{ flex: 1, padding: "16px 0", border, borderRadius: 12, cursor: answered ? "default" : "pointer", background: bg, textAlign: "center", fontSize: 17, fontWeight: 600 }}>{opt}</div>;
+              const isSel = selected === i;
+              const isCorrect = (opt === q.answer);
+              const wrongPick = answered && isSel && !isCorrect;
+              let border = "1px solid #E8E8EE";
+              let bg = "#FAFAFC";
+              let fw = 500;
+              if (!answered && isSel) {
+                border = "2px solid #111827";
+                bg = "#FFFFFF";
+                fw = 700;
+              }
+              if (answered) {
+                if (isCorrect) {
+                  bg = "rgba(16, 185, 129, 0.12)";
+                  border = "2px solid #10b981";
+                  fw = 600;
+                } else if (wrongPick) {
+                  bg = "rgba(239, 68, 68, 0.1)";
+                  border = "2px solid #ef4444";
+                  fw = 600;
+                }
+              }
+              return (
+                <motion.div
+                  key={i}
+                  className="quiz-option-tile"
+                  style={{ flex: 1, padding: "18px 0", border, borderRadius: 16, cursor: answered ? "default" : "pointer", background: bg, textAlign: "center", fontSize: 17, fontWeight: fw }}
+                  animate={wrongPick ? { x: [0, -8, 8, -6, 6, 0] } : { x: 0 }}
+                  transition={wrongPick ? { duration: 0.45 } : springPop}
+                  whileHover={!answered ? { scale: 1.02, y: -4 } : undefined}
+                  whileTap={!answered ? { scale: 0.98 } : undefined}
+                  onClick={() => !answered && setSelected(i)}
+                >{opt}</motion.div>
+              );
             })}
           </div>
         )}
       </div>
-      <AnimatePresence>
-      {isWrongAnswered && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: "auto" }}
-          exit={{ opacity: 0, height: 0 }}
-          transition={{ duration: 0.35, ease: "easeOut" }}
-          className="glass-panel"
-          style={{ marginBottom: 12, padding: 14, overflow: "hidden", borderColor: "rgba(239,68,68,0.5)" }}
-        >
-          <div style={{ color: "#fca5a5", fontWeight: 700, marginBottom: 6 }}>AI 提示</div>
-          <div style={{ color: "var(--text-main)", lineHeight: 1.8 }}><MathText text={q.explanation || "先检查公式匹配关系，再从已知量逆推。"} /></div>
+      {!answered && showHint && (
+        <motion.div className="premium-card" style={{ marginBottom: 14, padding: 20 }} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={springPop}>
+          <div style={{ fontWeight: 700, marginBottom: 8, color: "var(--text-main)" }}>预习提示</div>
+          <div style={{ color: "var(--text-muted)", lineHeight: 1.75 }}><MathText text={hintStepsQuiz[0]} /></div>
         </motion.div>
       )}
-      </AnimatePresence>
-      {(showHint || answered) && (() => {
-        // Error root cause analysis
-        const isWrong = answered && (() => {
-          if (opts) return letters[selected] !== q.answer;
-          return !((selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误"));
-        })();
-        const rootCause = isWrong ? (() => {
-          const exp = String(q.explanation || "");
-          if (/计算|乘|除|加|减|代入|化简/.test(exp)) return { type: "计算失误", color: G.amber, icon: "🔢", tip: "本题考察计算能力，建议重新推导一遍验证" };
-          if (/公式|定理|定义|法则/.test(exp)) return { type: "公式误用", color: G.red, icon: "📐", tip: "建议回顾相关公式定理，加深记忆" };
-          return { type: "概念理解", color: G.purple, icon: "💡", tip: "建议查看知识点卡片，理解底层概念" };
-        })() : null;
-
-        // Multi-step hints (split explanation into steps)
-        const hintSteps = (() => {
-          const exp = String(q.explanation || "");
-          // Split by period/semicolon into max 3 steps
-          const parts = exp.split(/[。；;]/).map(s => s.trim()).filter(s => s.length > 4).slice(0, 3);
-          if (parts.length >= 2) return parts;
-          return [exp]; // single step
-        })();
-
-        return (
-          <div style={{ ...s.card, marginBottom: 14, borderLeft: "4px solid " + (isWrong ? G.red : G.teal), background: isWrong ? "#fff8f8" : "#fafffe" }}>
-            {isWrong && rootCause && (
-              <div style={{ marginBottom: 10, padding: "8px 12px", background: rootCause.color + "18", borderRadius: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 18 }}>{rootCause.icon}</span>
-                <div>
-                  <span style={{ fontWeight: 700, color: rootCause.color, fontSize: 13 }}>错误类型：{rootCause.type}</span>
-                  <div style={{ fontSize: 12, color: "#666", marginTop: 2 }}>{rootCause.tip}</div>
-                </div>
+      <AnimatePresence>
+        {answered && isWrongAnswered && (
+          <motion.div
+            key="scaffold"
+            className="premium-card"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={springPop}
+            style={{ marginBottom: 14, padding: 22, overflow: "hidden", border: "1px solid rgba(239,68,68,0.25)" }}
+          >
+            <div style={{ fontWeight: 800, marginBottom: 10, color: "#b91c1c" }}>脚手架式提示</div>
+            {rootCauseQuiz && (
+              <div style={{ marginBottom: 12, padding: "10px 12px", background: rootCauseQuiz.color + "18", borderRadius: 12 }}>
+                <span style={{ fontWeight: 700, color: rootCauseQuiz.color }}>错误类型：{rootCauseQuiz.type}</span>
+                <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>{rootCauseQuiz.tip}</div>
               </div>
             )}
-            <div style={{ display: "flex", gap: 14 }}>
-              <div style={{ width: 34, height: 34, borderRadius: "50%", background: isWrong ? G.red : G.teal, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <span style={{ color: "#fff", fontSize: 12, fontWeight: 700 }}>{isWrong ? "❌" : "AI"}</span>
+            {hintStepsQuiz.map((step, si) => (
+              <div key={si} style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "flex-start" }}>
+                <div style={{ width: 24, height: 24, borderRadius: "50%", background: G.teal + "22", border: "1.5px solid " + G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: G.teal, flexShrink: 0 }}>{si + 1}</div>
+                <div style={{ fontSize: 15, color: "var(--text-main)", lineHeight: 1.75 }}><MathText text={step} /></div>
               </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#111", marginBottom: 8 }}>
-                  {answered ? "正确答案：" + q.answer : "🔍 分步提示"}
-                </div>
-                {hintSteps.length > 1 ? hintSteps.map((step, si) => (
-                  <div key={si} style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "flex-start" }}>
-                    <div style={{ width: 22, height: 22, borderRadius: "50%", background: G.teal + "22", border: "1.5px solid " + G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: G.teal, flexShrink: 0, marginTop: 1 }}>
-                      {si + 1}
-                    </div>
-                    <div style={{ fontSize: 14, color: "#444", lineHeight: 1.7 }}>{step}</div>
-                  </div>
-                )) : (
-                  <div style={{ fontSize: 15, color: "#444", lineHeight: 1.7 }}>{q.explanation}</div>
-                )}
-                {q.source_quote && (
-                  <div style={{ marginTop: 8, fontSize: 12, color: "#666", lineHeight: 1.6, padding: "6px 10px", background: "#f8fafc", borderRadius: 6 }}>
-                    📄 资料依据：{String(q.source_quote).slice(0, 140)}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        );
+            ))}
+            <div style={{ marginTop: 10, fontSize: 14, color: "var(--text-muted)" }}>参考答案：<strong style={{ color: "var(--text-main)" }}>{q.answer}</strong></div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {answered && !isWrongAnswered && (
+        <motion.div className="premium-card" style={{ marginBottom: 14, padding: 16, border: "1px solid rgba(16,185,129,0.35)" }} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={springPop}>
+          <span style={{ color: G.tealDark, fontWeight: 700 }}>回答正确</span>
+          <span style={{ marginLeft: 8, color: "var(--text-muted)" }}>继续保持节奏。</span>
+        </motion.div>
+      )}
       })()}
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <Btn onClick={() => { if (current > 0) { setCurrent(c => c-1); setSelected(null); setAnswered(false); setShowHint(false); } }}>← 上一题</Btn>
@@ -5873,7 +5899,7 @@ function MathText({ text }) {
                 key={i}
                 initial={{ opacity: 0, height: 0, scale: 0.98 }}
                 animate={{ opacity: 1, height: "auto", scale: 1 }}
-                transition={{ duration: 0.35, ease: "easeOut" }}
+                transition={{ type: "spring", stiffness: 300, damping: 30 }}
                 style={{ overflow: "hidden" }}
               >
                 <SimpleChart config={cfg} />
@@ -5970,81 +5996,100 @@ function MaterialChatPage({ setPage, profile }) {
   };
 
   return (
-    <div style={{ paddingBottom: 16 }}>
+    <div className="chat-page-wrap">
       <PageHeader
-        title="AI 复习助教"
-        subtitle="分屏智能终端：左侧沉浸式推导，右侧侧边抽屉控制。"
+        title="AI 助教"
+        subtitle="流式文档中心：连续阅读、公式与图表自然嵌入正文。"
         onBack={() => setPage("资料库")}
         backText="返回资料库"
       />
-      <div className="chat-page-container">
-        <div className="chat-main-pane glass-panel">
-          <header className="chat-header">
-            <h2 className="chat-title">AI 复习助教</h2>
-            <div className="chat-status">
-              当前上下文: {selectedMaterial ? `${selectedMaterial.title} · ${selectedMaterial.course || "未分类"}` : "未选择资料"}
-            </div>
-          </header>
-          <div className="chat-history-scroll">
-            {history.length === 0 && (
-              <div style={{ padding: "28px 0", color: "var(--text-muted)", fontSize: 14, lineHeight: 1.8 }}>
-                {chatMode === "tutor"
-                  ? "你可以直接输入：帮我制定 3 天复习计划；先从第一章讲起；我不会插值法，从零开始。"
-                  : "你可以直接输入：这份资料的核心知识点是什么？请给我一道例题并详细讲解步骤。"}
-              </div>
-            )}
-            {history.map((m, idx) => {
-              const role = m.role === "user" ? "user" : "ai";
-              const avatarText = role === "user" ? ((profile?.name || "U")[0] || "U").toUpperCase() : "AI";
-              return (
-                <div key={idx} className={`message-block ${role}`}>
-                  <div className="message-avatar">{avatarText}</div>
-                  <div className="message-content">
-                    <RenderMathAndChart content={m.text} />
-                  </div>
-                </div>
-              );
-            })}
-            {chatting && (
-              <div className="message-block ai">
-                <div className="message-avatar">AI</div>
-                <div className="message-content">正在思考...</div>
-              </div>
-            )}
-            <div ref={chatEndRef} />
+      <div className="premium-card" style={{ display: "flex", flexDirection: "column", minHeight: 560, overflow: "hidden" }}>
+        <div className="chat-header" style={{ borderBottom: "1px solid var(--border-light)" }}>
+          <div className="chat-doc-toolbar">
+            <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={{ ...s.input, marginBottom: 0, flex: "1 1 200px", maxWidth: 320 }}>
+              {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
+            </select>
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.02, y: -4 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => { setChatMode("chat"); setHistory([]); }}
+              style={{ padding: "8px 16px", borderRadius: 12, border: chatMode === "chat" ? "2px solid #111827" : "1px solid var(--border-light)", background: "#fff", fontWeight: chatMode === "chat" ? 700 : 500, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}
+            >
+              自由对话
+            </motion.button>
+            <motion.button
+              type="button"
+              whileHover={{ scale: 1.02, y: -4 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => { setChatMode("tutor"); setHistory([]); }}
+              style={{ padding: "8px 16px", borderRadius: 12, border: chatMode === "tutor" ? "2px solid #111827" : "1px solid var(--border-light)", background: "#fff", fontWeight: chatMode === "tutor" ? 700 : 500, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}
+            >
+              复习助教
+            </motion.button>
+            <Btn size="sm" onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))} disabled={!materialId || !selectedMaterial}>做题</Btn>
+            <Btn size="sm" onClick={() => setPage("知识点")}>知识点</Btn>
           </div>
-          <div className="chat-input-area">
-            <div className="input-wrapper">
-              <textarea
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey && !chatting) {
-                    e.preventDefault();
-                    ask();
-                  }
-                }}
-                placeholder="输入数学问题，或让 AI 生成复习提纲..."
-                className="clean-input"
-              />
-              <button className="btn-primary send-btn" onClick={ask} disabled={chatting || !materialId || !question.trim()}>
-                {chatting ? "发送中..." : "发送"}
-              </button>
-            </div>
+          <div className="chat-status">
+            当前文档：{selectedMaterial ? `${selectedMaterial.title} · ${selectedMaterial.course || "未分类"}` : "未选择资料"}
           </div>
         </div>
-        <aside className="chat-side-drawer glass-panel">
-          <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 8 }}>侧边抽屉</div>
-          <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={{ ...s.input, marginBottom: 10, background: "rgba(15,23,42,0.5)", color: "#e2e8f0", border: "1px solid rgba(255,255,255,0.12)" }}>
-            {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
-          </select>
-          <div style={{ display: "grid", gap: 8 }}>
-            <button className="btn-primary" onClick={() => { setChatMode("chat"); setHistory([]); }} style={{ background: chatMode === "chat" ? "#4f46e5" : "#1f2937" }}>自由对话</button>
-            <button className="btn-primary" onClick={() => { setChatMode("tutor"); setHistory([]); }} style={{ background: chatMode === "tutor" ? "#10b981" : "#1f2937" }}>复习助教</button>
-            <button className="btn-primary" onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))} disabled={!materialId || !selectedMaterial}>去做题</button>
-            <button className="btn-primary" onClick={() => setPage("知识点")}>知识点</button>
+        <div className="chat-history-scroll chat-doc-stream" style={{ flex: 1, minHeight: 320 }}>
+          {history.length === 0 && (
+            <div style={{ padding: "24px 0", color: "var(--text-muted)", fontSize: 14, lineHeight: 1.85 }}>
+              {chatMode === "tutor"
+                ? "试着输入：帮我制定 3 天复习计划；先从第一章讲起；我不会插值法，从零开始。"
+                : "试着输入：这份资料的核心知识点是什么？请给我一道例题并详细讲解步骤。"}
+            </div>
+          )}
+          {history.map((m, idx) =>
+            m.role === "user" ? (
+              <motion.div key={idx} className="chat-doc-row-user" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
+                <div className="chat-doc-user-text">
+                  <RenderMathAndChart content={m.text} />
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div key={idx} className="chat-doc-row-ai" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
+                <div className="chat-doc-ai-text">
+                  <RenderMathAndChart content={m.text} />
+                </div>
+              </motion.div>
+            )
+          )}
+          {chatting && (
+            <div className="chat-doc-row-ai">
+              <div className="chat-doc-ai-text" style={{ color: "var(--text-muted)" }}>正在思考…</div>
+            </div>
+          )}
+          <div ref={chatEndRef} />
+        </div>
+        <div className="chat-input-area" style={{ borderTop: "1px solid var(--border-light)", background: "#FAFAFC" }}>
+          <div className="input-wrapper">
+            <textarea
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !chatting) {
+                  e.preventDefault();
+                  ask();
+                }
+              }}
+              placeholder="输入数学问题，或让 AI 生成复习提纲…"
+              className="clean-input"
+            />
+            <motion.button
+              type="button"
+              className="btn-primary send-btn"
+              onClick={ask}
+              disabled={chatting || !materialId || !question.trim()}
+              whileHover={!(chatting || !materialId || !question.trim()) ? { scale: 1.02, y: -4 } : undefined}
+              whileTap={!(chatting || !materialId || !question.trim()) ? { scale: 0.98 } : undefined}
+            >
+              {chatting ? "发送中…" : "发送"}
+            </motion.button>
           </div>
-        </aside>
+        </div>
       </div>
     </div>
   );
@@ -6878,6 +6923,48 @@ function SkillTreePage({ setPage }) {
   );
 }
 
+function GatewayPage({ profile, onMaterial, onExam }) {
+  const spring = { type: "spring", stiffness: 300, damping: 30 };
+  const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); return d.days || 1; } catch { return 1; } })();
+  const badgeStats = getBadgeStats();
+  const unlocked = BADGES.filter(b => b.check(badgeStats)).length;
+  const displayName = profile?.name || "ISAA";
+  const stats = [
+    { label: "连续学习", value: streak + " 天" },
+    { label: "题库", value: ALL_QUESTIONS.length + "+" },
+    { label: "记忆卡", value: String(FLASHCARDS.length) },
+    { label: "徽章", value: unlocked + "/" + BADGES.length },
+  ];
+  return (
+    <div style={{ minHeight: "100vh", background: "#FAFAFC", padding: "48px 24px 64px", boxSizing: "border-box" }}>
+      <motion.div className="premium-card" style={{ maxWidth: 920, margin: "0 auto 40px", padding: "28px 32px" }} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.06em", marginBottom: 8 }}>欢迎回来</div>
+        <div style={{ fontSize: 32, fontWeight: 800, color: "var(--text-main)", letterSpacing: "-0.03em", marginBottom: 20 }}>{displayName}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+          {stats.map((st) => (
+            <div key={st.label} style={{ padding: "14px 16px", borderRadius: 14, background: "#FAFAFC", border: "1px solid var(--border-light)" }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text-main)" }}>{st.value}</div>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>{st.label}</div>
+            </div>
+          ))}
+        </div>
+      </motion.div>
+      <div style={{ maxWidth: 960, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 24 }}>
+        <motion.button type="button" className="premium-card" onClick={onMaterial} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.05 }} whileHover={{ scale: 1.02, y: -4 }} whileTap={{ scale: 0.98 }} style={{ cursor: "pointer", textAlign: "left", padding: "36px 32px", border: "none", fontFamily: "inherit" }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>{"\u{1F4DA}"}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text-main)", marginBottom: 8 }}>资料学习区</div>
+          <div style={{ fontSize: 15, color: "var(--text-muted)", lineHeight: 1.7 }}>上传课件 {"->"} 提取知识 {"->"} 智能题库</div>
+        </motion.button>
+        <motion.button type="button" className="premium-card" onClick={onExam} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.1 }} whileHover={{ scale: 1.02, y: -4 }} whileTap={{ scale: 0.98 }} style={{ cursor: "pointer", textAlign: "left", padding: "36px 32px", border: "none", fontFamily: "inherit" }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>{"\u{1F3AF}"}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text-main)", marginBottom: 8 }}>考前冲刺区</div>
+          <div style={{ fontSize: 15, color: "var(--text-muted)", lineHeight: 1.7 }}>设定倒计时 {"->"} 制定日历 {"->"} AI 带学</div>
+        </motion.button>
+      </div>
+    </div>
+  );
+}
+
 function GlassSideNav({ page, setPage }) {
   const items = [
     ["首页", "🏠"],
@@ -6888,7 +6975,7 @@ function GlassSideNav({ page, setPage }) {
     ["技能树", "🌌"],
   ];
   return (
-    <nav className="app-nav-rail glass-panel">
+    <nav className="app-nav-rail premium-card">
       {items.map(([name, icon]) => (
         <button
           key={name}
@@ -6914,6 +7001,8 @@ export default function App() {
   const [chapterFilter, setChapterFilter] = useState(null);
   const [sessionAnswers, setSessionAnswers] = useState({});
   const [emailJustConfirmed, setEmailJustConfirmed] = useState(false);
+  const [surface, setSurface] = useState("gateway");
+  const springNav = { type: "spring", stiffness: 300, damping: 30 };
   const recordAnswer = async (qid, correct, chapter, questionPayload = null) => {
     try {
       const updated = { ...sessionAnswers, [qid]: { correct, chapter } };
@@ -6974,7 +7063,7 @@ export default function App() {
     setLoading(false);
   };
 
-  const handleLogout = async () => { await supabase.auth.signOut(); setPage("首页"); };
+  const handleLogout = async () => { await supabase.auth.signOut(); setSurface("gateway"); setPage("首页"); };
 
   const handleSetPage = (p) => {
     if (p !== "题库练习") { setRetryQuestion(null); setChapterFilter(null); }
@@ -7017,22 +7106,46 @@ export default function App() {
   };
 
   return (
-    <div className="app-shell-dark">
-      <GlassSideNav page={page} setPage={handleSetPage} />
-      <div className="app-main-area">
-        <TopNav page={page} setPage={handleSetPage} profile={profile} onLogout={handleLogout} />
-        <AnimatePresence mode="wait">
+    <div style={{ minHeight: "100vh", background: "#FAFAFC" }}>
+      <AnimatePresence mode="wait">
+        {surface === "gateway" ? (
           <motion.div
-            key={page}
-            initial={{ opacity: 0, y: 20, filter: "blur(10px)" }}
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: -20, filter: "blur(10px)" }}
-            transition={{ duration: 0.4, ease: "easeOut" }}
+            key="gateway"
+            style={{ minHeight: "100vh" }}
+            initial={{ opacity: 1, scale: 1 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.28, ease: "easeOut" }}
           >
-            {renderPage()}
+            <GatewayPage
+              profile={profile}
+              onMaterial={() => { setPage("资料库"); setSurface("workbench"); }}
+              onExam={() => { setPage("学习报告"); setSurface("workbench"); }}
+            />
           </motion.div>
-        </AnimatePresence>
-      </div>
+        ) : (
+          <motion.div
+            key="workbench"
+            style={{ minHeight: "100vh" }}
+            initial={{ opacity: 0, scale: 1.03, filter: "blur(8px)" }}
+            animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={springNav}
+          >
+            <div className="app-shell-light">
+              <GlassSideNav page={page} setPage={handleSetPage} />
+              <div className="app-main-area" style={{ paddingBottom: 24 }}>
+                <TopNav page={page} setPage={handleSetPage} profile={profile} onLogout={handleLogout} onOpenGateway={() => setSurface("gateway")} />
+                <AnimatePresence mode="wait">
+                  <motion.div key={page} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={springNav}>
+                    {renderPage()}
+                  </motion.div>
+                </AnimatePresence>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
