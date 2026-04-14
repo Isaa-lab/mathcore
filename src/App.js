@@ -3168,84 +3168,51 @@ function ChangePasswordModal({ onClose }) {
 }
 
 function TopNav({ page, setPage, profile, onLogout }) {
-  const [showMore, setShowMore] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showPwdModal, setShowPwdModal] = useState(false);
-  const primaryLinks = ["首页", "资料对话", "题库练习", "学习报告", "资料库"];
-  const moreLinks = profile?.role === "teacher"
+  const primaryLinks = ["首页", "资料库", "资料对话", "题库练习", "学习报告"];
+  const secondaryLinks = profile?.role === "teacher"
     ? ["知识点", "记忆卡片", "错题本", "技能树", "上传资料", "教师管理"]
     : ["知识点", "记忆卡片", "错题本", "技能树", "上传资料"];
   const isActive = (l) => page === l;
+
   return (
-    <div style={{ position: "sticky", top: 0, zIndex: 100, marginBottom: 16 }}>
-      <div style={{ margin: "10px auto 0", background: "rgba(255,255,255,0.86)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)", border: `1px solid ${T.border}`, borderRadius: 18, boxShadow: T.shadow.soft, padding: "8px 12px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, minHeight: 50 }}>
-      <div onClick={() => setPage("首页")} style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flexShrink: 0 }}>
-        <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#1D9E75,#185FA5)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <path d="M17 4H6L11.5 11L6 18H17" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </div>
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: "#111", letterSpacing: "-0.5px", lineHeight: 1.1 }}>MathCore</div>
-          <div style={{ fontSize: 11, color: "#8391a1", marginTop: 2 }}>AI 数学学习工作台</div>
-        </div>
-      </div>
-      <div style={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap", justifyContent: "center" }}>
-        {primaryLinks.map(l => (
-          <button key={l} onClick={() => setPage(l)} style={{ padding: "8px 13px", borderRadius: 10, fontSize: 14, fontFamily: "inherit", border: "none", cursor: "pointer", fontWeight: isActive(l) ? 700 : 500, background: isActive(l) ? "#e9f5ff" : "transparent", color: isActive(l) ? "#0f5fa8" : "#3a4a5d", whiteSpace: "nowrap" }}>
-            {l === "资料对话" ? "🤖 AI助教" : l}
-          </button>
-        ))}
-        <div style={{ position: "relative" }}>
-          <button onClick={() => setShowMore(v => !v)} style={{ padding: "7px 12px", borderRadius: 9, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", background: moreLinks.includes(page) ? "#eefdf7" : "transparent", color: moreLinks.includes(page) ? G.tealDark : "#5b6677" }}>
-            更多 ▾
-          </button>
-          {showMore && (
-            <div onMouseLeave={() => setShowMore(false)} style={{ position: "absolute", top: "100%", right: 0, background: "#fff", borderRadius: 12, boxShadow: T.shadow.elevated, border: `1px solid ${T.border}`, padding: "8px 6px", minWidth: 150, zIndex: 200 }}>
-              {moreLinks.map(l => (
-                <button key={l} onClick={() => { setPage(l); setShowMore(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", background: page === l ? "#f1f5f9" : "transparent", color: page === l ? "#0f172a" : "#555", fontWeight: page === l ? 700 : 500 }}>{l}</button>
-              ))}
+    <div style={{ position: "sticky", top: 0, zIndex: 100, marginBottom: 20 }}>
+      <div style={{ marginTop: 10, background: "rgba(255,255,255,0.9)", backdropFilter: "blur(12px)", border: `1px solid ${T.border}`, borderRadius: 16, boxShadow: T.shadow.soft, overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 14px", borderBottom: `1px solid ${T.border}` }}>
+          <div onClick={() => setPage("首页")} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+            <div style={{ width: 34, height: 34, borderRadius: 9, background: "linear-gradient(135deg,#1D9E75,#185FA5)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 900 }}>Σ</div>
+            <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-0.02em" }}>MathCore</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
+            <button onClick={() => setShowPwdModal(true)} style={{ padding: "7px 12px", borderRadius: 9, border: `1px solid ${T.border}`, background: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", color: "#475569" }}>修改密码</button>
+            <div onClick={() => setShowUserMenu(v => !v)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 8px", borderRadius: 10 }}>
+              <div style={{ width: 30, height: 30, borderRadius: "50%", background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "#fff" }}>{(profile?.name || "U")[0].toUpperCase()}</div>
+              <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>{profile?.name}</div>
             </div>
-          )}
+            {showUserMenu && (
+              <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "#fff", border: `1px solid ${T.border}`, borderRadius: 12, minWidth: 160, boxShadow: T.shadow.elevated, padding: 6 }}>
+                <button onClick={() => { onLogout(); setShowUserMenu(false); }} style={{ width: "100%", textAlign: "left", padding: "9px 12px", border: "none", background: "transparent", borderRadius: 8, cursor: "pointer", color: G.red, fontSize: 13, fontFamily: "inherit", fontWeight: 600 }}>退出登录</button>
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={{ padding: "8px 12px 10px" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            {primaryLinks.map(l => (
+              <button key={l} onClick={() => setPage(l)} style={{ padding: "8px 13px", borderRadius: 999, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: isActive(l) ? "#0f172a" : "#f1f5f9", color: isActive(l) ? "#fff" : "#475569" }}>
+                {l === "资料对话" ? "AI助教" : l}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {secondaryLinks.map(l => (
+              <button key={l} onClick={() => setPage(l)} style={{ padding: "6px 11px", borderRadius: 999, border: `1px solid ${isActive(l) ? "#1D9E75" : T.border}`, background: isActive(l) ? "#ecfdf5" : "#fff", color: isActive(l) ? G.tealDark : "#64748b", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>{l}</button>
+            ))}
+          </div>
         </div>
       </div>
       {showPwdModal && <ChangePasswordModal onClose={() => setShowPwdModal(false)} />}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, position: "relative" }}>
-        <div onClick={() => setShowUserMenu(v => !v)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 8px", borderRadius: 10, transition: "background .15s" }}
-          onMouseEnter={e => e.currentTarget.style.background = "#f5f5f5"}
-          onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-        >
-          <div style={{ width: 32, height: 32, borderRadius: "50%", background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: "#fff" }}>{(profile?.name || "U")[0].toUpperCase()}</div>
-          <div style={{ lineHeight: 1.2 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#111" }}>{profile?.name}</div>
-            <div style={{ fontSize: 11, color: "#aaa" }}>{profile?.role === "teacher" ? "教师" : "学生"} ▾</div>
-          </div>
-        </div>
-        {showUserMenu && (
-          <div onMouseLeave={() => setShowUserMenu(false)} style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "#fff", borderRadius: 14, boxShadow: "0 8px 32px rgba(0,0,0,0.12)", border: "1px solid #eee", padding: "8px 6px", minWidth: 160, zIndex: 300 }}>
-            <div style={{ padding: "8px 14px", fontSize: 12, color: "#aaa", fontWeight: 600, borderBottom: "1px solid #f0f0f0", marginBottom: 6 }}>{profile?.email || profile?.name}</div>
-            <button onClick={() => { setShowPwdModal(true); setShowUserMenu(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", background: "transparent", color: "#333" }}
-              onMouseEnter={e => e.currentTarget.style.background = "#f5f5f5"}
-              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-            >🔒 修改密码</button>
-            <div style={{ height: 1, background: "#f0f0f0", margin: "6px 8px" }} />
-            <button onClick={() => { onLogout(); setShowUserMenu(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", borderRadius: 8, fontSize: 13, fontFamily: "inherit", border: "none", cursor: "pointer", background: "transparent", color: G.red }}
-              onMouseEnter={e => e.currentTarget.style.background = "#fff5f5"}
-              onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-            >🚪 退出登录</button>
-          </div>
-        )}
-      </div>
-      </div>
-      <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", paddingLeft: 48 }}>
-        {moreLinks.map(l => (
-          <button key={l} onClick={() => setPage(l)} style={{ padding: "5px 10px", borderRadius: 999, border: `1px solid ${isActive(l) ? "#b9e6d8" : "#e2e8f0"}`, background: isActive(l) ? "#ecfdf5" : "#fff", color: isActive(l) ? G.tealDark : "#64748b", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>
-            {l}
-          </button>
-        ))}
-      </div>
-      </div>
     </div>
   );
 }
@@ -3341,68 +3308,41 @@ function HomePage({ setPage, profile }) {
   const unlockedIds = new Set(BADGES.filter(b => b.check(badgeStats)).map(b => b.id));
 
   return (
-    <div style={{ maxWidth: 1020, margin: "0 auto", padding: "0 0 60px" }}>
+    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "0 0 50px" }}>
       {showAISettings && <AISettingsModal onClose={() => setShowAISettings(false)} />}
 
-      {/* ───────── HERO ───────── */}
-      <div style={{
-        background: "linear-gradient(135deg, #0d7a58 0%, #1D9E75 45%, #1565c0 100%)",
-        padding: "3.5rem 3rem 3rem",
-        position: "relative", overflow: "hidden",
-        borderRadius: 28,
-      }}>
-        {/* decorative */}
-        <div style={{ position:"absolute", right:-60, top:-60, width:320, height:320, borderRadius:"50%", background:"rgba(255,255,255,0.04)" }} />
-        <div style={{ position:"absolute", right:100, bottom:-80, width:200, height:200, borderRadius:"50%", background:"rgba(255,255,255,0.03)" }} />
-
-        <div style={{ position:"relative", zIndex:1 }}>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:16 }}>
-            <div>
-              <div style={{ color:"rgba(255,255,255,0.7)", fontSize:13, fontWeight:600, letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:10 }}>
-                数学智能学习平台
-              </div>
-              <div style={{ fontSize:40, fontWeight:900, color:"#fff", letterSpacing:"-1px", lineHeight:1.1, marginBottom:14 }}>
-                你好，{profile?.name || "同学"} 👋
-              </div>
-              <div style={{ fontSize:15, color:"rgba(255,255,255,0.8)", lineHeight:1.7, maxWidth:500 }}>
-                两大核心功能：<strong style={{color:"#fff"}}>上传资料 → AI 知识分析</strong>，以及 <strong style={{color:"#fff"}}>制定备考计划 → AI 助教带领复习</strong>
-              </div>
+      <SectionCard style={{ padding: "1.35rem", marginBottom: 16, background: "linear-gradient(145deg,#0f172a,#1e293b)", border: "none", color: "#fff" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 18 }}>
+          <div>
+            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8, letterSpacing: "0.08em" }}>MODERN LEARNING OPERATING SYSTEM</div>
+            <div style={{ fontSize: 34, fontWeight: 900, lineHeight: 1.15, letterSpacing: "-0.03em", marginBottom: 10 }}>欢迎回来，{profile?.name || "同学"}</div>
+            <div style={{ fontSize: 14, opacity: 0.82, lineHeight: 1.8, maxWidth: 560 }}>
+              一个页面完成两条主线：上传资料并生成知识结构，按考试时间线执行 AI 引导复习。
             </div>
-            <div style={{ display:"flex", gap:10, flexShrink:0 }}>
-              <button onClick={() => setShowAISettings(true)} style={{ padding:"10px 18px", fontSize:13, fontWeight:600, fontFamily:"inherit", background: hasUserKey ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.12)", color:"#fff", border:"1.5px solid rgba(255,255,255,0.35)", borderRadius:12, cursor:"pointer", display:"flex", alignItems:"center", gap:7 }}>
-                ⚙️ AI 设置
-                {hasUserKey && <span style={{ fontSize:11, background:"rgba(255,255,255,0.2)", padding:"2px 8px", borderRadius:8 }}>{providerLabel} ✓</span>}
-              </button>
+            <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+              <button onClick={() => setPage("资料库")} style={{ padding: "10px 16px", borderRadius: 10, background: "#fff", color: "#0f172a", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>进入资料学习</button>
+              <button onClick={() => setPage("学习报告")} style={{ padding: "10px 16px", borderRadius: 10, background: "rgba(255,255,255,0.14)", color: "#fff", border: "1px solid rgba(255,255,255,0.28)", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>进入备考计划</button>
+              <button onClick={() => setShowAISettings(true)} style={{ padding: "10px 16px", borderRadius: 10, background: "rgba(255,255,255,0.12)", color: "#fff", border: "1px solid rgba(255,255,255,0.24)", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>AI 设置 {hasUserKey ? `(${providerLabel})` : ""}</button>
             </div>
           </div>
-
-          {/* Stats pills */}
-          <div style={{ display:"flex", gap:10, marginTop:28, flexWrap:"wrap" }}>
-            {[
-              { icon:"🔥", val: streak + "天", label:"连续学习" },
-              { icon:"✏️", val: ALL_QUESTIONS.length + "+", label:"题目总量" },
-              { icon:"🏃", val: FLASHCARDS.length, label:"记忆卡片" },
-              { icon:"🏅", val: unlockedIds.size + "/" + BADGES.length, label:"徽章解锁" },
-            ].map(p => (
-              <div key={p.label} style={{ background:"rgba(255,255,255,0.14)", backdropFilter:"blur(8px)", borderRadius:14, padding:"10px 18px", display:"flex", alignItems:"center", gap:8, border:"1px solid rgba(255,255,255,0.2)" }}>
-                <span style={{ fontSize:18 }}>{p.icon}</span>
-                <div>
-                  <div style={{ fontSize:18, fontWeight:800, color:"#fff", lineHeight:1 }}>{p.val}</div>
-                  <div style={{ fontSize:11, color:"rgba(255,255,255,0.7)" }}>{p.label}</div>
-                </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            {[{ title: "连续学习", val: `${streak} 天` }, { title: "题库规模", val: `${ALL_QUESTIONS.length}+` }, { title: "记忆卡", val: `${FLASHCARDS.length}` }, { title: "徽章", val: `${unlockedIds.size}/${BADGES.length}` }].map(i => (
+              <div key={i.title} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: 12, padding: "12px 10px" }}>
+                <div style={{ fontSize: 20, fontWeight: 900 }}>{i.val}</div>
+                <div style={{ fontSize: 12, opacity: 0.72 }}>{i.title}</div>
               </div>
             ))}
           </div>
         </div>
-      </div>
+      </SectionCard>
 
       {/* ───────── TWO CORE WORKFLOW CARDS ───────── */}
-      <div style={{ padding:"0 2rem", marginTop:-1 }}>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginTop:24, marginBottom:24 }}>
+      <div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:16 }}>
 
           {/* Card 1: 资料学习 */}
-          <div style={{ background:"#fff", borderRadius:24, overflow:"hidden", boxShadow:"0 4px 24px rgba(29,158,117,0.12)", border:"1px solid rgba(29,158,117,0.15)" }}>
-            <div style={{ background:"linear-gradient(135deg, #ecfdf5, #d1fae5)", padding:"1.6rem 1.8rem 1.2rem", borderBottom:"1px solid #a7f3d0" }}>
+          <SectionCard style={{ padding:"1.2rem" }}>
+            <div style={{ paddingBottom:12, borderBottom:"1px solid #e6edf5" }}>
               <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
                 <div style={{ width:44, height:44, borderRadius:14, background:G.teal, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>📚</div>
                 <div>
@@ -3414,7 +3354,7 @@ function HomePage({ setPage, profile }) {
                 上传课件、作业、真题，AI 自动提取知识点结构、生成题库、配套记忆卡片
               </div>
             </div>
-            <div style={{ padding:"1rem 1.8rem 1.5rem" }}>
+            <div style={{ paddingTop:12 }}>
               <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:16 }}>
                 {[
                   { icon:"⬆️", text:"上传资料", sub:"支持 PDF、图片、文字", page:"资料库" },
@@ -3434,15 +3374,15 @@ function HomePage({ setPage, profile }) {
                   </div>
                 ))}
               </div>
-              <button onClick={() => setPage("资料库")} style={{ width:"100%", padding:"12px", background:G.teal, color:"#fff", border:"none", borderRadius:14, fontSize:15, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>
+              <button onClick={() => setPage("资料库")} style={{ width:"100%", padding:"12px", background:"#0f172a", color:"#fff", border:"none", borderRadius:12, fontSize:15, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>
                 开始学习 →
               </button>
             </div>
-          </div>
+          </SectionCard>
 
           {/* Card 2: 备考复习 */}
-          <div style={{ background:"#fff", borderRadius:24, overflow:"hidden", boxShadow:"0 4px 24px rgba(24,95,165,0.12)", border:"1px solid rgba(24,95,165,0.15)" }}>
-            <div style={{ background:"linear-gradient(135deg, #eff6ff, #dbeafe)", padding:"1.6rem 1.8rem 1.2rem", borderBottom:"1px solid #bfdbfe" }}>
+          <SectionCard style={{ padding:"1.2rem" }}>
+            <div style={{ paddingBottom:12, borderBottom:"1px solid #e6edf5" }}>
               <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
                 <div style={{ width:44, height:44, borderRadius:14, background:G.blue, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>🎯</div>
                 <div>
@@ -3454,7 +3394,7 @@ function HomePage({ setPage, profile }) {
                 设定考试日期和范围，生成倍计划，AI 小核逐章引导复习、即时检验、分析薄弱点
               </div>
             </div>
-            <div style={{ padding:"1rem 1.8rem 1.5rem" }}>
+            <div style={{ paddingTop:12 }}>
               <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:16 }}>
                 {[
                   { icon:"📅", text:"制定备考计划", sub:"设考试日期指定范围和章节", page:"学习报告" },
@@ -3474,15 +3414,15 @@ function HomePage({ setPage, profile }) {
                   </div>
                 ))}
               </div>
-              <button onClick={() => setPage("资料对话")} style={{ width:"100%", padding:"12px", background:G.blue, color:"#fff", border:"none", borderRadius:14, fontSize:15, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>
+              <button onClick={() => setPage("资料对话")} style={{ width:"100%", padding:"12px", background:"#0f172a", color:"#fff", border:"none", borderRadius:12, fontSize:15, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>
                 开始备考 →
               </button>
             </div>
-          </div>
+          </SectionCard>
         </div>
 
         {/* ───────── QUICK TOOLS ───────── */}
-        <div style={{ marginBottom:24 }}>
+        <SectionCard style={{ marginBottom:16 }}>
           <div style={{ fontSize:12, fontWeight:700, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:12 }}>快捷工具</div>
           <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
             {[
@@ -3497,12 +3437,12 @@ function HomePage({ setPage, profile }) {
               </button>
             ))}
           </div>
-        </div>
+        </SectionCard>
 
         <JoinClassCard profile={profile} />
 
         {/* ───────── BADGE GALLERY ───────── */}
-        <div style={{ marginTop:28 }}>
+        <SectionCard style={{ marginTop:16 }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
             <div style={{ fontSize:16, fontWeight:800, color:"#111" }}>🏅 成就墙</div>
             <div style={{ fontSize:12, color:"#bbb" }}>{unlockedIds.size}/{BADGES.length} 已解锁</div>
@@ -3512,23 +3452,23 @@ function HomePage({ setPage, profile }) {
               const unlocked = unlockedIds.has(b.id);
               return (
                 <div key={b.id} title={b.desc} style={{
-                  background: unlocked ? "linear-gradient(135deg,#fef9c3,#fef08a)" : "#fafafa",
-                  border: unlocked ? "2px solid #facc15" : "1.5px solid #eee",
-                  borderRadius:18, padding:"16px 8px",
+                  background: unlocked ? "#fffbe6" : "#fff",
+                  border: unlocked ? "1.5px solid #facc15" : `1px solid ${T.border}`,
+                  borderRadius:12, padding:"12px 8px",
                   display:"flex", flexDirection:"column", alignItems:"center", gap:8,
                   opacity: unlocked ? 1 : 0.45,
-                  boxShadow: unlocked ? "0 4px 16px rgba(250,204,21,0.3)" : "none",
+                  boxShadow: "none",
                   transition:"all .2s",
                 }}>
                   <span style={{ fontSize:26, filter: unlocked ? "none" : "grayscale(1)" }}>{b.emoji}</span>
                   <div style={{ fontSize:12, fontWeight:700, color: unlocked ? "#78350f" : "#999", textAlign:"center", lineHeight:1.3 }}>{b.name}</div>
                   <div style={{ fontSize:10, color: unlocked ? "#92400e" : "#ccc", textAlign:"center", lineHeight:1.4 }}>{b.desc}</div>
-                  {unlocked && <div style={{ fontSize:9, background:"#22c55e", color:"#fff", padding:"2px 8px", borderRadius:20, fontWeight:700 }}>已解锁 ✓</div>}
+                  {unlocked && <div style={{ fontSize:9, background:"#0f172a", color:"#fff", padding:"2px 8px", borderRadius:20, fontWeight:700 }}>已解锁</div>}
                 </div>
               );
             })}
           </div>
-        </div>
+        </SectionCard>
       </div>
     </div>
   );
