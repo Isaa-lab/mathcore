@@ -11,18 +11,18 @@ import "katex/dist/katex.min.css";
   style.textContent = `
     * { box-sizing: border-box; }
     :root{
-      --mc-bg:#f4f7fb;
+      --mc-bg:#f7f8fa;
       --mc-surface:#ffffff;
       --mc-surface-soft:#f8fafc;
-      --mc-border:#e6edf5;
+      --mc-border:#e5e7eb;
       --mc-text:#0f172a;
       --mc-muted:#64748b;
       --mc-primary:#1D9E75;
       --mc-radius-sm:10px;
       --mc-radius-md:14px;
       --mc-radius-lg:18px;
-      --mc-shadow-soft:0 2px 14px rgba(15,23,42,0.05);
-      --mc-shadow-elevated:0 10px 30px rgba(15,23,42,0.08);
+      --mc-shadow-soft:0 1px 2px rgba(15,23,42,0.06);
+      --mc-shadow-elevated:0 8px 24px rgba(15,23,42,0.08);
       --mc-duration-fast:120ms;
       --mc-duration-normal:220ms;
       --mc-ease:cubic-bezier(.2,.7,.2,1);
@@ -90,20 +90,20 @@ const G = {
 };
 
 const T = {
-  bg: "#f4f7fb",
+  bg: "#f7f8fa",
   panel: "#ffffff",
   panelSoft: "#f8fafc",
-  border: "#e6edf5",
+  border: "#e5e7eb",
   text: "#0f172a",
   muted: "#64748b",
-  radius: { sm: 10, md: 14, lg: 18, xl: 24 },
-  shadow: { soft: "0 2px 14px rgba(15,23,42,0.05)", elevated: "0 10px 30px rgba(15,23,42,0.08)" },
+  radius: { sm: 8, md: 10, lg: 12, xl: 16 },
+  shadow: { soft: "0 1px 2px rgba(15,23,42,0.06)", elevated: "0 8px 24px rgba(15,23,42,0.08)" },
   gap: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
 };
 
 const AppShell = ({ children }) => (
-  <div style={{ minHeight: "100vh", background: `radial-gradient(1200px 500px at 0% -20%, #dff4ec 0%, transparent 55%), radial-gradient(1200px 500px at 100% -30%, #e4edff 0%, transparent 55%), ${T.bg}` }}>
-    <div style={{ maxWidth: 1240, margin: "0 auto", padding: "0 20px 28px" }} className="mc-page-enter">
+  <div style={{ minHeight: "100vh", background: T.bg }}>
+    <div style={{ maxWidth: 1240, margin: "0 auto", padding: "0 18px 24px" }} className="mc-page-enter">
       {children}
     </div>
   </div>
