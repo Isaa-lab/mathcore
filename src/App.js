@@ -6858,8 +6858,8 @@ function GatewayPage({ profile, onMaterial, onExam }) {
   const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1 } } };
   const item = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0, transition: spring } };
 
-  const [studyHover, setStudyHover] = React.useState(false);
-  const [sprintHover, setSprintHover] = React.useState(false);
+  const [studyHover, setStudyHover] = useState(false);
+  const [sprintHover, setSprintHover] = useState(false);
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", background: "#FAFAFC" }}>
