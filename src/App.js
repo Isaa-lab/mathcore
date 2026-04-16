@@ -3,6 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import katex from "katex";
 import { AnimatePresence, motion } from "framer-motion";
 import { useMathStore } from "./store/useMathStore";
+import QuizPageView from "./pages/QuizPage";
+import MaterialChatPageView from "./pages/MaterialChatPage";
+import InteractiveMathChart from "./components/InteractiveMathChart";
 import "katex/dist/katex.min.css";
 
 // Inject global CSS animations
@@ -4416,278 +4419,37 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     return { type: "概念理解", color: G.purple, icon: "*", tip: "回到知识点卡片理清定义" };
   })() : null;
 
-  // ── Quiz screen ──
+  // ── Quiz screen (modular view) ──
+  const normalizedOptions = opts || (q.type === "判断题" ? ["正确", "错误"] : []);
+  const selectedOptionIndex = selected;
+  const correctIndex = normalizedOptions.findIndex((item, idx) => {
+    if (opts) return letters[idx] === q.answer;
+    return item === q.answer;
+  });
   return (
     <div className="quiz-stage">
-      <div className="premium-card" style={{ marginBottom: 20, padding: "14px 18px", display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 14, alignItems: "center" }}>
-        <Btn size="sm" onClick={() => { setQuizMode(null); setFinished(false); }}>← 返回</Btn>
-        <div>
-          <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text-main)", letterSpacing: "-0.01em" }}>第 {current + 1} / {displayQ.length} 题</div>
-          <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>{q.chapter} · {q.type}</div>
-        </div>
-        <div style={{ minWidth: 220, display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
-            {timerOn
-              ? <span style={{ color: "var(--text-muted)" }}>⏱ {String(Math.floor(timer/60)).padStart(2,"0")}:{String(timer%60).padStart(2,"0")}</span>
-              : <span style={{ color: "var(--text-muted)" }}>沉浸答题模式</span>
-            }
-            <span style={{ color: "var(--text-muted)" }}>得分 <strong style={{ color: "#111827", fontSize: 16 }}>{score}</strong></span>
-          </div>
-          <div style={{ width: "100%", height: 7, background: "#EEF0F6", borderRadius: 999 }}>
-            <motion.div
-              style={{ height: 7, borderRadius: 999, background: "linear-gradient(90deg,#635BFF,#8B5CF6)" }}
-              initial={false}
-              animate={{ width: ((current + 1) / Math.max(displayQ.length, 1) * 100) + "%" }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            />
-          </div>
-        </div>
+      <div className="premium-card" style={{ marginBottom: 14, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>第 {current + 1} / {displayQ.length} 题 · {q.chapter}</span>
+        {timerOn && <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>⏱ {String(Math.floor(timer/60)).padStart(2,"0")}:{String(timer%60).padStart(2,"0")}</span>}
       </div>
-      <div style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "right", marginBottom: 6 }}>⌨️ 1-4 选择 · Enter 提交</div>
-      <motion.div
-        className="premium-card"
-        animate={answered ? (isWrongAnswered ? { x: [0, -10, 10, -8, 8, 0] } : { backgroundColor: "#ecfdf5" }) : { x: 0, backgroundColor: "#FFFFFF" }}
-        transition={{ duration: 0.45 }}
-        style={{ padding: 28, marginBottom: 14, border: answered && !isWrongAnswered ? "1px solid rgba(16,185,129,0.32)" : "1px solid rgba(0,0,0,0.04)" }}
-      >
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          <Badge color="blue">{q.type}</Badge>
-          <Badge color="amber">{q.chapter}</Badge>
-        </div>
-        <div style={{ fontSize: 24, color: "var(--text-main)", lineHeight: 1.6, marginBottom: 16, fontWeight: 700 }}><MathText text={q.question} /></div>
-        {/* AI Help button */}
-        <div style={{ textAlign: "right", marginBottom: 14 }}>
-          <button onClick={() => { setShowAIHelp(!showAIHelp); if (!showAIHelp) { setAIHelpReply(""); setAIHelpInput(""); } }}
-            style={{ padding: "6px 14px", background: showAIHelp ? "#eff6ff" : "#f0fdf4", color: showAIHelp ? "#2563eb" : "#16a34a", border: "1px solid " + (showAIHelp ? "#bfdbfe" : "#bbf7d0"), borderRadius: 20, cursor: "pointer", fontSize: 13, fontWeight: 600, transition: "all 0.2s" }}>
-            {showAIHelp ? "▲ 收起AI解析" : "💬 不会？问 AI"}
-          </button>
-        </div>
-        {showAIHelp && (
-          <div style={{ background: "#f0f7ff", border: "1px solid #bfdbfe", borderRadius: 14, padding: "14px 16px", marginBottom: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#1d4ed8", marginBottom: 10 }}>🤖 AI 解析助手</div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-              <input value={aiHelpInput} onChange={e => setAIHelpInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && askQuestionAI(aiHelpInput || "请详细解析这道题的解题思路和步骤")}
-                placeholder="输入你的困惑，或直接点击「获取解析」"
-                style={{ flex: 1, padding: "8px 12px", borderRadius: 8, border: "1px solid #dbeafe", fontSize: 13, background: "#fff", outline: "none" }} />
-              <button onClick={() => askQuestionAI(aiHelpInput || "请详细解析这道题的解题思路和步骤")}
-                disabled={aiHelpLoading}
-                style={{ padding: "8px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-                {aiHelpLoading ? "..." : "发送"}
-              </button>
-            </div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-              {["请详细解析这道题的解题思路和步骤", "这道题考查的是哪个知识点？", "类似题型如何解答？"].map(hint => (
-                <button key={hint} onClick={() => askQuestionAI(hint)} disabled={aiHelpLoading}
-                  style={{ padding: "4px 10px", background: "#fff", border: "1px solid #bfdbfe", borderRadius: 12, cursor: "pointer", fontSize: 12, color: "#3b82f6" }}>
-                  {hint}
-                </button>
-              ))}
-            </div>
-            {aiHelpLoading && <div style={{ color: "#3b82f6", fontSize: 13, marginTop: 4 }}>AI 正在思考中...</div>}
-            {aiHelpReply && (
-              <div style={{ background: "#fff", border: "1px solid #dbeafe", borderRadius: 10, padding: "12px 14px", marginTop: 8, fontSize: 14, lineHeight: 1.8, color: "#1e293b" }}>
-                <MathText text={aiHelpReply} />
-              </div>
-            )}
-          </div>
-        )}
-        {opts && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {opts.map((opt, i) => {
-              const isSel = selected === i;
-              const isCorrectLetter = letters[i] === q.answer;
-              const wrongPick = answered && isSel && !isCorrectLetter;
-              let border = "1px solid #E8E8EE";
-              let bg = "#FAFAFC";
-              let col = "#111827";
-              let fw = 400;
-              if (!answered && isSel) {
-                border = "2px solid #111827";
-                bg = "#FFFFFF";
-                fw = 700;
-              }
-              if (answered) {
-                if (isCorrectLetter) {
-                  bg = "rgba(16, 185, 129, 0.12)";
-                  border = "2px solid #10b981";
-                  col = "#065f46";
-                  fw = 600;
-                } else if (wrongPick) {
-                  bg = "rgba(239, 68, 68, 0.1)";
-                  border = "2px solid #ef4444";
-                  col = "#991b1b";
-                  fw = 600;
-                }
-              }
-              return (
-                <motion.div
-                  key={i}
-                  className="quiz-option-tile"
-                  animate={wrongPick ? { x: [0, -8, 8, -6, 6, 0] } : { x: 0 }}
-                  transition={wrongPick ? { duration: 0.45 } : springPop}
-                  whileHover={!answered ? { scale: 1.02, y: -4 } : undefined}
-                  whileTap={!answered ? { scale: 0.98 } : undefined}
-                  onClick={() => !answered && setSelected(i)}
-                  style={{ border, cursor: answered ? "default" : "pointer", background: bg, display: "flex", gap: 14, alignItems: "center" }}
-                >
-                  <div style={{ width: 28, height: 28, borderRadius: "50%", border: "2px solid " + (isSel && !answered ? "#111827" : "#d1d5db"), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, flexShrink: 0, background: isSel && !answered ? "#111827" : "transparent", color: isSel && !answered ? "#fff" : col }}>{letters[i]}</div>
-                  <span style={{ fontSize: 16, color: col, fontWeight: fw }}><MathText text={opt} /></span>
-                  {answered && isCorrectLetter && <span style={{ marginLeft: "auto", color: G.teal }}>{String.fromCharCode(0x2713)}</span>}
-                </motion.div>
-              );
-            })}
-          </div>
-        )}
-        {!opts && q.type === "判断题" && (
-          <div style={{ display: "flex", gap: 12 }}>
-            {["正确","错误"].map((opt, i) => {
-              const isSel = selected === i;
-              const isCorrect = (opt === q.answer);
-              const wrongPick = answered && isSel && !isCorrect;
-              let border = "1px solid #E8E8EE";
-              let bg = "#FAFAFC";
-              let fw = 500;
-              if (!answered && isSel) {
-                border = "2px solid #111827";
-                bg = "#FFFFFF";
-                fw = 700;
-              }
-              if (answered) {
-                if (isCorrect) {
-                  bg = "rgba(16, 185, 129, 0.12)";
-                  border = "2px solid #10b981";
-                  fw = 600;
-                } else if (wrongPick) {
-                  bg = "rgba(239, 68, 68, 0.1)";
-                  border = "2px solid #ef4444";
-                  fw = 600;
-                }
-              }
-              return (
-                <motion.div
-                  key={i}
-                  className="quiz-option-tile"
-                  style={{ flex: 1, padding: "18px 0", border, borderRadius: 16, cursor: answered ? "default" : "pointer", background: bg, textAlign: "center", fontSize: 17, fontWeight: fw }}
-                  animate={wrongPick ? { x: [0, -8, 8, -6, 6, 0] } : { x: 0 }}
-                  transition={wrongPick ? { duration: 0.45 } : springPop}
-                  whileHover={!answered ? { scale: 1.02, y: -4 } : undefined}
-                  whileTap={!answered ? { scale: 0.98 } : undefined}
-                  onClick={() => !answered && setSelected(i)}
-                >{opt}</motion.div>
-              );
-            })}
-          </div>
-        )}
-        {isTextQuestion(q) && q.type.includes("填空") && (
-          <div style={{ marginTop: 14 }}>
-            <input
-              value={answerText}
-              onChange={(e) => setAnswerText(e.target.value)}
-              disabled={answered}
-              placeholder="在此输入你的答案…"
-              style={{
-                width: "100%",
-                fontSize: 18,
-                padding: "10px 4px",
-                border: "none",
-                borderBottom: answered ? "2px solid #d1d5db" : "2px solid #9ca3af",
-                outline: "none",
-                background: "transparent",
-                transition: "border-color .25s ease",
-                color: "var(--text-main)",
-              }}
-              onFocus={(e) => { if (!answered) e.target.style.borderBottom = "2px solid #635BFF"; }}
-              onBlur={(e) => { if (!answered) e.target.style.borderBottom = "2px solid #9ca3af"; }}
-            />
-          </div>
-        )}
-        {isTextQuestion(q) && !q.type.includes("填空") && (
-          <div style={{ marginTop: 14 }}>
-            <textarea
-              value={answerText}
-              onChange={(e) => setAnswerText(e.target.value)}
-              disabled={answered}
-              placeholder="写下你的推导过程、关键公式与结论…"
-              rows={4}
-              style={{
-                width: "100%",
-                minHeight: 140,
-                resize: "vertical",
-                border: "none",
-                borderRadius: 14,
-                padding: "14px 16px",
-                background: "#F3F4F6",
-                color: "var(--text-main)",
-                fontSize: 15,
-                lineHeight: 1.7,
-                fontFamily: "inherit",
-                outline: "none",
-              }}
-            />
-          </div>
-        )}
-      </motion.div>
-      {!answered && showHint && (
-        <motion.div className="premium-card" style={{ marginBottom: 14, padding: 20 }} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={springPop}>
-          <div style={{ fontWeight: 700, marginBottom: 8, color: "var(--text-main)" }}>预习提示</div>
-          <div style={{ color: "var(--text-muted)", lineHeight: 1.75 }}><MathText text={hintStepsQuiz[0]} /></div>
-        </motion.div>
-      )}
-      <AnimatePresence>
-        {(answered && isWrongAnswered) || showAIHelp ? (
-          <motion.div
-            key="scaffold"
-            className="premium-card"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={springPop}
-            style={{ marginBottom: 14, padding: 22, overflow: "hidden", border: "1px solid rgba(99,91,255,0.25)" }}
-          >
-            <div style={{ fontWeight: 800, marginBottom: 12, color: "#312e81" }}>深度解析</div>
-            <div style={{ fontSize: 15, lineHeight: 1.8, color: "var(--text-main)", marginBottom: 14 }}>
-              <MathText text={q.explanation || "先审题，提取已知条件，再匹配对应公式。"} />
-            </div>
-            {rootCauseQuiz && (
-              <div style={{ marginBottom: 12, padding: "10px 12px", background: rootCauseQuiz.color + "18", borderRadius: 12 }}>
-                <span style={{ fontWeight: 700, color: rootCauseQuiz.color }}>错误类型：{rootCauseQuiz.type}</span>
-                <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>{rootCauseQuiz.tip}</div>
-              </div>
-            )}
-            <div style={{ fontWeight: 800, marginBottom: 10, color: "#111827" }}>解题架构</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {hintStepsQuiz.map((step, si) => (
-                <div key={si} style={{ background: "#F5F3FF", borderLeft: "4px solid #8B5CF6", borderRadius: 12, padding: "12px 14px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6D28D9", marginBottom: 4 }}>STEP {si + 1}</div>
-                  <div style={{ fontSize: 15, color: "var(--text-main)", lineHeight: 1.75 }}><MathText text={step} /></div>
-                </div>
-              ))}
-              <div style={{ background: "#EEF2FF", borderLeft: "4px solid #6366F1", borderRadius: 12, padding: "12px 14px" }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#4338CA", marginBottom: 4 }}>通用模板</div>
-                <div style={{ fontSize: 14, color: "var(--text-main)", lineHeight: 1.75 }}>
-                  读题定位目标 -> 提取已知条件 -> 匹配公式/定理 -> 分步计算与检验 -> 回答并复盘易错点
-                </div>
-              </div>
-            </div>
-            <div style={{ marginTop: 10, fontSize: 14, color: "var(--text-muted)" }}>参考答案：<strong style={{ color: "var(--text-main)" }}>{q.answer}</strong></div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-      {answered && !isWrongAnswered && (
-        <motion.div className="premium-card" style={{ marginBottom: 14, padding: 16, border: "1px solid rgba(16,185,129,0.35)" }} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={springPop}>
-          <span style={{ color: G.tealDark, fontWeight: 700 }}>回答正确</span>
-          <span style={{ marginLeft: 8, color: "var(--text-muted)" }}>继续保持节奏。</span>
-        </motion.div>
-      )}
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
+      <QuizPageView
+        question={q.question}
+        options={normalizedOptions}
+        selectedIndex={selectedOptionIndex}
+        onSelectOption={(idx) => { if (!answered) setSelected(idx); }}
+        submitted={answered}
+        isCorrect={!answered ? false : selectedOptionIndex === correctIndex}
+        onSubmit={handleSubmit}
+        onNext={handleNext}
+        explanation={q.explanation || aiHelpReply}
+        showScaffold={(answered && isWrongAnswered) || showAIHelp}
+        wrongShake={answered && isWrongAnswered}
+        mathRenderer={(txt) => <MathText text={String(txt || "")} />}
+      />
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
         <Btn onClick={() => { if (current > 0) { setCurrent(c => c-1); setSelected(null); setAnswered(false); setShowHint(false); } }}>← 上一题</Btn>
         <div style={{ display: "flex", gap: 10 }}>
-          {!answered && <Btn size="sm" onClick={() => setShowHint(v => !v)}>💡 {showHint ? "隐藏" : "提示"}</Btn>}
           <Btn size="sm" onClick={() => setShowAIHelp(v => !v)}>问 AI 解析</Btn>
-          {!answered
-            ? <Btn variant="primary" onClick={handleSubmit} disabled={!isTextQuestion(q) ? selected === null : !answerText.trim()}>提交答案</Btn>
-            : <Btn variant="primary" onClick={handleNext}>{current >= displayQ.length-1 ? "查看结果 →" : "下一题 →"}</Btn>}
         </div>
       </div>
     </div>
@@ -6199,29 +5961,18 @@ function MaterialChatPage({ setPage, profile }) {
           {history.length === 0 && (
             <div style={{ padding: "24px 0", color: "var(--text-muted)", fontSize: 14, lineHeight: 1.85 }}>
               {chatMode === "tutor"
-                ? "试着输入：帮我制定 3 天复习计划；先从第一章讲起；我不会插值法，从零开始。"
-                : "试着输入：这份资料的核心知识点是什么？请给我一道例题并详细讲解步骤。"}
+                ? "试着输入：帮我制定 3 天复习计划；先从第一章讲起；输出 [VAR:a,1,10] 与 [CHART] 进行可视化。"
+                : "试着输入：这份资料的核心知识点是什么？并输出 [VAR:a,1,10] 与 [CHART]。"}
             </div>
           )}
-          {history.map((m, idx) =>
-            m.role === "user" ? (
-              <motion.div key={idx} className="chat-doc-row-user" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
-                <div className="chat-doc-user-text" style={{ marginBottom: 32, fontWeight: 700, color: "#1e3a8a", textShadow: "0 0 18px rgba(99,102,241,0.12)" }}>
-                  {renderStructuredText(m.text)}
-                </div>
-              </motion.div>
-            ) : (
-              <motion.div key={idx} className="chat-doc-row-ai" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
-                <div className="chat-doc-ai-text" style={{ marginBottom: 32, borderLeft: "2px solid transparent", borderImage: "linear-gradient(180deg,#a78bfa,#60a5fa) 1", paddingLeft: 14 }}>
-                  {renderStructuredText(m.text)}
-                </div>
-              </motion.div>
-            )
-          )}
+          <MaterialChatPageView
+            messages={history}
+            conversationHistory={history}
+            currentMaterial={selectedMaterial}
+            renderChart={() => <InteractiveMathChart />}
+          />
           {chatting && (
-            <div className="chat-doc-row-ai">
-              <div className="chat-doc-ai-text" style={{ color: "var(--text-muted)", marginBottom: 32, borderLeft: "2px solid transparent", borderImage: "linear-gradient(180deg,#a78bfa,#60a5fa) 1", paddingLeft: 14 }}>正在思考…</div>
-            </div>
+            <div style={{ color: "var(--text-secondary)", paddingLeft: 16, borderLeft: "2px solid transparent", borderImage: "var(--ai-glow) 1" }}>正在思考…</div>
           )}
           <div ref={chatEndRef} />
         </div>

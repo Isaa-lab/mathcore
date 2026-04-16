@@ -52,11 +52,19 @@ function ParsedFlowBlock({ text, renderChart }) {
 
 export default function MaterialChatPage({
   messages,
+  conversationHistory,
+  currentMaterial,
   renderChart,
 }) {
+  const stream = messages || conversationHistory || [];
   return (
     <div style={{ maxWidth: 768, margin: "0 auto", padding: "8px 12px 24px" }}>
-      {messages.map((msg, i) =>
+      {currentMaterial?.title && (
+        <div style={{ marginBottom: 16, fontSize: 12, color: "var(--text-secondary)" }}>
+          当前资料：{currentMaterial.title}
+        </div>
+      )}
+      {stream.map((msg, i) =>
         msg.role === "user" ? (
           <div
             key={i}
