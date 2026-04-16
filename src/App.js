@@ -139,7 +139,7 @@ import "katex/dist/katex.min.css";
       flex-wrap: wrap;
       gap: 10px;
       align-items: center;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
     }
     .chat-doc-row-user {
       display: flex;
@@ -170,7 +170,7 @@ import "katex/dist/katex.min.css";
       color: var(--text-main);
     }
     .chat-header {
-      padding: 16px 18px 12px;
+      padding: 18px 22px 14px;
       border-bottom: 1px solid var(--border-light);
       background: transparent;
     }
@@ -184,6 +184,7 @@ import "katex/dist/katex.min.css";
       margin-top: 4px;
       font-size: 12px;
       color: var(--text-muted);
+      letter-spacing: 0.01em;
     }
     .chat-history-scroll {
       flex: 1;
@@ -193,8 +194,9 @@ import "katex/dist/katex.min.css";
     }
     .chat-input-area {
       border-top: 1px solid var(--border-light);
-      background: transparent;
-      padding: 12px 18px;
+      background: rgba(255,255,255,0.72);
+      backdrop-filter: blur(8px);
+      padding: 14px 18px 16px;
     }
     .input-wrapper {
       display: flex;
@@ -203,28 +205,32 @@ import "katex/dist/katex.min.css";
     }
     .clean-input {
       flex: 1;
-      min-height: 44px;
-      max-height: 120px;
+      min-height: 52px;
+      max-height: 140px;
       border: 1px solid var(--border-light);
-      border-radius: var(--radius-md);
-      padding: 10px 12px;
+      border-radius: 14px;
+      padding: 12px 14px;
       font-family: inherit;
       resize: vertical;
       background: #FFFFFF;
       color: var(--text-main);
-      font-size: 14px;
-      line-height: 1.6;
+      font-size: 15px;
+      line-height: 1.65;
     }
-    .clean-input:focus { outline: none; border-color: var(--text-main); }
+    .clean-input:focus {
+      outline: none;
+      border-color: #635BFF;
+      box-shadow: 0 0 0 4px rgba(99, 91, 255, 0.12);
+    }
     .send-btn:disabled {
       background: var(--btn-disabled-bg);
       color: var(--btn-disabled-text);
       cursor: not-allowed;
     }
     .quiz-stage {
-      max-width: 980px;
+      max-width: 1040px;
       margin: 0 auto;
-      padding-bottom: 16px;
+      padding: 4px 8px 18px;
     }
     .quiz-option-tile {
       border: 1px solid var(--border-light);
@@ -3930,6 +3936,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [displayQ, setDisplayQ] = useState([]);
   const [current, setCurrent] = useState(0);
   const [selected, setSelected] = useState(null);
+  const [answerText, setAnswerText] = useState("");
   const [answered, setAnswered] = useState(false);
   const [showHint, setShowHint] = useState(false);
   const [score, setScore] = useState(0);
@@ -4113,12 +4120,30 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     setAIHelpLoading(false);
   };
 
+  const normalizeText = (v) => String(v || "").trim().replace(/\s+/g, "").toLowerCase();
+  const isTextQuestion = (question) => {
+    const qt = String(question?.type || "");
+    return qt.includes("填空") || qt.includes("问答") || qt.includes("简答") || qt.includes("大题");
+  };
+  const checkTextAnswer = (input, standard) => {
+    const user = normalizeText(input);
+    if (!user) return false;
+    const base = String(standard || "");
+    const candidates = base.split(/[|｜]/).map(s => normalizeText(s)).filter(Boolean);
+    if (candidates.length === 0) return false;
+    return candidates.some((cand) => user === cand || user.includes(cand) || cand.includes(user));
+  };
+
   const handleSubmit = () => {
-    if (selected === null) return;
+    if (!q) return;
+    if (!isTextQuestion(q) && selected === null) return;
+    if (isTextQuestion(q) && !answerText.trim()) return;
     setAnswered(true);
-    const correct = opts
-      ? letters[selected] === q.answer
-      : (selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误");
+    const correct = isTextQuestion(q)
+      ? checkTextAnswer(answerText, q.answer)
+      : (opts
+          ? letters[selected] === q.answer
+          : (selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误"));
     if (correct) {
       setScore(s => s + 1);
       setCorrectStreak(s => {
@@ -4152,12 +4177,12 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       } catch {}
       return;
     }
-    setCurrent(c => c + 1); setSelected(null); setAnswered(false); setShowHint(false); setShowAIHelp(false); setAIHelpReply(""); setAIHelpInput("");
+    setCurrent(c => c + 1); setSelected(null); setAnswerText(""); setAnswered(false); setShowHint(false); setShowAIHelp(false); setAIHelpReply(""); setAIHelpInput("");
   };
   // Reset streak on quiz restart
   const handleRestartQuiz = () => {
     setCorrectStreak(0); setShowWin(false); setFinished(false);
-    setCurrent(0); setSelected(null); setAnswered(false); setScore(0); setWrongList([]);
+    setCurrent(0); setSelected(null); setAnswerText(""); setAnswered(false); setScore(0); setWrongList([]);
   };
 
   // Keyboard shortcuts
@@ -4165,10 +4190,12 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     if (quizMode !== "active" || finished || !q) return;
     const handler = (e) => {
       if (answered) { if (e.key === "Enter" || e.key === "ArrowRight") handleNext(); return; }
-      if (e.key === "1") setSelected(0);
-      if (e.key === "2") setSelected(1);
-      if (e.key === "3") setSelected(2);
-      if (e.key === "4") setSelected(3);
+      if (!isTextQuestion(q)) {
+        if (e.key === "1") setSelected(0);
+        if (e.key === "2") setSelected(1);
+        if (e.key === "3") setSelected(2);
+        if (e.key === "4") setSelected(3);
+      }
       if (e.key === "Enter") handleSubmit();
     };
     window.addEventListener("keydown", handler);
@@ -4383,24 +4410,37 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   // ── Quiz screen ──
   return (
     <div className="quiz-stage">
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+      <div className="premium-card" style={{ marginBottom: 20, padding: "14px 18px", display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 14, alignItems: "center" }}>
         <Btn size="sm" onClick={() => { setQuizMode(null); setFinished(false); }}>← 返回</Btn>
-        <div className="premium-card" style={{ flex: 1, padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>第 {current + 1} / {displayQ.length} 题</div>
-            <div style={{ fontSize: 13, color: "#888", marginTop: 2 }}>{q.chapter} · {q.type}</div>
+        <div>
+          <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text-main)", letterSpacing: "-0.01em" }}>第 {current + 1} / {displayQ.length} 题</div>
+          <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>{q.chapter} · {q.type}</div>
+        </div>
+        <div style={{ minWidth: 220, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
+            {timerOn
+              ? <span style={{ color: "var(--text-muted)" }}>⏱ {String(Math.floor(timer/60)).padStart(2,"0")}:{String(timer%60).padStart(2,"0")}</span>
+              : <span style={{ color: "var(--text-muted)" }}>沉浸答题模式</span>
+            }
+            <span style={{ color: "var(--text-muted)" }}>得分 <strong style={{ color: "#111827", fontSize: 16 }}>{score}</strong></span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            {timerOn && <div style={{ fontSize: 14, color: "#888", background: "#f5f5f5", padding: "4px 12px", borderRadius: 20 }}>⏱ {String(Math.floor(timer/60)).padStart(2,"0")}:{String(timer%60).padStart(2,"0")}</div>}
-            <span style={{ fontSize: 14, color: "#666" }}>得分 <strong style={{ color: G.teal, fontSize: 18 }}>{score}</strong>/{current}</span>
-            <div style={{ width: 100, height: 6, background: "#f0f0f0", borderRadius: 3 }}>
-              <div style={{ height: 6, background: G.teal, borderRadius: 3, width: ((current+1)/displayQ.length*100)+"%" }} />
-            </div>
+          <div style={{ width: "100%", height: 7, background: "#EEF0F6", borderRadius: 999 }}>
+            <motion.div
+              style={{ height: 7, borderRadius: 999, background: "linear-gradient(90deg,#635BFF,#8B5CF6)" }}
+              initial={false}
+              animate={{ width: ((current + 1) / Math.max(displayQ.length, 1) * 100) + "%" }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            />
           </div>
         </div>
       </div>
       <div style={{ fontSize: 12, color: "var(--text-muted)", textAlign: "right", marginBottom: 6 }}>⌨️ 1-4 选择 · Enter 提交</div>
-      <div className="premium-card" style={{ padding: 28, marginBottom: 14 }}>
+      <motion.div
+        className="premium-card"
+        animate={answered ? (isWrongAnswered ? { x: [0, -10, 10, -8, 8, 0] } : { backgroundColor: "#ecfdf5" }) : { x: 0, backgroundColor: "#FFFFFF" }}
+        transition={{ duration: 0.45 }}
+        style={{ padding: 28, marginBottom: 14, border: answered && !isWrongAnswered ? "1px solid rgba(16,185,129,0.32)" : "1px solid rgba(0,0,0,0.04)" }}
+      >
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           <Badge color="blue">{q.type}</Badge>
           <Badge color="amber">{q.chapter}</Badge>
@@ -4487,7 +4527,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                   {answered && isCorrectLetter && <span style={{ marginLeft: "auto", color: G.teal }}>{String.fromCharCode(0x2713)}</span>}
                 </motion.div>
               );
-            })}            })}
+            })}
           </div>
         )}
         {!opts && q.type === "判断题" && (
@@ -4530,7 +4570,55 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             })}
           </div>
         )}
-      </div>
+        {isTextQuestion(q) && q.type.includes("填空") && (
+          <div style={{ marginTop: 14 }}>
+            <input
+              value={answerText}
+              onChange={(e) => setAnswerText(e.target.value)}
+              disabled={answered}
+              placeholder="在此输入你的答案…"
+              style={{
+                width: "100%",
+                fontSize: 18,
+                padding: "10px 4px",
+                border: "none",
+                borderBottom: answered ? "2px solid #d1d5db" : "2px solid #9ca3af",
+                outline: "none",
+                background: "transparent",
+                transition: "border-color .25s ease",
+                color: "var(--text-main)",
+              }}
+              onFocus={(e) => { if (!answered) e.target.style.borderBottom = "2px solid #635BFF"; }}
+              onBlur={(e) => { if (!answered) e.target.style.borderBottom = "2px solid #9ca3af"; }}
+            />
+          </div>
+        )}
+        {isTextQuestion(q) && !q.type.includes("填空") && (
+          <div style={{ marginTop: 14 }}>
+            <textarea
+              value={answerText}
+              onChange={(e) => setAnswerText(e.target.value)}
+              disabled={answered}
+              placeholder="写下你的推导过程、关键公式与结论…"
+              rows={4}
+              style={{
+                width: "100%",
+                minHeight: 140,
+                resize: "vertical",
+                border: "none",
+                borderRadius: 14,
+                padding: "14px 16px",
+                background: "#F3F4F6",
+                color: "var(--text-main)",
+                fontSize: 15,
+                lineHeight: 1.7,
+                fontFamily: "inherit",
+                outline: "none",
+              }}
+            />
+          </div>
+        )}
+      </motion.div>
       {!answered && showHint && (
         <motion.div className="premium-card" style={{ marginBottom: 14, padding: 20 }} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={springPop}>
           <div style={{ fontWeight: 700, marginBottom: 8, color: "var(--text-main)" }}>预习提示</div>
@@ -4538,7 +4626,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         </motion.div>
       )}
       <AnimatePresence>
-        {answered && isWrongAnswered && (
+        {(answered && isWrongAnswered) || showAIHelp ? (
           <motion.div
             key="scaffold"
             className="premium-card"
@@ -4546,24 +4634,36 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
             transition={springPop}
-            style={{ marginBottom: 14, padding: 22, overflow: "hidden", border: "1px solid rgba(239,68,68,0.25)" }}
+            style={{ marginBottom: 14, padding: 22, overflow: "hidden", border: "1px solid rgba(99,91,255,0.25)" }}
           >
-            <div style={{ fontWeight: 800, marginBottom: 10, color: "#b91c1c" }}>脚手架式提示</div>
+            <div style={{ fontWeight: 800, marginBottom: 12, color: "#312e81" }}>深度解析</div>
+            <div style={{ fontSize: 15, lineHeight: 1.8, color: "var(--text-main)", marginBottom: 14 }}>
+              <MathText text={q.explanation || "先审题，提取已知条件，再匹配对应公式。"} />
+            </div>
             {rootCauseQuiz && (
               <div style={{ marginBottom: 12, padding: "10px 12px", background: rootCauseQuiz.color + "18", borderRadius: 12 }}>
                 <span style={{ fontWeight: 700, color: rootCauseQuiz.color }}>错误类型：{rootCauseQuiz.type}</span>
                 <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 4 }}>{rootCauseQuiz.tip}</div>
               </div>
             )}
-            {hintStepsQuiz.map((step, si) => (
-              <div key={si} style={{ display: "flex", gap: 10, marginBottom: 8, alignItems: "flex-start" }}>
-                <div style={{ width: 24, height: 24, borderRadius: "50%", background: G.teal + "22", border: "1.5px solid " + G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: G.teal, flexShrink: 0 }}>{si + 1}</div>
-                <div style={{ fontSize: 15, color: "var(--text-main)", lineHeight: 1.75 }}><MathText text={step} /></div>
+            <div style={{ fontWeight: 800, marginBottom: 10, color: "#111827" }}>解题架构</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {hintStepsQuiz.map((step, si) => (
+                <div key={si} style={{ background: "#F5F3FF", borderLeft: "4px solid #8B5CF6", borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#6D28D9", marginBottom: 4 }}>STEP {si + 1}</div>
+                  <div style={{ fontSize: 15, color: "var(--text-main)", lineHeight: 1.75 }}><MathText text={step} /></div>
+                </div>
+              ))}
+              <div style={{ background: "#EEF2FF", borderLeft: "4px solid #6366F1", borderRadius: 12, padding: "12px 14px" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#4338CA", marginBottom: 4 }}>通用模板</div>
+                <div style={{ fontSize: 14, color: "var(--text-main)", lineHeight: 1.75 }}>
+                  读题定位目标 -> 提取已知条件 -> 匹配公式/定理 -> 分步计算与检验 -> 回答并复盘易错点
+                </div>
               </div>
-            ))}
+            </div>
             <div style={{ marginTop: 10, fontSize: 14, color: "var(--text-muted)" }}>参考答案：<strong style={{ color: "var(--text-main)" }}>{q.answer}</strong></div>
           </motion.div>
-        )}
+        ) : null}
       </AnimatePresence>
       {answered && !isWrongAnswered && (
         <motion.div className="premium-card" style={{ marginBottom: 14, padding: 16, border: "1px solid rgba(16,185,129,0.35)" }} initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={springPop}>
@@ -4571,13 +4671,13 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           <span style={{ marginLeft: 8, color: "var(--text-muted)" }}>继续保持节奏。</span>
         </motion.div>
       )}
-      })()}
       <div style={{ display: "flex", justifyContent: "space-between" }}>
         <Btn onClick={() => { if (current > 0) { setCurrent(c => c-1); setSelected(null); setAnswered(false); setShowHint(false); } }}>← 上一题</Btn>
         <div style={{ display: "flex", gap: 10 }}>
           {!answered && <Btn size="sm" onClick={() => setShowHint(v => !v)}>💡 {showHint ? "隐藏" : "提示"}</Btn>}
+          <Btn size="sm" onClick={() => setShowAIHelp(v => !v)}>问 AI 解析</Btn>
           {!answered
-            ? <Btn variant="primary" onClick={handleSubmit} disabled={selected === null}>提交答案</Btn>
+            ? <Btn variant="primary" onClick={handleSubmit} disabled={!isTextQuestion(q) ? selected === null : !answerText.trim()}>提交答案</Btn>
             : <Btn variant="primary" onClick={handleNext}>{current >= displayQ.length-1 ? "查看结果 →" : "下一题 →"}</Btn>}
         </div>
       </div>
@@ -5897,10 +5997,10 @@ function MathText({ text }) {
             return (
               <motion.div
                 key={i}
-                initial={{ opacity: 0, height: 0, scale: 0.98 }}
-                animate={{ opacity: 1, height: "auto", scale: 1 }}
+                initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                style={{ overflow: "hidden" }}
+                style={{ overflow: "hidden", transformOrigin: "top center" }}
               >
                 <SimpleChart config={cfg} />
               </motion.div>
@@ -5995,6 +6095,29 @@ function MaterialChatPage({ setPage, profile }) {
     setChatting(false);
   };
 
+  const renderStructuredText = (content) => {
+    const lines = String(content || "").split("\n");
+    return lines.map((line, idx) => {
+      const t = line.trim();
+      if (!t) return <div key={idx} style={{ height: 10 }} />;
+      if (t.startsWith("### ")) {
+        return <h3 key={idx} style={{ margin: "14px 0 10px", fontSize: 19, fontWeight: 800, color: "#111827" }}><MathText text={t.slice(4)} /></h3>;
+      }
+      if (t.startsWith("## ")) {
+        return <h2 key={idx} style={{ margin: "20px 0 12px", fontSize: 24, fontWeight: 800, color: "#0f172a" }}><MathText text={t.slice(3)} /></h2>;
+      }
+      if (/^[-*]\s+/.test(t)) {
+        return (
+          <div key={idx} style={{ display: "flex", gap: 8, margin: "6px 0", lineHeight: 1.9 }}>
+            <span style={{ color: "#6B7280", fontWeight: 700 }}>-</span>
+            <div><MathText text={t.replace(/^[-*]\s+/, "")} /></div>
+          </div>
+        );
+      }
+      return <div key={idx} style={{ lineHeight: 1.95, color: "#1f2937" }}><MathText text={line} /></div>;
+    });
+  };
+
   return (
     <div className="chat-page-wrap">
       <PageHeader
@@ -6006,7 +6129,7 @@ function MaterialChatPage({ setPage, profile }) {
       <div className="premium-card" style={{ display: "flex", flexDirection: "column", minHeight: 560, overflow: "hidden" }}>
         <div className="chat-header" style={{ borderBottom: "1px solid var(--border-light)" }}>
           <div className="chat-doc-toolbar">
-            <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={{ ...s.input, marginBottom: 0, flex: "1 1 200px", maxWidth: 320 }}>
+            <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={{ ...s.input, marginBottom: 0, flex: "1 1 240px", maxWidth: 360, borderRadius: 12, border: "1px solid #E5E7EB", background: "#fff" }}>
               {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
             </select>
             <motion.button
@@ -6014,7 +6137,7 @@ function MaterialChatPage({ setPage, profile }) {
               whileHover={{ scale: 1.02, y: -4 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => { setChatMode("chat"); setHistory([]); }}
-              style={{ padding: "8px 16px", borderRadius: 12, border: chatMode === "chat" ? "2px solid #111827" : "1px solid var(--border-light)", background: "#fff", fontWeight: chatMode === "chat" ? 700 : 500, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}
+              style={{ padding: "8px 16px", borderRadius: 12, border: chatMode === "chat" ? "2px solid #111827" : "1px solid var(--border-light)", background: chatMode === "chat" ? "#FFFFFF" : "#FAFAFC", fontWeight: chatMode === "chat" ? 700 : 500, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}
             >
               自由对话
             </motion.button>
@@ -6023,7 +6146,7 @@ function MaterialChatPage({ setPage, profile }) {
               whileHover={{ scale: 1.02, y: -4 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => { setChatMode("tutor"); setHistory([]); }}
-              style={{ padding: "8px 16px", borderRadius: 12, border: chatMode === "tutor" ? "2px solid #111827" : "1px solid var(--border-light)", background: "#fff", fontWeight: chatMode === "tutor" ? 700 : 500, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}
+              style={{ padding: "8px 16px", borderRadius: 12, border: chatMode === "tutor" ? "2px solid #111827" : "1px solid var(--border-light)", background: chatMode === "tutor" ? "#FFFFFF" : "#FAFAFC", fontWeight: chatMode === "tutor" ? 700 : 500, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}
             >
               复习助教
             </motion.button>
@@ -6034,7 +6157,7 @@ function MaterialChatPage({ setPage, profile }) {
             当前文档：{selectedMaterial ? `${selectedMaterial.title} · ${selectedMaterial.course || "未分类"}` : "未选择资料"}
           </div>
         </div>
-        <div className="chat-history-scroll chat-doc-stream" style={{ flex: 1, minHeight: 320 }}>
+        <div className="chat-history-scroll chat-doc-stream" style={{ flex: 1, minHeight: 320, padding: "34px 28px" }}>
           {history.length === 0 && (
             <div style={{ padding: "24px 0", color: "var(--text-muted)", fontSize: 14, lineHeight: 1.85 }}>
               {chatMode === "tutor"
@@ -6045,21 +6168,21 @@ function MaterialChatPage({ setPage, profile }) {
           {history.map((m, idx) =>
             m.role === "user" ? (
               <motion.div key={idx} className="chat-doc-row-user" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
-                <div className="chat-doc-user-text">
-                  <RenderMathAndChart content={m.text} />
+                <div className="chat-doc-user-text" style={{ marginBottom: 32, fontWeight: 700, color: "#1e3a8a", textShadow: "0 0 18px rgba(99,102,241,0.12)" }}>
+                  {renderStructuredText(m.text)}
                 </div>
               </motion.div>
             ) : (
               <motion.div key={idx} className="chat-doc-row-ai" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
-                <div className="chat-doc-ai-text">
-                  <RenderMathAndChart content={m.text} />
+                <div className="chat-doc-ai-text" style={{ marginBottom: 32, borderLeft: "2px solid transparent", borderImage: "linear-gradient(180deg,#a78bfa,#60a5fa) 1", paddingLeft: 14 }}>
+                  {renderStructuredText(m.text)}
                 </div>
               </motion.div>
             )
           )}
           {chatting && (
             <div className="chat-doc-row-ai">
-              <div className="chat-doc-ai-text" style={{ color: "var(--text-muted)" }}>正在思考…</div>
+              <div className="chat-doc-ai-text" style={{ color: "var(--text-muted)", marginBottom: 32, borderLeft: "2px solid transparent", borderImage: "linear-gradient(180deg,#a78bfa,#60a5fa) 1", paddingLeft: 14 }}>正在思考…</div>
             </div>
           )}
           <div ref={chatEndRef} />
@@ -6085,6 +6208,7 @@ function MaterialChatPage({ setPage, profile }) {
               disabled={chatting || !materialId || !question.trim()}
               whileHover={!(chatting || !materialId || !question.trim()) ? { scale: 1.02, y: -4 } : undefined}
               whileTap={!(chatting || !materialId || !question.trim()) ? { scale: 0.98 } : undefined}
+              style={{ borderRadius: 12, padding: "10px 16px", fontWeight: 700, letterSpacing: "0.01em", boxShadow: "0 10px 24px rgba(17,24,39,0.16)" }}
             >
               {chatting ? "发送中…" : "发送"}
             </motion.button>
