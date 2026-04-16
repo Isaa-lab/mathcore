@@ -6832,17 +6832,14 @@ function GatewayPage({ profile, onMaterial, onExam }) {
   const IconDatabase = ({ size = 16, color }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4 3 9 3s9-1.34 9-3v-6"/></svg>
   );
-  const IconBrain = ({ size = 16, color }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2a2.5 2.5 0 0 0-2.5 2.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>
-  );
   const IconTrophy = ({ size = 16, color }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
   );
-  const IconBook = ({ size = 28, color, style }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+  const IconSmartphone = ({ size = 28, color, style }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
   );
-  const IconTarget = ({ size = 28, color, style }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+  const IconTarget = ({ size = 28, color, style, strokeWidth = 2 }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" style={style}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
   );
   const IconChevron = ({ size = 14, color }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
@@ -6851,7 +6848,7 @@ function GatewayPage({ profile, onMaterial, onExam }) {
   const stats = [
     { label: "连续学习", value: streak + " 天", icon: <IconZap color="#F59E0B" /> },
     { label: "题库规模", value: ALL_QUESTIONS.length + "+", icon: <IconDatabase color="#3B82F6" /> },
-    { label: "记忆卡", value: String(FLASHCARDS.length), icon: <IconBrain color="#A855F7" /> },
+    { label: "记忆卡", value: String(FLASHCARDS.length), icon: <IconTarget size={16} color="#F43F5E" strokeWidth={2.5} /> },
     { label: "徽章", value: unlocked + "/" + BADGES.length, icon: <IconTrophy color="#F43F5E" /> },
   ];
 
@@ -6876,23 +6873,23 @@ function GatewayPage({ profile, onMaterial, onExam }) {
         {/* Top Data Dashboard */}
         <motion.div
           variants={item}
-          style={{ background: "#FFFFFF", borderRadius: 24, padding: 40, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 24, boxShadow: "0 15px 40px rgba(0,0,0,0.06)" }}
+          style={{ background: "#FFFFFF", borderRadius: 24, padding: "32px 40px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 24, boxShadow: "0 15px 40px rgba(0,0,0,0.06)" }}
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ color: "#6B7280", fontSize: 13, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase" }}>Welcome Back</span>
+            <span style={{ color: "#6B7280", fontSize: 12, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase" }}>Welcome Back</span>
             <h1 style={{ margin: 0, fontSize: 36, color: "#111827", fontWeight: 800, letterSpacing: "-0.025em" }}>{displayName}</h1>
           </div>
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             {stats.map((st) => (
               <div
                 key={st.label}
-                style={{ background: "#FAFAFC", borderRadius: 16, padding: "16px 24px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minWidth: 100, border: "1px solid rgba(229,231,235,0.5)", transition: "background 0.2s" }}
+                style={{ background: "#FAFAFC", borderRadius: 16, padding: "12px 20px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minWidth: 100, border: "1px solid rgba(229,231,235,0.5)", transition: "background 0.2s" }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = "#F3F4F6")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "#FAFAFC")}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
                   {st.icon}
-                  <span style={{ fontSize: 22, fontWeight: 800, color: "#111827" }}>{st.value}</span>
+                  <span style={{ fontSize: 20, fontWeight: 800, color: "#111827", letterSpacing: "-0.02em" }}>{st.value}</span>
                 </div>
                 <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500 }}>{st.label}</span>
               </div>
@@ -6901,7 +6898,7 @@ function GatewayPage({ profile, onMaterial, onExam }) {
         </motion.div>
 
         {/* Asymmetric 12-column grid: 7:5 split */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 24, height: 320 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(12, 1fr)", gap: 24, height: 280 }}>
           {/* Study Zone - 7 cols */}
           <motion.button
             type="button"
@@ -6912,25 +6909,21 @@ function GatewayPage({ profile, onMaterial, onExam }) {
             whileHover={{ scale: 1.01, y: -4 }}
             whileTap={{ scale: 0.99 }}
             transition={spring}
-            style={{ gridColumn: "span 7", background: "#FFFFFF", borderRadius: 32, padding: 40, border: "none", fontFamily: "inherit", textAlign: "left", cursor: "pointer", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column", justifyContent: "space-between", boxShadow: "0 15px 40px rgba(0,0,0,0.06)" }}
+            style={{ gridColumn: "span 7", background: "#FFFFFF", borderRadius: 32, padding: 40, border: "none", borderTop: studyHover ? "4px solid #60A5FA" : "4px solid transparent", fontFamily: "inherit", textAlign: "left", cursor: "pointer", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 15px 40px rgba(0,0,0,0.06)", transition: "border-color 0.3s" }}
           >
-            {/* Oversized watermark icon */}
-            <div style={{ position: "absolute", right: -40, bottom: -40, pointerEvents: "none", transition: "transform 0.7s ease-out", transform: studyHover ? "scale(1.1)" : "scale(1)" }}>
-              <IconBook size={256} color="#DBEAFE" style={{ opacity: 0.5 }} />
+            {/* Oversized watermark icon (Smartphone) */}
+            <div style={{ position: "absolute", right: -32, bottom: -32, pointerEvents: "none", transition: "transform 0.7s ease-out", transform: studyHover ? "scale(1.05)" : "scale(1)" }}>
+              <IconSmartphone size={240} color="#DBEAFE" style={{ opacity: 0.5 }} />
             </div>
 
             <div style={{ position: "relative", zIndex: 1 }}>
               <div style={{ width: 56, height: 56, borderRadius: 16, background: "#EFF6FF", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 24 }}>
-                <IconBook size={28} color="#2563EB" />
+                <IconSmartphone size={28} color="#2563EB" />
               </div>
               <h2 style={{ fontSize: 30, margin: "0 0 12px 0", color: "#111827", fontWeight: 700, letterSpacing: "-0.02em" }}>资料学习区</h2>
-              <div style={{ color: "#6B7280", fontSize: 15, fontWeight: 500, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ color: "#6B7280", fontSize: 15, fontWeight: 500, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                 上传课件 <IconChevron color="#D1D5DB" /> 提取知识 <IconChevron color="#D1D5DB" /> 智能题库
               </div>
-            </div>
-
-            <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", color: "#2563EB", fontWeight: 600, fontSize: 15, opacity: studyHover ? 1 : 0, transform: studyHover ? "translateX(0)" : "translateX(-10px)", transition: "opacity 0.3s, transform 0.3s" }}>
-              进入学习 <span style={{ marginLeft: 6, display: "inline-flex" }}><IconChevron size={18} color="#2563EB" /></span>
             </div>
           </motion.button>
 
@@ -6944,9 +6937,9 @@ function GatewayPage({ profile, onMaterial, onExam }) {
             whileHover={{ scale: 1.015, y: -4 }}
             whileTap={{ scale: 0.99 }}
             transition={spring}
-            style={{ gridColumn: "span 5", background: "#FFFFFF", borderRadius: 32, padding: 40, border: "none", borderTop: sprintHover ? "4px solid #FB7185" : "4px solid transparent", fontFamily: "inherit", textAlign: "left", cursor: "pointer", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column", justifyContent: "space-between", boxShadow: "0 15px 40px rgba(0,0,0,0.06)", transition: "border-color 0.3s" }}
+            style={{ gridColumn: "span 5", background: "#FFFFFF", borderRadius: 32, padding: 40, border: "none", borderTop: sprintHover ? "4px solid #FB7185" : "4px solid transparent", fontFamily: "inherit", textAlign: "left", cursor: "pointer", position: "relative", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 15px 40px rgba(0,0,0,0.06)", transition: "border-color 0.3s" }}
           >
-            {/* Oversized watermark target */}
+            {/* Oversized watermark target (Bullseye) */}
             <div style={{ position: "absolute", right: -32, top: -32, pointerEvents: "none", transition: "transform 0.7s ease-out", transform: sprintHover ? "rotate(12deg)" : "rotate(0deg)" }}>
               <IconTarget size={192} color="#FFE4E6" style={{ opacity: 0.5 }} />
             </div>
@@ -6956,13 +6949,9 @@ function GatewayPage({ profile, onMaterial, onExam }) {
                 <IconTarget size={28} color="#E11D48" />
               </div>
               <h2 style={{ fontSize: 30, margin: "0 0 12px 0", color: "#111827", fontWeight: 700, letterSpacing: "-0.02em" }}>考前冲刺区</h2>
-              <div style={{ color: "#6B7280", fontSize: 15, fontWeight: 500, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ color: "#6B7280", fontSize: 15, fontWeight: 500, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                 设定倒计时 <IconChevron color="#D1D5DB" /> AI 规划
               </div>
-            </div>
-
-            <div style={{ position: "relative", zIndex: 1, display: "flex", alignItems: "center", color: "#E11D48", fontWeight: 600, fontSize: 15, opacity: sprintHover ? 1 : 0, transform: sprintHover ? "translateX(0)" : "translateX(-10px)", transition: "opacity 0.3s, transform 0.3s" }}>
-              开启冲刺 <span style={{ marginLeft: 6, display: "inline-flex" }}><IconChevron size={18} color="#E11D48" /></span>
             </div>
           </motion.button>
         </div>
