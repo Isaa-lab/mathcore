@@ -87,11 +87,11 @@ function InteractiveTriggerCard({ title, onOpen }) {
   );
 }
 
-// ── Inline renderer: bold, italic, code, math, [VAR] placeholders ──────────
+// ── Inline renderer: bold, italic, highlight, code, math, [VAR] placeholders
 function renderInline(text, keyPrefix = "") {
   if (text == null) return null;
   const str = String(text);
-  const parts = str.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|__VAR_\d+__|\*\*[^*\n]+?\*\*|\*[^*\n]+?\*|`[^`\n]+?`)/g);
+  const parts = str.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|__VAR_\d+__|==[^=\n]+?==|\*\*[^*\n]+?\*\*|\*[^*\n]+?\*|`[^`\n]+?`|<mark>[\s\S]+?<\/mark>)/g);
   return parts.map((part, i) => {
     const key = `${keyPrefix}-${i}`;
     if (!part) return null;
@@ -107,11 +107,18 @@ function renderInline(text, keyPrefix = "") {
         return <span key={key} dangerouslySetInnerHTML={{ __html: html }} />;
       } catch { return <code key={key}>{part}</code>; }
     }
+    // Highlighter: ==text== or <mark>text</mark>
+    if (part.startsWith("==") && part.endsWith("==") && part.length > 4) {
+      return <mark key={key} style={{ background: "rgba(254,240,138,0.8)", color: "#854D0E", padding: "1px 5px", borderRadius: 4, fontWeight: 500 }}>{part.slice(2, -2)}</mark>;
+    }
+    if (part.startsWith("<mark>") && part.endsWith("</mark>")) {
+      return <mark key={key} style={{ background: "rgba(254,240,138,0.8)", color: "#854D0E", padding: "1px 5px", borderRadius: 4, fontWeight: 500 }}>{part.slice(6, -7)}</mark>;
+    }
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      return <strong key={key} style={{ fontWeight: 700, color: "#111827", background: "rgba(99,102,241,0.06)", padding: "0 4px", borderRadius: 4 }}>{part.slice(2, -2)}</strong>;
+      return <strong key={key} style={{ fontWeight: 700, color: "#111827", background: "rgba(224,231,255,0.8)", padding: "0 5px", borderRadius: 4 }}>{part.slice(2, -2)}</strong>;
     }
     if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
-      return <em key={key} style={{ fontStyle: "italic", color: "#4F46E5" }}>{part.slice(1, -1)}</em>;
+      return <em key={key} style={{ fontStyle: "italic", color: "#4B5563", borderBottom: "1px solid #E5E7EB", paddingBottom: 1 }}>{part.slice(1, -1)}</em>;
     }
     if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
       return <code key={key} style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "0.9em", padding: "2px 6px", background: "#F3F4F6", borderRadius: 6, color: "#111827" }}>{part.slice(1, -1)}</code>;
@@ -182,7 +189,7 @@ function renderMarkdown(text, context) {
     blocks.push(
       <ul key={`ul-${blocks.length}`} style={{ margin: "6px 0 20px 4px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 10 }}>
         {listBuffer.map((item, idx) => (
-          <li key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 10, lineHeight: 1.7, color: "#374151", fontSize: 15 }}>
+          <li key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 10, lineHeight: 1.8, color: "#374151", fontSize: 15 }}>
             <span style={{ flexShrink: 0, marginTop: 9, width: 5, height: 5, borderRadius: 999, background: "#A5B4FC" }} />
             <div style={{ flex: 1, minWidth: 0 }}>{replaceVars(renderInline(item, `li-${idx}`))}</div>
           </li>
@@ -243,7 +250,7 @@ function renderMarkdown(text, context) {
     }
     flushList();
     blocks.push(
-      <p key={`p-${idx}`} style={{ margin: "0 0 20px", lineHeight: 1.7, color: "#374151", fontSize: 15, letterSpacing: "0.01em" }}>
+      <p key={`p-${idx}`} style={{ margin: "0 0 20px", lineHeight: 1.8, color: "#374151", fontSize: 15, letterSpacing: "0.01em" }}>
         {replaceVars(renderInline(t, `p-${idx}`))}
       </p>
     );
