@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 import katex from "katex";
 import { AnimatePresence, motion } from "framer-motion";
+import { useMathStore } from "./store/useMathStore";
 import "katex/dist/katex.min.css";
 
 // Inject global CSS animations
@@ -44,8 +45,9 @@ import "katex/dist/katex.min.css";
     .premium-card {
       background: #FFFFFF;
       border-radius: 20px;
-      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.06);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0,0,0,0.02);
       border: 1px solid rgba(0,0, 0, 0.04);
+      transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     }
     .app-shell-light {
       min-height: 100vh;
@@ -275,6 +277,13 @@ const supabase = createClient(
   "https://kadjwgslbpklwbpvpsze.supabase.co",
   "sb_publishable_TvfRCNQCSs92EmZ02J5H1A_yM3FrFUp"
 );
+
+const notifyUser = (message) => {
+  try {
+    window.dispatchEvent(new CustomEvent("mc-notice", { detail: String(message || "") }));
+  } catch (e) {}
+  console.info(message);
+};
 
 const G = {
   teal: "#1D9E75", tealLight: "#E1F5EE", tealDark: "#0F6E56",
@@ -5651,7 +5660,7 @@ function MaterialsPage({ setPage, profile }) {
     if (!window.confirm(`确认删除资料「${m.title}」？`)) return;
     setDeletingId(m.id);
     const { error } = await supabase.from("materials").delete().eq("id", m.id);
-    if (error) alert("删除失败：" + error.message);
+    if (error) notifyUser("删除失败：" + error.message);
     await loadMaterials();
     setDeletingId(null);
   };
@@ -5731,7 +5740,7 @@ function MaterialsPage({ setPage, profile }) {
                 🖼️ 插入图片
                 <input type="file" accept="image/*" style={{ display: "none" }} onChange={async e => {
                   const file = e.target.files[0]; if (!file) return;
-                  if (file.size > 2 * 1024 * 1024) { alert("图片不能超过 2MB"); return; }
+                  if (file.size > 2 * 1024 * 1024) { notifyUser("图片不能超过 2MB"); return; }
                   const b64 = await new Promise(res => { const r = new FileReader(); r.onload = ev => res(ev.target.result); r.readAsDataURL(file); });
                   setNote(n => n + `
 ![图片](${b64})
@@ -5948,11 +5957,21 @@ function SimpleChart({ config }) {
 
 function MathText({ text }) {
   if (!text) return <span />;
+  const interactiveParams = useMathStore((s) => s.interactiveParams);
+  const setInteractiveParam = useMathStore((s) => s.setInteractiveParam);
   // Extract [CHART:{...}] blocks tracking bracket depth to handle nested arrays
   const chartBlocks = [];
+  const varBlocks = [];
   let prepped = "";
   let i = 0;
   while (i < text.length) {
+    const varMatch = text.slice(i).match(/^\[VAR:([a-zA-Z_]\w*),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\]/);
+    if (varMatch) {
+      varBlocks.push({ key: varMatch[1], min: Number(varMatch[2]), max: Number(varMatch[3]) });
+      prepped += "__VAR_" + (varBlocks.length - 1) + "__";
+      i += varMatch[0].length;
+      continue;
+    }
     if (text.slice(i, i + 7) === "[CHART:") {
       let depth = 1, j = i + 7;
       while (j < text.length && depth > 0) {
@@ -5972,7 +5991,7 @@ function MathText({ text }) {
   prepped = prepped
     .replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, "")
     .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/g, "");
-  const parts = prepped.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$|__CHART_\d+__)/);
+  const parts = prepped.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]+?\$|__CHART_\d+__|__VAR_\d+__)/);
   return (
     <span>
       {parts.map((part, i) => {
@@ -5997,9 +6016,9 @@ function MathText({ text }) {
             return (
               <motion.div
                 key={i}
-                initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                transition={{ type: "spring", stiffness: 260, damping: 25 }}
                 style={{ overflow: "hidden", transformOrigin: "top center" }}
               >
                 <SimpleChart config={cfg} />
@@ -6010,6 +6029,25 @@ function MathText({ text }) {
               图表解析失败: {String(e2.message)}
             </div>;
           }
+        }
+        const varToken = part.match(/^__VAR_(\d+)__$/);
+        if (varToken) {
+          const vidx = parseInt(varToken[1], 10);
+          const cfg = varBlocks[vidx];
+          const current = interactiveParams?.[cfg.key] ?? cfg.min;
+          return (
+            <input
+              key={i}
+              type="range"
+              className="inline-slider"
+              min={cfg.min}
+              max={cfg.max}
+              value={current}
+              aria-label={"动态调整数学参数 " + cfg.key}
+              onChange={(e) => setInteractiveParam(cfg.key, Number(e.target.value))}
+              style={{ width: 180, verticalAlign: "middle", margin: "0 8px" }}
+            />
+          );
         }
         return <span key={i} style={{ whiteSpace: "pre-wrap" }}>{part}</span>;
       })}
@@ -6453,7 +6491,7 @@ function TeacherPage({ setPage, profile }) {
     if (!error) {
       const { data } = await supabase.from("questions").select("*").order("created_at", { ascending: false });
       if (data) setDbQuestions(data);
-      alert("已保存到题库！");
+      notifyUser("已保存到题库！");
     }
     setSaving(false);
   };
@@ -6633,7 +6671,7 @@ function TeacherPage({ setPage, profile }) {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <div style={{ fontSize: 28, fontWeight: 800, color: G.teal, letterSpacing: "0.2em", background: G.tealLight, padding: "10px 24px", borderRadius: 12 }}>MATH2024</div>
-              <Btn size="sm" onClick={() => { navigator.clipboard.writeText("MATH2024"); alert("邀请码已复制！"); }}>复制</Btn>
+              <Btn size="sm" onClick={() => { navigator.clipboard.writeText("MATH2024"); notifyUser("邀请码已复制！"); }}>复制</Btn>
             </div>
           </div>
 
@@ -6661,7 +6699,7 @@ function TeacherPage({ setPage, profile }) {
                         <span style={{ fontSize: 15 }}>{w}</span>
                         <div style={{ display: "flex", gap: 8 }}>
                           <Btn size="sm" onClick={() => generateQuestions(w)}>AI 出针对题</Btn>
-                          <Btn size="sm" variant="primary" onClick={() => { setHwAssigned(prev => ({ ...prev, [selectedStudent.name]: [...(prev[selectedStudent.name] || []), w] })); alert(`已向 ${selectedStudent.name} 布置 ${w} 专项作业！`); }}>布置作业</Btn>
+                          <Btn size="sm" variant="primary" onClick={() => { setHwAssigned(prev => ({ ...prev, [selectedStudent.name]: [...(prev[selectedStudent.name] || []), w] })); notifyUser(`已向 ${selectedStudent.name} 布置 ${w} 专项作业！`); }}>布置作业</Btn>
                         </div>
                       </div>
                     ))
@@ -7126,7 +7164,7 @@ export default function App() {
   const [sessionAnswers, setSessionAnswers] = useState({});
   const [emailJustConfirmed, setEmailJustConfirmed] = useState(false);
   const [surface, setSurface] = useState("gateway");
-  const springNav = { type: "spring", stiffness: 300, damping: 30 };
+  const springNav = { type: "spring", stiffness: 260, damping: 25 };
   const recordAnswer = async (qid, correct, chapter, questionPayload = null) => {
     try {
       const updated = { ...sessionAnswers, [qid]: { correct, chapter } };
@@ -7236,10 +7274,10 @@ export default function App() {
           <motion.div
             key="gateway"
             style={{ minHeight: "100vh" }}
-            initial={{ opacity: 1, scale: 1 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.98 }}
-            transition={{ duration: 0.28, ease: "easeOut" }}
+            initial={{ opacity: 0, y: 15, scale: 0.99 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -15, filter: "blur(4px)" }}
+            transition={springNav}
           >
             <GatewayPage
               profile={profile}
@@ -7251,9 +7289,9 @@ export default function App() {
           <motion.div
             key="workbench"
             style={{ minHeight: "100vh" }}
-            initial={{ opacity: 0, scale: 1.03, filter: "blur(8px)" }}
-            animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-            exit={{ opacity: 0, scale: 0.98 }}
+            initial={{ opacity: 0, y: 15, scale: 0.99 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -15, filter: "blur(4px)" }}
             transition={springNav}
           >
             <div className="app-shell-light">
