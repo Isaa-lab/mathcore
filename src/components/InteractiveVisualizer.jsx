@@ -3,8 +3,8 @@ import katex from "katex";
 import { useMathStore } from "../store/useMathStore";
 import "katex/dist/katex.min.css";
 
-const W = 720;
-const H = 300;
+const W = 400;
+const H = 200;
 const PAD = 32;
 
 export default function InteractiveVisualizer() {
@@ -36,63 +36,54 @@ export default function InteractiveVisualizer() {
   return (
     <div className="premium-card" style={{ padding: 20 }}>
       <style>{`
-        .math-slider {
+        input[type=range] {
           -webkit-appearance: none;
-          appearance: none;
+          width: 100%;
+          background: transparent;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
           width: 100%;
           height: 6px;
-          border-radius: 9999px;
           background: #E5E7EB;
-          outline: none;
+          border-radius: 9999px;
         }
-        .math-slider::-webkit-slider-thumb {
+        input[type=range]::-webkit-slider-thumb {
           -webkit-appearance: none;
-          appearance: none;
-          width: 18px;
-          height: 18px;
-          border-radius: 9999px;
+          height: 20px;
+          width: 20px;
+          border-radius: 50%;
           background: #4F46E5;
-          border: 0;
-          box-shadow: 0 4px 12px rgba(79, 70, 229, 0.28);
+          margin-top: -7px;
+          box-shadow: 0 2px 6px rgba(79, 70, 229, 0.4);
           cursor: pointer;
+          transition: transform 0.1s;
         }
-        .math-slider::-moz-range-thumb {
-          width: 18px;
-          height: 18px;
-          border-radius: 9999px;
-          background: #4F46E5;
-          border: 0;
-          box-shadow: 0 4px 12px rgba(79, 70, 229, 0.28);
-          cursor: pointer;
+        input[type=range]::-webkit-slider-thumb:hover {
+          transform: scale(1.1);
         }
       `}</style>
-      <div style={{ height: 300, marginBottom: 18 }}>
-        <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet">
-          <line x1={PAD} y1={H / 2} x2={W - PAD} y2={H / 2} stroke="#E5E7EB" strokeWidth="1" />
-          <line x1={PAD} y1={PAD} x2={PAD} y2={H - PAD} stroke="#E5E7EB" strokeWidth="1" />
+      <div style={{ background: "#F9FAFB", borderRadius: 12, border: "1px solid #E5E7EB", marginBottom: 24, padding: 12 }}>
+        <svg width="100%" viewBox="0 0 400 200" preserveAspectRatio="xMidYMid meet">
+          <line x1={PAD} y1={H / 2} x2={W - PAD} y2={H / 2} stroke="#D1D5DB" strokeWidth="1" />
+          <line x1={PAD} y1={PAD} x2={PAD} y2={H - PAD} stroke="#D1D5DB" strokeWidth="1" />
           <path
             d={pathD}
             stroke="#4F46E5"
             strokeWidth="3"
             fill="none"
             strokeLinecap="round"
+            strokeLinejoin="round"
             style={{ transition: "d 80ms linear" }}
           />
         </svg>
       </div>
 
       <div style={{ display: "grid", gap: 16 }}>
-        <div
-          style={{ color: "#111827", minHeight: 48 }}
-          dangerouslySetInnerHTML={{ __html: mathHtml }}
-        />
-
         <div>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", marginBottom: 10 }}>
             振幅 a
           </div>
           <input
-            className="math-slider"
             type="range"
             min="1"
             max="10"
@@ -103,6 +94,11 @@ export default function InteractiveVisualizer() {
             style={{ width: "100%" }}
           />
         </div>
+
+        <div
+          style={{ background: "#FFFFFF", padding: 16, borderRadius: 12, boxShadow: "0 4px 12px rgba(0,0,0,0.03)", textAlign: "center", fontSize: "1.25rem", fontFamily: "'KaTeX_Math', serif" }}
+          dangerouslySetInnerHTML={{ __html: mathHtml }}
+        />
       </div>
     </div>
   );

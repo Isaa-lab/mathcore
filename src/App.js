@@ -6925,6 +6925,15 @@ function ReportDashboardCard({ setPage }) {
   );
 }
 
+function DashboardMetricCard({ title, value }) {
+  return (
+    <div className="premium-card" style={{ padding: 22 }}>
+      <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 8 }}>{title}</div>
+      <div style={{ fontSize: 26, fontWeight: 800, color: "#111827", lineHeight: 1.25 }}>{value}</div>
+    </div>
+  );
+}
+
 function GlassSideNav({ page, setPage }) {
   const items = [
     ["首页", "🏠"],
@@ -7082,7 +7091,13 @@ export default function App() {
 
   const examWorkspaceView = (
     <ExamWorkspace
-      reportDashboard={<ReportDashboardCard setPage={handleSetPage} />}
+      reportDashboard={
+        <>
+          <DashboardMetricCard title="距离考试" value={(localStorage.getItem("mc_exam_date") ? `${Math.ceil((new Date(localStorage.getItem("mc_exam_date")) - new Date()) / 86400000)} 天` : "14 天")} />
+          <DashboardMetricCard title="今日任务" value="微积分 错题巩固" />
+          <DashboardMetricCard title="掌握度" value="78%" />
+        </>
+      }
       quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
       wrongBook={<WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} />}
     />
