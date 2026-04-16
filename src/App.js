@@ -5934,56 +5934,83 @@ function MaterialChatPage({ setPage, profile }) {
     });
   };
 
+  const canSend = !chatting && materialId && question.trim();
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden" }}>
-      <div style={{ flexShrink: 0, padding: "12px 24px", borderBottom: "1px solid #E5E7EB" }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 8 }}>
-          <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={{ ...s.input, marginBottom: 0, flex: "1 1 200px", maxWidth: 320, borderRadius: 12, border: "1px solid #E5E7EB", background: "#fff" }}>
-            {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden", background: "#FAFAFC" }}>
+      {/* Minimalist control header */}
+      <header style={{ flexShrink: 0, padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, background: "rgba(255,255,255,0.85)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)", borderBottom: "1px solid #F3F4F6", zIndex: 5, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#FAFAFC", border: "1px solid #F3F4F6", padding: "8px 14px", borderRadius: 14, flex: "0 1 auto", minWidth: 0 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={{ border: "none", outline: "none", background: "transparent", fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "inherit", cursor: "pointer", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {materials.length === 0 && <option value="">未选择资料</option>}
+            {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course || "未分类"}</option>)}
           </select>
-          <motion.button type="button" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setChatMode("chat"); setHistory([]); }} style={{ padding: "6px 14px", borderRadius: 10, border: chatMode === "chat" ? "2px solid #111827" : "1px solid #E5E7EB", background: chatMode === "chat" ? "#FFF" : "#FAFAFC", fontWeight: chatMode === "chat" ? 700 : 500, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>自由对话</motion.button>
-          <motion.button type="button" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setChatMode("tutor"); setHistory([]); }} style={{ padding: "6px 14px", borderRadius: 10, border: chatMode === "tutor" ? "2px solid #111827" : "1px solid #E5E7EB", background: chatMode === "tutor" ? "#FFF" : "#FAFAFC", fontWeight: chatMode === "tutor" ? 700 : 500, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>复习助教</motion.button>
         </div>
-        <div style={{ fontSize: 12, color: "#6B7280" }}>当前文档：{selectedMaterial ? `${selectedMaterial.title} · ${selectedMaterial.course || "未分类"}` : "未选择资料"}</div>
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
+        <div style={{ display: "flex", background: "#FAFAFC", border: "1px solid #F3F4F6", padding: 4, borderRadius: 14 }}>
+          {[["chat", "自由对话"], ["tutor", "复习助教"]].map(([m, l]) => (
+            <button key={m} type="button" onClick={() => { setChatMode(m); setHistory([]); }} style={{ padding: "8px 20px", borderRadius: 10, border: "none", fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: chatMode === m ? 700 : 500, background: chatMode === m ? "#FFFFFF" : "transparent", color: chatMode === m ? "#111827" : "#6B7280", boxShadow: chatMode === m ? "0 2px 8px rgba(0,0,0,0.06)" : "none", transition: "all 0.15s" }}>{l}</button>
+          ))}
+        </div>
+      </header>
+
+      {/* Scrollable chat canvas */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "28px 24px 12px" }}>
         {history.length === 0 && (
-          <div style={{ padding: "24px 0", color: "#6B7280", fontSize: 14, lineHeight: 1.85 }}>
+          <div style={{ maxWidth: 820, margin: "0 auto", padding: "24px 8px", color: "#9CA3AF", fontSize: 14, lineHeight: 1.85 }}>
             {chatMode === "tutor"
               ? "试着输入：帮我制定 3 天复习计划；先从第一章讲起；输出 [VAR:a,1,10] 与 [CHART] 进行可视化。"
               : "试着输入：这份资料的核心知识点是什么？并输出 [VAR:a,1,10] 与 [CHART]。"}
           </div>
         )}
-        <MaterialChatPageView
-          messages={history}
-          conversationHistory={history}
-          currentMaterial={selectedMaterial}
-          renderChart={() => <InteractiveMathChart />}
-        />
+        <motion.div initial="hidden" animate="visible" variants={{ visible: { transition: { staggerChildren: 0.08 } } }}>
+          <MaterialChatPageView
+            messages={history}
+            conversationHistory={history}
+            currentMaterial={selectedMaterial}
+            renderChart={() => <InteractiveMathChart />}
+            onOpenChart={() => setPage && setPage("知识点")}
+          />
+        </motion.div>
         {chatting && (
-          <div style={{ color: "#6B7280", paddingLeft: 16, borderLeft: "2px solid transparent", borderImage: "var(--ai-glow) 1" }}>正在思考…</div>
+          <div style={{ maxWidth: 820, margin: "0 auto 16px", display: "flex", gap: 14, paddingLeft: 4 }}>
+            <div style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 14, background: "linear-gradient(135deg, #6366F1 0%, #A855F7 100%)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 14px rgba(99,102,241,0.25)" }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>
+            </div>
+            <div style={{ flex: 1, background: "#fff", border: "1px solid #F3F4F6", borderRadius: 24, borderTopLeftRadius: 6, padding: "16px 22px", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 20px rgba(0,0,0,0.03)" }}>
+              {[0, 1, 2].map(i => (
+                <motion.span key={i} style={{ width: 8, height: 8, borderRadius: 999, background: "#A5B4FC" }} animate={{ y: [0, -4, 0], opacity: [0.4, 1, 0.4] }} transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }} />
+              ))}
+              <span style={{ marginLeft: 6, color: "#6B7280", fontSize: 13 }}>正在思考…</span>
+            </div>
+          </div>
         )}
         <div ref={chatEndRef} />
       </div>
-      <div style={{ flexShrink: 0, padding: "16px 24px", borderTop: "1px solid #E5E7EB", background: "#FAFAFC" }}>
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+
+      {/* Floating input pod */}
+      <div style={{ flexShrink: 0, padding: "16px 24px 20px", background: "linear-gradient(to top, #FFFFFF 60%, rgba(255,255,255,0) 100%)" }}>
+        <div style={{ maxWidth: 820, margin: "0 auto", position: "relative" }}>
           <textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !chatting) { e.preventDefault(); ask(); } }}
+            onFocus={(e) => { e.target.style.borderColor = "#818CF8"; e.target.style.boxShadow = "0 0 0 4px rgba(99,102,241,0.1), 0 10px 30px rgba(0,0,0,0.04)"; }}
+            onBlur={(e) => { e.target.style.borderColor = "#E5E7EB"; e.target.style.boxShadow = "0 4px 20px rgba(0,0,0,0.04)"; }}
             placeholder="输入数学问题，或让 AI 生成复习提纲…"
-            style={{ flex: 1, minHeight: 48, maxHeight: 120, border: "1px solid #E5E7EB", borderRadius: 12, padding: "10px 14px", fontFamily: "inherit", resize: "vertical", background: "#FFF", fontSize: 14, lineHeight: 1.6 }}
+            rows={1}
+            style={{ width: "100%", background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 24, padding: "18px 64px 18px 22px", fontFamily: "inherit", fontSize: 14, lineHeight: 1.6, color: "#111827", outline: "none", resize: "none", minHeight: 60, maxHeight: 160, boxSizing: "border-box", boxShadow: "0 4px 20px rgba(0,0,0,0.04)", transition: "border-color 0.2s, box-shadow 0.2s" }}
           />
           <motion.button
             type="button"
-            className="btn-primary"
             onClick={ask}
-            disabled={chatting || !materialId || !question.trim()}
-            whileHover={!(chatting || !materialId || !question.trim()) ? { scale: 1.02 } : undefined}
-            whileTap={!(chatting || !materialId || !question.trim()) ? { scale: 0.98 } : undefined}
-            style={{ borderRadius: 12, padding: "10px 16px", fontWeight: 700, flexShrink: 0 }}
+            disabled={!canSend}
+            whileHover={canSend ? { scale: 1.06 } : undefined}
+            whileTap={canSend ? { scale: 0.94 } : undefined}
+            transition={{ type: "spring", stiffness: 400, damping: 18 }}
+            style={{ position: "absolute", right: 10, top: 10, width: 40, height: 40, borderRadius: 14, background: canSend ? "#111827" : "#D1D5DB", color: "#fff", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: canSend ? "pointer" : "not-allowed", boxShadow: canSend ? "0 4px 14px rgba(17,24,39,0.2)" : "none", fontFamily: "inherit" }}
+            aria-label="发送"
           >
-            {chatting ? "发送中…" : "发送"}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 2 }}><path d="m3 3 3 9-3 9 19-9Z"/><path d="M6 12h16"/></svg>
           </motion.button>
         </div>
       </div>
