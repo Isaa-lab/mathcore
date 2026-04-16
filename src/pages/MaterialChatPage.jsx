@@ -54,39 +54,35 @@ function InteractiveTriggerCard({ title, onOpen }) {
     <motion.button
       type="button"
       onClick={onOpen}
-      whileHover={{ scale: 1.01, y: -2 }}
+      whileHover={{ scale: 1.015, y: -2 }}
       whileTap={{ scale: 0.99 }}
       transition={springTransition}
       style={{
-        marginTop: 20,
+        marginTop: 16,
         width: "100%",
         padding: 16,
         borderRadius: 16,
-        background: "#FAFAFC",
-        border: "1px solid #E5E7EB",
+        background: "#F8F9FF",
+        border: "1px solid rgba(219,234,254,0.6)",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
         cursor: "pointer",
         fontFamily: "inherit",
         textAlign: "left",
-        transition: "background 0.2s, border-color 0.2s, box-shadow 0.2s",
+        transition: "background 0.2s, border-color 0.2s",
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = "#FFFFFF"; e.currentTarget.style.borderColor = "#C7D2FE"; e.currentTarget.style.boxShadow = "0 8px 30px rgba(79,70,229,0.08)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = "#FAFAFC"; e.currentTarget.style.borderColor = "#E5E7EB"; e.currentTarget.style.boxShadow = "none"; }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        <div style={{ width: 40, height: 40, borderRadius: 999, background: "#EFF6FF", display: "flex", alignItems: "center", justifyContent: "center", color: "#2563EB", flexShrink: 0 }}>
-          <IconActivity size={18} color="#2563EB" />
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 12, background: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", color: "#2563EB", flexShrink: 0, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+          <IconActivity size={16} color="#2563EB" />
         </div>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <span style={{ color: "#111827", fontWeight: 700, fontSize: 14, letterSpacing: "-0.01em" }}>开启沉浸式动态图谱</span>
-          <span style={{ color: "#6B7280", fontSize: 12, fontWeight: 500, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+          <span style={{ color: "#111827", fontWeight: 700, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase" }}>交互实验室</span>
+          <span style={{ color: "#6B7280", fontSize: 13, fontWeight: 500, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
         </div>
       </div>
-      <div style={{ width: 32, height: 32, borderRadius: 999, background: "#fff", border: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 1px 2px rgba(0,0,0,0.04)", flexShrink: 0 }}>
-        <IconChevron size={14} color="#9CA3AF" />
-      </div>
+      <IconChevron size={16} color="#60A5FA" />
     </motion.button>
   );
 }
@@ -112,7 +108,7 @@ function renderInline(text, keyPrefix = "") {
       } catch { return <code key={key}>{part}</code>; }
     }
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      return <strong key={key} style={{ fontWeight: 800, color: "#111827", background: "rgba(79,70,229,0.08)", padding: "0 4px", borderRadius: 4 }}>{part.slice(2, -2)}</strong>;
+      return <strong key={key} style={{ fontWeight: 700, color: "#111827", background: "rgba(99,102,241,0.06)", padding: "0 4px", borderRadius: 4 }}>{part.slice(2, -2)}</strong>;
     }
     if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
       return <em key={key} style={{ fontStyle: "italic", color: "#4F46E5" }}>{part.slice(1, -1)}</em>;
@@ -184,10 +180,10 @@ function renderMarkdown(text, context) {
   const flushList = () => {
     if (!listBuffer) return;
     blocks.push(
-      <ul key={`ul-${blocks.length}`} style={{ margin: "8px 0 12px 4px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+      <ul key={`ul-${blocks.length}`} style={{ margin: "6px 0 20px 4px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 10 }}>
         {listBuffer.map((item, idx) => (
-          <li key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 12, lineHeight: 1.75, color: "#1F2937" }}>
-            <span style={{ flexShrink: 0, marginTop: 10, width: 6, height: 6, borderRadius: 999, background: "#818CF8" }} />
+          <li key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 10, lineHeight: 1.7, color: "#374151", fontSize: 15 }}>
+            <span style={{ flexShrink: 0, marginTop: 9, width: 5, height: 5, borderRadius: 999, background: "#A5B4FC" }} />
             <div style={{ flex: 1, minWidth: 0 }}>{replaceVars(renderInline(item, `li-${idx}`))}</div>
           </li>
         ))}
@@ -224,17 +220,17 @@ function renderMarkdown(text, context) {
     if (!t) { flushList(); blocks.push(<div key={`sp-${idx}`} style={{ height: 8 }} />); return; }
     if (t.startsWith("### ")) {
       flushList();
-      blocks.push(<h3 key={`h3-${idx}`} style={{ margin: "18px 0 10px", fontSize: 17, fontWeight: 800, color: "#111827", letterSpacing: "-0.01em" }}>{replaceVars(renderInline(t.slice(4), `h3-${idx}`))}</h3>);
+      blocks.push(<h3 key={`h3-${idx}`} style={{ margin: "20px 0 10px", fontSize: 15, fontWeight: 800, color: "#111827", letterSpacing: "-0.01em" }}>{replaceVars(renderInline(t.slice(4), `h3-${idx}`))}</h3>);
       return;
     }
     if (t.startsWith("## ")) {
       flushList();
-      blocks.push(<h2 key={`h2-${idx}`} style={{ margin: "22px 0 12px", fontSize: 19, fontWeight: 800, color: "#0F172A", paddingBottom: 8, borderBottom: "1px solid #F3F4F6", letterSpacing: "-0.02em" }}>{replaceVars(renderInline(t.slice(3), `h2-${idx}`))}</h2>);
+      blocks.push(<h2 key={`h2-${idx}`} style={{ margin: "22px 0 12px", fontSize: 17, fontWeight: 800, color: "#0F172A", paddingBottom: 6, borderBottom: "1px solid #F3F4F6", letterSpacing: "-0.015em" }}>{replaceVars(renderInline(t.slice(3), `h2-${idx}`))}</h2>);
       return;
     }
     if (t.startsWith("# ")) {
       flushList();
-      blocks.push(<h1 key={`h1-${idx}`} style={{ margin: "24px 0 14px", fontSize: 22, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.02em" }}>{replaceVars(renderInline(t.slice(2), `h1-${idx}`))}</h1>);
+      blocks.push(<h1 key={`h1-${idx}`} style={{ margin: "24px 0 14px", fontSize: 19, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.02em" }}>{replaceVars(renderInline(t.slice(2), `h1-${idx}`))}</h1>);
       return;
     }
     const ulM = t.match(/^[-*]\s+(.+)/);
@@ -247,7 +243,7 @@ function renderMarkdown(text, context) {
     }
     flushList();
     blocks.push(
-      <p key={`p-${idx}`} style={{ margin: "0 0 12px", lineHeight: 1.85, color: "#1F2937" }}>
+      <p key={`p-${idx}`} style={{ margin: "0 0 20px", lineHeight: 1.7, color: "#374151", fontSize: 15, letterSpacing: "0.01em" }}>
         {replaceVars(renderInline(t, `p-${idx}`))}
       </p>
     );
@@ -259,23 +255,21 @@ function renderMarkdown(text, context) {
 // ── AI Bubble ──────────────────────────────────────────────────────────────
 function AIBubble({ content, context }) {
   return (
-    <motion.div variants={bubbleVariants} style={{ display: "flex", gap: 14, width: "100%", maxWidth: 820, margin: "0 auto 24px" }}>
-      <div style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 14, background: "linear-gradient(135deg, #6366F1 0%, #A855F7 100%)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 14px rgba(99,102,241,0.25)" }}>
-        <IconSparkles />
+    <motion.div variants={bubbleVariants} style={{ display: "flex", gap: 14, width: "100%", maxWidth: 820, margin: "0 auto 40px" }}>
+      <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 12, background: "#6366F1", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 18px rgba(99,102,241,0.18)" }}>
+        <IconSparkles size={16} />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
           background: "#FFFFFF",
           borderRadius: 24,
           borderTopLeftRadius: 6,
-          padding: "20px 24px",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.03)",
-          border: "1px solid #F3F4F6",
-          fontSize: 15,
-          color: "#111827",
-          lineHeight: 1.75,
-          letterSpacing: "0.005em",
+          padding: "24px 28px",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.02)",
+          border: "1px solid rgba(243,244,246,0.6)",
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
+          WebkitFontSmoothing: "antialiased",
+          MozOsxFontSmoothing: "grayscale",
         }}>
           {renderMarkdown(content, context)}
         </div>
@@ -287,19 +281,19 @@ function AIBubble({ content, context }) {
 // ── User Bubble ────────────────────────────────────────────────────────────
 function UserBubble({ content }) {
   return (
-    <motion.div variants={bubbleVariants} style={{ display: "flex", gap: 14, width: "100%", maxWidth: 820, margin: "0 auto 24px", justifyContent: "flex-end" }}>
+    <motion.div variants={bubbleVariants} style={{ display: "flex", gap: 14, width: "100%", maxWidth: 820, margin: "0 auto 40px", justifyContent: "flex-end" }}>
       <div style={{
         background: "#111827",
         color: "#FFFFFF",
         borderRadius: 24,
         borderTopRightRadius: 6,
-        padding: "14px 20px",
-        boxShadow: "0 6px 20px rgba(17,24,39,0.12)",
-        maxWidth: "78%",
-        fontSize: 14,
-        lineHeight: 1.7,
+        padding: "14px 24px",
+        boxShadow: "0 10px 25px rgba(229,231,235,0.5)",
+        maxWidth: "75%",
+        fontSize: 14.5,
+        lineHeight: 1.625,
         fontWeight: 500,
-        letterSpacing: "0.01em",
+        letterSpacing: "0.015em",
       }}>
         {renderInline(content, "ub")}
       </div>
