@@ -7112,13 +7112,12 @@ export default function App() {
             {/* Workspace area */}
             <AnimatePresence mode="wait">
               {workspaceMode === "study" ? (
-                <motion.div key="study" style={{ flex: 1, overflow: "hidden" }} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.25 }}>
+                <motion.div key="study" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.25 }}>
                   <StudyWorkspace renderTab={renderStudyTab} />
                 </motion.div>
               ) : (
-                <motion.div key="sprint" style={{ flex: 1, overflow: "hidden" }} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25 }}>
+                <motion.div key="sprint" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25 }}>
                   <SprintWorkspace
-                    calendar={<ReportPage setPage={handleSetPage} setChapterFilter={setChapterFilter} />}
                     chatPage={<MaterialChatPage setPage={handleSetPage} profile={profile} />}
                     quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
                     onViewPlan={() => handleSetPage("学习报告")}

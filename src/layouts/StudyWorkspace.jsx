@@ -2,23 +2,24 @@ import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
 const TABS = ["资料库", "AI对话", "知识点", "知识树", "小测"];
+const TAB_ICONS = { "资料库": "📚", "AI对话": "🤖", "知识点": "📖", "知识树": "🌌", "小测": "🧩" };
 
 export default function StudyWorkspace({ renderTab }) {
   const [activeTab, setActiveTab] = useState("资料库");
 
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 64px)", padding: 24, gap: 24, boxSizing: "border-box" }}>
+    <div style={{ display: "flex", flex: 1, padding: 24, gap: 24, overflow: "hidden", boxSizing: "border-box" }}>
       <div
         className="premium-card"
-        style={{ width: 200, flexShrink: 0, padding: "24px 16px", display: "flex", flexDirection: "column", gap: 16, borderRadius: 32 }}
+        style={{ width: 240, flexShrink: 0, padding: 16, display: "flex", flexDirection: "column", gap: 8, borderRadius: 24 }}
       >
         {TABS.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             style={{
-              padding: 12,
-              textAlign: "center",
+              padding: "10px 14px",
+              textAlign: "left",
               background: activeTab === tab ? "#F3F4F6" : "transparent",
               borderRadius: 12,
               border: "none",
@@ -28,8 +29,12 @@ export default function StudyWorkspace({ renderTab }) {
               color: activeTab === tab ? "#111827" : "#6B7280",
               fontFamily: "inherit",
               transition: "background 0.15s, color 0.15s",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
             }}
           >
+            <span style={{ fontSize: 16 }}>{TAB_ICONS[tab]}</span>
             {tab}
           </button>
         ))}
@@ -37,7 +42,7 @@ export default function StudyWorkspace({ renderTab }) {
 
       <div
         className="premium-card"
-        style={{ flex: 1, padding: 32, overflowY: "auto", position: "relative" }}
+        style={{ flex: 1, padding: 32, position: "relative", overflowY: "auto", borderRadius: 24 }}
       >
         <AnimatePresence mode="wait">
           <motion.div
