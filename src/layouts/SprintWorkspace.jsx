@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 
 function VerticalMiniCalendar() {
   const [selectedDate, setSelectedDate] = useState(new Date().getDate());
@@ -29,13 +30,11 @@ function VerticalMiniCalendar() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", textAlign: "center" }}>{monthName}</div>
-
       {daysUntilExam !== null && (
         <div style={{ padding: "8px 12px", background: "#FEF3C7", borderRadius: 10, fontSize: 12, fontWeight: 600, color: "#92400E", textAlign: "center" }}>
           距离考试还有 {daysUntilExam > 0 ? daysUntilExam : 0} 天
         </div>
       )}
-
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, textAlign: "center" }}>
         {["日", "一", "二", "三", "四", "五", "六"].map((d) => (
           <div key={d} style={{ fontSize: 10, fontWeight: 600, color: "#9CA3AF", padding: 4 }}>{d}</div>
@@ -63,15 +62,14 @@ function VerticalMiniCalendar() {
           );
         })}
       </div>
-
-      <div style={{ fontSize: 11, color: "#9CA3AF", textAlign: "center" }}>
-        点击日期查看当天计划
-      </div>
+      <div style={{ fontSize: 11, color: "#9CA3AF", textAlign: "center" }}>点击日期查看当天计划</div>
     </div>
   );
 }
 
 export default function SprintWorkspace({ chatPage, quizPage, onViewPlan, onViewWrong }) {
+  const [rightPanelMode, setRightPanelMode] = useState("chat");
+
   return (
     <div style={{ display: "flex", flex: 1, padding: 24, gap: 24, overflow: "hidden", boxSizing: "border-box" }}>
       <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: 24 }}>
@@ -89,14 +87,34 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewPlan, onView
         >
           <h3 style={{ margin: "0 0 8px 0", fontSize: 16, fontWeight: 700, color: "#111827" }}>目标与错题</h3>
           <button
+            onClick={() => setRightPanelMode("chat")}
+            style={{
+              padding: 12, textAlign: "center", borderRadius: 12, border: "none", cursor: "pointer",
+              fontWeight: 600, fontSize: 14, fontFamily: "inherit", transition: "background 0.12s",
+              background: rightPanelMode === "chat" ? "#111827" : "#F3F4F6",
+              color: rightPanelMode === "chat" ? "#FFFFFF" : "#111827",
+            }}
+          >
+            🤖 AI 复习对讲
+          </button>
+          <button
+            onClick={() => setRightPanelMode("quiz")}
+            style={{
+              padding: 12, textAlign: "center", borderRadius: 12, border: "none", cursor: "pointer",
+              fontWeight: 600, fontSize: 14, fontFamily: "inherit", transition: "background 0.12s",
+              background: rightPanelMode === "quiz" ? "#10B981" : "#F3F4F6",
+              color: rightPanelMode === "quiz" ? "#FFFFFF" : "#111827",
+            }}
+          >
+            🧩 AI 出题检测
+          </button>
+          <button
             onClick={onViewPlan}
             style={{
               padding: 12, textAlign: "center", background: "#F3F4F6", borderRadius: 12,
               border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14,
-              color: "#111827", fontFamily: "inherit", transition: "background 0.12s",
+              color: "#111827", fontFamily: "inherit",
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#E5E7EB"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "#F3F4F6"; }}
           >
             📋 查看复习计划
           </button>
@@ -105,10 +123,8 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewPlan, onView
             style={{
               padding: 12, textAlign: "center", background: "#F3F4F6", borderRadius: 12,
               border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14,
-              color: "#111827", fontFamily: "inherit", transition: "background 0.12s",
+              color: "#111827", fontFamily: "inherit",
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#E5E7EB"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "#F3F4F6"; }}
           >
             📝 进入错题本
           </button>
@@ -126,19 +142,31 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewPlan, onView
 
       <div
         className="premium-card"
-        style={{ flex: 1, padding: 32, display: "flex", flexDirection: "column", overflowY: "auto", borderRadius: 24 }}
+        style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 24 }}
       >
-        <div style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
-          <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#6B7280", marginBottom: 12, letterSpacing: "0.04em" }}>AI 复习对话</div>
-            {chatPage}
-          </div>
-          <div style={{ width: 1, background: "#E5E7EB", flexShrink: 0 }} />
-          <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#6B7280", marginBottom: 12, letterSpacing: "0.04em" }}>AI 出题检测</div>
-            {quizPage}
-          </div>
-        </div>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={rightPanelMode}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}
+          >
+            {rightPanelMode === "chat" ? (
+              chatPage
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+                <div style={{ padding: "16px 24px", borderBottom: "1px solid #E5E7EB", display: "flex", alignItems: "center", flexShrink: 0 }}>
+                  <h2 style={{ fontSize: 18, margin: 0, fontWeight: 700, color: "#111827" }}>AI 出题检测</h2>
+                </div>
+                <div style={{ flex: 1, overflowY: "auto" }}>
+                  {quizPage}
+                </div>
+              </div>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );

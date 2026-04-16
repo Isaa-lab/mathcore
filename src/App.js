@@ -6,7 +6,6 @@ import { useMathStore } from "./store/useMathStore";
 import QuizPageView from "./pages/QuizPage";
 import MaterialChatPageView from "./pages/MaterialChatPage";
 import InteractiveMathChart from "./components/InteractiveMathChart";
-import InteractiveVisualizer from "./components/InteractiveVisualizer";
 import StudyWorkspace from "./layouts/StudyWorkspace";
 import SprintWorkspace from "./layouts/SprintWorkspace";
 import "katex/dist/katex.min.css";
@@ -3661,7 +3660,7 @@ function HomePage({ setPage, profile }) {
   );
 }
 
-function KnowledgePage({ setPage, setChapterFilter, showVisualizer = false }) {
+function KnowledgePage({ setPage, setChapterFilter }) {
   const [materials, setMaterials] = useState([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState(null);
   const [aiTopics, setAiTopics] = useState([]);
@@ -3816,8 +3815,6 @@ function KnowledgePage({ setPage, setChapterFilter, showVisualizer = false }) {
               </Btn>
             </div>
           </div>
-
-          {showVisualizer && <InteractiveVisualizer />}
 
           {/* Knowledge topic cards grouped by chapter */}
           {courseTopics.length > 0 ? (
@@ -5898,89 +5895,56 @@ function MaterialChatPage({ setPage, profile }) {
   };
 
   return (
-    <div className="chat-page-wrap">
-      <PageHeader
-        title="AI 助教"
-        subtitle="流式文档中心：连续阅读、公式与图表自然嵌入正文。"
-        onBack={() => setPage("资料库")}
-        backText="返回资料库"
-      />
-      <div className="premium-card" style={{ display: "flex", flexDirection: "column", minHeight: 560, overflow: "hidden" }}>
-        <div className="chat-header" style={{ borderBottom: "1px solid var(--border-light)" }}>
-          <div className="chat-doc-toolbar">
-            <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={{ ...s.input, marginBottom: 0, flex: "1 1 240px", maxWidth: 360, borderRadius: 12, border: "1px solid #E5E7EB", background: "#fff" }}>
-              {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
-            </select>
-            <motion.button
-              type="button"
-              whileHover={{ scale: 1.02, y: -4 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => { setChatMode("chat"); setHistory([]); }}
-              style={{ padding: "8px 16px", borderRadius: 12, border: chatMode === "chat" ? "2px solid #111827" : "1px solid var(--border-light)", background: chatMode === "chat" ? "#FFFFFF" : "#FAFAFC", fontWeight: chatMode === "chat" ? 700 : 500, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}
-            >
-              自由对话
-            </motion.button>
-            <motion.button
-              type="button"
-              whileHover={{ scale: 1.02, y: -4 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => { setChatMode("tutor"); setHistory([]); }}
-              style={{ padding: "8px 16px", borderRadius: 12, border: chatMode === "tutor" ? "2px solid #111827" : "1px solid var(--border-light)", background: chatMode === "tutor" ? "#FFFFFF" : "#FAFAFC", fontWeight: chatMode === "tutor" ? 700 : 500, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}
-            >
-              复习助教
-            </motion.button>
-            <Btn size="sm" onClick={() => materialId && selectedMaterial && setPage("quiz_material_" + materialId + "_" + encodeURIComponent(selectedMaterial.title || ""))} disabled={!materialId || !selectedMaterial}>做题</Btn>
-            <Btn size="sm" onClick={() => setPage("知识点")}>知识点</Btn>
-          </div>
-          <div className="chat-status">
-            当前文档：{selectedMaterial ? `${selectedMaterial.title} · ${selectedMaterial.course || "未分类"}` : "未选择资料"}
-          </div>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden" }}>
+      <div style={{ flexShrink: 0, padding: "12px 24px", borderBottom: "1px solid #E5E7EB" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 8 }}>
+          <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} style={{ ...s.input, marginBottom: 0, flex: "1 1 200px", maxWidth: 320, borderRadius: 12, border: "1px solid #E5E7EB", background: "#fff" }}>
+            {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course}</option>)}
+          </select>
+          <motion.button type="button" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setChatMode("chat"); setHistory([]); }} style={{ padding: "6px 14px", borderRadius: 10, border: chatMode === "chat" ? "2px solid #111827" : "1px solid #E5E7EB", background: chatMode === "chat" ? "#FFF" : "#FAFAFC", fontWeight: chatMode === "chat" ? 700 : 500, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>自由对话</motion.button>
+          <motion.button type="button" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => { setChatMode("tutor"); setHistory([]); }} style={{ padding: "6px 14px", borderRadius: 10, border: chatMode === "tutor" ? "2px solid #111827" : "1px solid #E5E7EB", background: chatMode === "tutor" ? "#FFF" : "#FAFAFC", fontWeight: chatMode === "tutor" ? 700 : 500, cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>复习助教</motion.button>
         </div>
-        <div className="chat-history-scroll chat-doc-stream" style={{ flex: 1, minHeight: 320, padding: "34px 28px" }}>
-          {history.length === 0 && (
-            <div style={{ padding: "24px 0", color: "var(--text-muted)", fontSize: 14, lineHeight: 1.85 }}>
-              {chatMode === "tutor"
-                ? "试着输入：帮我制定 3 天复习计划；先从第一章讲起；输出 [VAR:a,1,10] 与 [CHART] 进行可视化。"
-                : "试着输入：这份资料的核心知识点是什么？并输出 [VAR:a,1,10] 与 [CHART]。"}
-            </div>
-          )}
-          <MaterialChatPageView
-            messages={history}
-            conversationHistory={history}
-            currentMaterial={selectedMaterial}
-            renderChart={() => <InteractiveMathChart />}
+        <div style={{ fontSize: 12, color: "#6B7280" }}>当前文档：{selectedMaterial ? `${selectedMaterial.title} · ${selectedMaterial.course || "未分类"}` : "未选择资料"}</div>
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
+        {history.length === 0 && (
+          <div style={{ padding: "24px 0", color: "#6B7280", fontSize: 14, lineHeight: 1.85 }}>
+            {chatMode === "tutor"
+              ? "试着输入：帮我制定 3 天复习计划；先从第一章讲起；输出 [VAR:a,1,10] 与 [CHART] 进行可视化。"
+              : "试着输入：这份资料的核心知识点是什么？并输出 [VAR:a,1,10] 与 [CHART]。"}
+          </div>
+        )}
+        <MaterialChatPageView
+          messages={history}
+          conversationHistory={history}
+          currentMaterial={selectedMaterial}
+          renderChart={() => <InteractiveMathChart />}
+        />
+        {chatting && (
+          <div style={{ color: "#6B7280", paddingLeft: 16, borderLeft: "2px solid transparent", borderImage: "var(--ai-glow) 1" }}>正在思考…</div>
+        )}
+        <div ref={chatEndRef} />
+      </div>
+      <div style={{ flexShrink: 0, padding: "16px 24px", borderTop: "1px solid #E5E7EB", background: "#FAFAFC" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+          <textarea
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !chatting) { e.preventDefault(); ask(); } }}
+            placeholder="输入数学问题，或让 AI 生成复习提纲…"
+            style={{ flex: 1, minHeight: 48, maxHeight: 120, border: "1px solid #E5E7EB", borderRadius: 12, padding: "10px 14px", fontFamily: "inherit", resize: "vertical", background: "#FFF", fontSize: 14, lineHeight: 1.6 }}
           />
-          {chatting && (
-            <div style={{ color: "var(--text-secondary)", paddingLeft: 16, borderLeft: "2px solid transparent", borderImage: "var(--ai-glow) 1" }}>正在思考…</div>
-          )}
-          <div ref={chatEndRef} />
-        </div>
-        <div className="chat-input-area" style={{ borderTop: "1px solid var(--border-light)", background: "#FAFAFC" }}>
-          <div className="input-wrapper">
-            <textarea
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !chatting) {
-                  e.preventDefault();
-                  ask();
-                }
-              }}
-              placeholder="输入数学问题，或让 AI 生成复习提纲…"
-              className="clean-input"
-            />
-            <motion.button
-              type="button"
-              className="btn-primary send-btn"
-              onClick={ask}
-              disabled={chatting || !materialId || !question.trim()}
-              whileHover={!(chatting || !materialId || !question.trim()) ? { scale: 1.02, y: -4 } : undefined}
-              whileTap={!(chatting || !materialId || !question.trim()) ? { scale: 0.98 } : undefined}
-              style={{ borderRadius: 12, padding: "10px 16px", fontWeight: 700, letterSpacing: "0.01em", boxShadow: "0 10px 24px rgba(17,24,39,0.16)" }}
-            >
-              {chatting ? "发送中…" : "发送"}
-            </motion.button>
-          </div>
+          <motion.button
+            type="button"
+            className="btn-primary"
+            onClick={ask}
+            disabled={chatting || !materialId || !question.trim()}
+            whileHover={!(chatting || !materialId || !question.trim()) ? { scale: 1.02 } : undefined}
+            whileTap={!(chatting || !materialId || !question.trim()) ? { scale: 0.98 } : undefined}
+            style={{ borderRadius: 12, padding: "10px 16px", fontWeight: 700, flexShrink: 0 }}
+          >
+            {chatting ? "发送中…" : "发送"}
+          </motion.button>
         </div>
       </div>
     </div>
@@ -6823,35 +6787,39 @@ function GatewayPage({ profile, onMaterial, onExam }) {
   const displayName = profile?.name || "ISAA";
   const stats = [
     { label: "连续学习", value: streak + " 天" },
-    { label: "题库", value: ALL_QUESTIONS.length + "+" },
+    { label: "题库规模", value: ALL_QUESTIONS.length + "+" },
     { label: "记忆卡", value: String(FLASHCARDS.length) },
     { label: "徽章", value: unlocked + "/" + BADGES.length },
   ];
   return (
-    <div style={{ height: "100vh", overflow: "hidden", background: "#FAFAFC", padding: "48px 24px 64px", boxSizing: "border-box", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-      <motion.div className="premium-card" style={{ maxWidth: 920, margin: "0 auto 40px", padding: "28px 32px" }} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.06em", marginBottom: 8 }}>欢迎回来</div>
-        <div style={{ fontSize: 32, fontWeight: 800, color: "var(--text-main)", letterSpacing: "-0.03em", marginBottom: 20 }}>{displayName}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
-          {stats.map((st) => (
-            <div key={st.label} style={{ padding: "14px 16px", borderRadius: 14, background: "#FAFAFC", border: "1px solid var(--border-light)" }}>
-              <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text-main)" }}>{st.value}</div>
-              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>{st.label}</div>
-            </div>
-          ))}
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100vh", width: "100vw", padding: 40, boxSizing: "border-box", background: "#FAFAFC" }}>
+      <div style={{ width: "100%", maxWidth: 1000, display: "flex", flexDirection: "column", gap: 40 }}>
+        <motion.div className="premium-card" style={{ padding: "32px 40px", display: "flex", alignItems: "center", justifyContent: "space-between", borderRadius: 24, flexWrap: "wrap", gap: 24 }} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
+          <div>
+            <p style={{ margin: "0 0 8px 0", color: "#6B7280", fontSize: 16 }}>欢迎回来</p>
+            <h1 style={{ margin: 0, fontSize: 36, color: "#111827", fontWeight: "bold" }}>{displayName}</h1>
+          </div>
+          <div style={{ display: "flex", gap: 24 }}>
+            {stats.map((st) => (
+              <div key={st.label} style={{ padding: "16px 24px", background: "#F3F4F6", borderRadius: 16, minWidth: 100 }}>
+                <h2 style={{ margin: "0 0 4px 0", fontSize: 24, color: "#111827", fontWeight: 800 }}>{st.value}</h2>
+                <p style={{ margin: 0, fontSize: 14, color: "#6B7280" }}>{st.label}</p>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+        <div style={{ display: "flex", gap: 32, width: "100%" }}>
+          <motion.button type="button" className="premium-card" onClick={onMaterial} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.05 }} whileHover={{ scale: 1.02, y: -4 }} whileTap={{ scale: 0.98 }} style={{ flex: 1, padding: 40, borderRadius: 24, cursor: "pointer", textAlign: "left", border: "none", fontFamily: "inherit" }}>
+            <div style={{ fontSize: 40, marginBottom: 24 }}>{"\u{1F4DA}"}</div>
+            <h2 style={{ fontSize: 24, margin: "0 0 12px 0", color: "#111827", fontWeight: 800 }}>资料学习区</h2>
+            <p style={{ color: "#6B7280", margin: 0, fontSize: 15, lineHeight: 1.7 }}>上传课件 → 提取知识 → 智能题库</p>
+          </motion.button>
+          <motion.button type="button" className="premium-card" onClick={onExam} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.1 }} whileHover={{ scale: 1.02, y: -4 }} whileTap={{ scale: 0.98 }} style={{ flex: 1, padding: 40, borderRadius: 24, cursor: "pointer", textAlign: "left", border: "none", fontFamily: "inherit" }}>
+            <div style={{ fontSize: 40, marginBottom: 24 }}>{"\u{1F3AF}"}</div>
+            <h2 style={{ fontSize: 24, margin: "0 0 12px 0", color: "#111827", fontWeight: 800 }}>考前冲刺区</h2>
+            <p style={{ color: "#6B7280", margin: 0, fontSize: 15, lineHeight: 1.7 }}>设定倒计时 → 制定日历 → AI 带学</p>
+          </motion.button>
         </div>
-      </motion.div>
-      <div style={{ maxWidth: 960, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 24 }}>
-        <motion.button type="button" className="premium-card" onClick={onMaterial} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.05 }} whileHover={{ scale: 1.02, y: -4 }} whileTap={{ scale: 0.98 }} style={{ cursor: "pointer", textAlign: "left", padding: "36px 32px", border: "none", fontFamily: "inherit" }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>{"\u{1F4DA}"}</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text-main)", marginBottom: 8 }}>资料学习区</div>
-          <div style={{ fontSize: 15, color: "var(--text-muted)", lineHeight: 1.7 }}>上传课件 {"->"} 提取知识 {"->"} 智能题库</div>
-        </motion.button>
-        <motion.button type="button" className="premium-card" onClick={onExam} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.1 }} whileHover={{ scale: 1.02, y: -4 }} whileTap={{ scale: 0.98 }} style={{ cursor: "pointer", textAlign: "left", padding: "36px 32px", border: "none", fontFamily: "inherit" }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>{"\u{1F3AF}"}</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "var(--text-main)", marginBottom: 8 }}>考前冲刺区</div>
-          <div style={{ fontSize: 15, color: "var(--text-muted)", lineHeight: 1.7 }}>设定倒计时 {"->"} 制定日历 {"->"} AI 带学</div>
-        </motion.button>
       </div>
     </div>
   );
@@ -7054,7 +7022,7 @@ export default function App() {
   const renderStudyTab = (tab) => {
     if (tab === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
     if (tab === "AI对话") return <MaterialChatPage setPage={handleSetPage} profile={profile} />;
-    if (tab === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} showVisualizer />;
+    if (tab === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
     if (tab === "知识树") return <SkillTreePage setPage={handleSetPage} />;
     if (tab === "小测") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
     return null;
