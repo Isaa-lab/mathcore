@@ -42,7 +42,7 @@ export default function StudyWorkspace({ renderTab }) {
 
       <div
         className="premium-card"
-        style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", borderRadius: 24, position: "relative" }}
+        style={{ flex: 1, overflowY: "auto", height: "100%", padding: 32, borderRadius: 24, position: "relative" }}
       >
         <AnimatePresence mode="wait">
           <motion.div
@@ -51,7 +51,6 @@ export default function StudyWorkspace({ renderTab }) {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -10 }}
             transition={{ duration: 0.2 }}
-            style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}
           >
             {renderTab(activeTab)}
           </motion.div>

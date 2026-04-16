@@ -3224,77 +3224,83 @@ function AuthPage() {
     setLoading(false);
   };
 
+  const inputStyle = { background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 12, padding: "14px 16px", fontSize: 15, width: "100%", boxSizing: "border-box", transition: "all 0.2s", outline: "none", fontFamily: "inherit", color: "#111827" };
+  const focusInput = (e) => { e.target.style.borderColor = "#4F46E5"; e.target.style.boxShadow = "0 0 0 3px rgba(79, 70, 229, 0.1)"; };
+  const blurInput = (e) => { e.target.style.borderColor = "#E5E7EB"; e.target.style.boxShadow = "none"; };
+
   return (
-    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #f0fdf8 0%, #e8f4ff 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
-      <div style={{ width: "100%", maxWidth: 460 }}>
-        {/* Brand */}
-        <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 16, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, margin: "0 auto 14px" }}>📐</div>
-          <div style={{ fontSize: 26, fontWeight: 700, color: "#111", letterSpacing: "-0.5px" }}>MathCore</div>
-          <div style={{ fontSize: 15, color: "#666", marginTop: 4 }}>数学与应用数学学习平台</div>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", width: "100vw", background: "var(--bg-global, #FAFAFC)" }}>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="premium-card"
+        style={{ width: 400, padding: 48, borderRadius: 24, display: "flex", flexDirection: "column", alignItems: "center" }}
+      >
+        <div style={{ fontSize: 28, fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", marginBottom: 4 }}>MathCore</div>
+        <div style={{ fontSize: 14, color: "#6B7280", marginBottom: 32 }}>数学与应用数学学习平台</div>
+
+        <div style={{ display: "flex", background: "#F3F4F6", borderRadius: 12, padding: 4, marginBottom: 24, width: "100%" }}>
+          {[["login", "登录"], ["register", "注册"]].map(([m, l]) => (
+            <button key={m} onClick={() => { setMode(m); setError(""); setSuccess(""); }} style={{ flex: 1, padding: "10px 0", fontSize: 14, fontFamily: "inherit", border: "none", cursor: "pointer", borderRadius: 10, fontWeight: mode === m ? 600 : 400, background: mode === m ? "#fff" : "transparent", color: mode === m ? "#111827" : "#9CA3AF", boxShadow: mode === m ? "0 2px 8px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>{l}</button>
+          ))}
         </div>
 
-        <div style={{ ...s.card, padding: "2rem" }}>
-          {/* Tabs */}
-          <div style={{ display: "flex", background: "#f5f5f5", borderRadius: 12, padding: 4, marginBottom: 24 }}>
-            {[["login", "登录"], ["register", "注册"]].map(([m, l]) => (
-              <button key={m} onClick={() => { setMode(m); setError(""); setSuccess(""); }} style={{ flex: 1, padding: "10px 0", fontSize: 14, fontFamily: "inherit", border: "none", cursor: "pointer", borderRadius: 10, fontWeight: mode === m ? 600 : 400, background: mode === m ? "#fff" : "transparent", color: mode === m ? "#111" : "#888", boxShadow: mode === m ? "0 2px 8px rgba(0,0,0,0.08)" : "none" }}>{l}</button>
-            ))}
-          </div>
-
-          {error && <div style={{ padding: "12px 16px", background: G.redLight, color: G.red, borderRadius: 10, fontSize: 14, marginBottom: 16 }}>{error}</div>}
-          {success && (
-            <div style={{ padding: "14px 16px", background: G.tealLight, color: G.tealDark, borderRadius: 10, fontSize: 14, marginBottom: 16, lineHeight: 1.7 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>✉️ 验证邮件已发送！</div>
-              <div>请打开你注册时填写的邮箱，点击邮件中的链接完成验证后即可登录。</div>
-              <div style={{ marginTop: 6, color: "#2d7a5f", fontSize: 13 }}>
-                没收到？请检查<strong>垃圾邮件</strong>文件夹。
-                {cooldown > 0
-                  ? <span style={{ marginLeft: 6, color: "#888" }}>重新发送需等待 <strong style={{ color: G.tealDark }}>{cooldown}s</strong></span>
-                  : <span style={{ marginLeft: 6 }}>如仍未收到，可重新注册触发再次发送（每封邮件有 60 秒冷却）。</span>
-                }
-              </div>
+        {error && <div style={{ padding: "12px 16px", background: "#FEF2F2", color: "#DC2626", borderRadius: 12, fontSize: 14, marginBottom: 16, width: "100%", lineHeight: 1.6 }}>{error}</div>}
+        {success && (
+          <div style={{ padding: "14px 16px", background: "#ECFDF5", color: "#065F46", borderRadius: 12, fontSize: 14, marginBottom: 16, width: "100%", lineHeight: 1.7 }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>✉️ 验证邮件已发送！</div>
+            <div>请打开你注册时填写的邮箱，点击邮件中的链接完成验证后即可登录。</div>
+            <div style={{ marginTop: 6, fontSize: 13, color: "#047857" }}>
+              没收到？请检查<strong>垃圾邮件</strong>文件夹。
+              {cooldown > 0
+                ? <span style={{ marginLeft: 6, color: "#6B7280" }}>重新发送需等待 <strong style={{ color: "#065F46" }}>{cooldown}s</strong></span>
+                : <span style={{ marginLeft: 6 }}>如仍未收到，可重新注册触发再次发送。</span>
+              }
             </div>
-          )}
+          </div>
+        )}
 
+        <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 14 }}>
           {mode === "register" && (
             <>
-              <div style={{ marginBottom: 14 }}>
-                <label style={s.label}>姓名</label>
-                <input style={s.input} value={name} onChange={e => setName(e.target.value)} placeholder="你的名字" />
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 6 }}>姓名</label>
+                <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="你的名字" onFocus={focusInput} onBlur={blurInput} />
               </div>
-              <div style={{ marginBottom: 14 }}>
-                <label style={s.label}>身份</label>
+              <div>
+                <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 6 }}>身份</label>
                 <div style={{ display: "flex", gap: 10 }}>
-                  {[["student", "🎓 学生"], ["teacher", "👨‍🏫 教师"]].map(([r, l]) => (
-                    <button key={r} onClick={() => setRole(r)} style={{ flex: 1, padding: "12px 0", fontSize: 14, fontFamily: "inherit", border: role === r ? `2px solid ${G.teal}` : "2px solid #e0e0e0", borderRadius: 10, cursor: "pointer", fontWeight: role === r ? 600 : 400, background: role === r ? G.tealLight : "#fff", color: role === r ? G.tealDark : "#666" }}>{l}</button>
+                  {[["student", "学生"], ["teacher", "教师"]].map(([r, l]) => (
+                    <button key={r} onClick={() => setRole(r)} style={{ flex: 1, padding: "12px 0", fontSize: 14, fontFamily: "inherit", border: role === r ? "2px solid #111827" : "1px solid #E5E7EB", borderRadius: 12, cursor: "pointer", fontWeight: role === r ? 700 : 500, background: role === r ? "#111827" : "#F9FAFB", color: role === r ? "#fff" : "#6B7280", transition: "all 0.15s" }}>{l}</button>
                   ))}
                 </div>
               </div>
             </>
           )}
 
-          <div style={{ marginBottom: 14 }}>
-            <label style={s.label}>邮箱</label>
-            <input style={s.input} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" />
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 6 }}>邮箱</label>
+            <input style={inputStyle} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" onFocus={focusInput} onBlur={blurInput} />
           </div>
-          <div style={{ marginBottom: 20 }}>
-            <label style={s.label}>密码</label>
-            <input style={s.input} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={mode === "register" ? "至少 6 位" : "输入密码"} onKeyDown={e => { if (e.key === "Enter") { if (mode === "login") handleLogin(); else handleRegister(); }}} />
-          </div>
-
-          <button
-            disabled={loading || (mode === "register" && cooldown > 0)}
-            onClick={mode === "login" ? handleLogin : handleRegister}
-            style={{ width: "100%", padding: "14px 0", fontSize: 16, fontWeight: 600, fontFamily: "inherit", background: loading || (mode === "register" && cooldown > 0) ? "#9FE1CB" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: loading || (mode === "register" && cooldown > 0) ? "not-allowed" : "pointer" }}
-          >
-            {loading ? "处理中…" : mode === "register" && cooldown > 0 ? `重新发送（${cooldown}s）` : mode === "login" ? "登录" : "注册账号"}
-          </button>
-          <div style={{ textAlign: "center", marginTop: 16, fontSize: 14, color: "#888" }}>
-            {mode === "login" ? <>还没有账号？<span onClick={() => setMode("register")} style={{ color: G.teal, cursor: "pointer", fontWeight: 500 }}>立即注册</span></> : <>已有账号？<span onClick={() => setMode("login")} style={{ color: G.teal, cursor: "pointer", fontWeight: 500 }}>直接登录</span></>}
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 6 }}>密码</label>
+            <input style={inputStyle} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={mode === "register" ? "至少 6 位" : "输入密码"} onKeyDown={e => { if (e.key === "Enter") { if (mode === "login") handleLogin(); else handleRegister(); }}} onFocus={focusInput} onBlur={blurInput} />
           </div>
         </div>
-      </div>
+
+        <motion.button
+          disabled={loading || (mode === "register" && cooldown > 0)}
+          onClick={mode === "login" ? handleLogin : handleRegister}
+          whileHover={!(loading || (mode === "register" && cooldown > 0)) ? { scale: 1.02, y: -2 } : undefined}
+          whileTap={!(loading || (mode === "register" && cooldown > 0)) ? { scale: 0.98 } : undefined}
+          style={{ width: "100%", padding: 14, fontSize: 16, fontWeight: 600, fontFamily: "inherit", background: loading || (mode === "register" && cooldown > 0) ? "#D1D5DB" : "#111827", color: "#fff", border: "none", borderRadius: 12, cursor: loading || (mode === "register" && cooldown > 0) ? "not-allowed" : "pointer", marginTop: 20, transition: "background 0.2s" }}
+        >
+          {loading ? "处理中…" : mode === "register" && cooldown > 0 ? `重新发送（${cooldown}s）` : mode === "login" ? "登录" : "注册账号"}
+        </motion.button>
+        <div style={{ textAlign: "center", marginTop: 16, fontSize: 14, color: "#9CA3AF" }}>
+          {mode === "login" ? <>还没有账号？<span onClick={() => setMode("register")} style={{ color: "#4F46E5", cursor: "pointer", fontWeight: 600 }}>立即注册</span></> : <>已有账号？<span onClick={() => setMode("login")} style={{ color: "#4F46E5", cursor: "pointer", fontWeight: 600 }}>直接登录</span></>}
+        </div>
+      </motion.div>
     </div>
   );
 }
@@ -5517,7 +5523,7 @@ function MaterialsPage({ setPage, profile }) {
   );
 
   return (
-    <div style={{ padding: "0 0 18px", maxWidth: 1040, margin: "0 auto" }}>
+    <div style={{ width: "100%" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
           <div style={{ fontSize: 26, fontWeight: 700, color: "#111", marginBottom: 4 }}>📚 教材资料库</div>
@@ -5526,12 +5532,11 @@ function MaterialsPage({ setPage, profile }) {
         <Btn variant="primary" onClick={() => setPage("上传资料")}>+ 上传资料</Btn>
       </div>
 
-      {/* Search + Filter */}
       <div style={{ marginBottom: 16 }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 搜索资料名称、课程或简介…" style={{ width: "100%", fontSize: 15, padding: "12px 16px", border: "1.5px solid #e0e0e0", borderRadius: 12, fontFamily: "inherit", color: "#111", boxSizing: "border-box", marginBottom: 12 }} />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 搜索资料名称、课程或简介…" style={{ width: "100%", fontSize: 15, padding: "12px 16px", border: "1px solid #E5E7EB", borderRadius: 12, fontFamily: "inherit", color: "#111", boxSizing: "border-box", marginBottom: 12, background: "#F9FAFB", outline: "none" }} />
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {courses.map(c => (
-            <button key={c} onClick={() => setFilter(c)} style={{ fontSize: 14, padding: "8px 18px", borderRadius: 20, border: "2px solid " + (filter === c ? G.teal : "#e0e0e0"), cursor: "pointer", fontFamily: "inherit", fontWeight: filter === c ? 700 : 400, background: filter === c ? G.teal : "#fff", color: filter === c ? "#fff" : "#666" }}>{c}</button>
+            <button key={c} onClick={() => setFilter(c)} style={{ fontSize: 14, padding: "8px 18px", borderRadius: 20, border: filter === c ? "2px solid #111827" : "2px solid #E5E7EB", cursor: "pointer", fontFamily: "inherit", fontWeight: filter === c ? 700 : 400, background: filter === c ? "#111827" : "#fff", color: filter === c ? "#fff" : "#6B7280" }}>{c}</button>
           ))}
         </div>
       </div>
@@ -5539,14 +5544,14 @@ function MaterialsPage({ setPage, profile }) {
       {loading && <div style={{ textAlign: "center", padding: "4rem", color: "#aaa", fontSize: 16 }}>加载中…</div>}
 
       {!loading && filtered.length === 0 && (
-        <div style={{ ...s.card, textAlign: "center", padding: "4rem" }}>
+        <div style={{ textAlign: "center", padding: "4rem", border: "2px dashed #E5E7EB", borderRadius: 16 }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>📭</div>
           <div style={{ fontSize: 18, fontWeight: 600, color: "#333", marginBottom: 8 }}>暂无资料</div>
           <div style={{ fontSize: 15, color: "#888" }}>{profile?.role === "teacher" ? "点击右上角上传第一份教材" : "请等待教师上传教材"}</div>
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 24, width: "100%", marginTop: 24 }}>
         {filtered.map(m => (
           <div key={m.id} onClick={() => setSelected(m)} style={{ ...s.card, cursor: "pointer", transition: "transform .15s, box-shadow .15s", borderTop: `4px solid ${getCourseBorderColor(m.course)}` }}>
             <div style={{ fontSize: 32, marginBottom: 12 }}>📄</div>
