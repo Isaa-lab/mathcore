@@ -3224,22 +3224,7 @@ function AuthPage() {
     setLoading(false);
   };
 
-  const a = useMathStore((s) => s.interactiveParams.a ?? 2);
-  const setInteractiveParam = useMathStore((s) => s.setInteractiveParam);
-  const mathString = `f(x) = ${a.toFixed(1)} \\cdot \\sin(x)`;
-  const mathHtml = useMemo(() => katex.renderToString(mathString, { throwOnError: false, displayMode: true }), [mathString]);
-  const vizPath = useMemo(() => {
-    const pts = [];
-    for (let i = 0; i <= 200; i++) {
-      const x = -Math.PI * 2 + (4 * Math.PI * i) / 200;
-      const y = a * Math.sin(x);
-      const px = 40 + ((x + Math.PI * 2) / (4 * Math.PI)) * 420;
-      const py = 100 - y * (70 / Math.max(a + 0.5, 2));
-      pts.push(`${i === 0 ? "M" : "L"} ${px.toFixed(1)} ${py.toFixed(1)}`);
-    }
-    return pts.join(" ");
-  }, [a]);
-
+  const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); return d.days || 1; } catch { return 1; } })();
   const inputStyle = { background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 14, padding: "16px 18px", fontSize: 16, width: "100%", boxSizing: "border-box", transition: "all 0.2s", outline: "none", fontFamily: "inherit", color: "#111827" };
   const focusInput = (e) => { e.target.style.borderColor = "#4F46E5"; e.target.style.boxShadow = "0 0 0 3px rgba(79, 70, 229, 0.1)"; };
   const blurInput = (e) => { e.target.style.borderColor = "#E5E7EB"; e.target.style.boxShadow = "none"; };
@@ -3251,30 +3236,35 @@ function AuthPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ type: "spring", stiffness: 260, damping: 24 }}
         className="premium-card"
-        style={{ width: 520, borderRadius: 28, display: "flex", flexDirection: "column", overflow: "hidden" }}
+        style={{ width: "100%", maxWidth: 860, borderRadius: 20, padding: "48px 56px", display: "flex", flexDirection: "column", gap: 40, margin: "0 32px" }}
       >
-        {/* Upper: Interactive math visualization */}
-        <div style={{ height: 260, background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 32px", position: "relative", overflow: "hidden" }}>
-          <div style={{ position: "absolute", inset: 0, opacity: 0.06 }}>
-            <svg width="100%" height="100%"><pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M 24 0 L 0 0 0 24" fill="none" stroke="#fff" strokeWidth="0.5" /></pattern><rect width="100%" height="100%" fill="url(#grid)" /></svg>
+        {/* Data Dashboard Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 32, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 14, color: "#9CA3AF", fontWeight: 500, marginBottom: 6 }}>欢迎来到</div>
+            <div style={{ fontSize: 36, fontWeight: 800, color: "#111827", letterSpacing: "-0.03em", lineHeight: 1.2 }}>MathCore</div>
+            <div style={{ fontSize: 15, color: "#6B7280", marginTop: 8 }}>数学与应用数学学习平台</div>
           </div>
-          <svg width="100%" viewBox="0 0 500 200" preserveAspectRatio="xMidYMid meet" style={{ position: "relative", zIndex: 1, maxHeight: 120 }}>
-            <line x1="40" y1="100" x2="460" y2="100" stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
-            <line x1="250" y1="20" x2="250" y2="180" stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
-            <path d={vizPath} stroke="#818CF8" strokeWidth="2.5" fill="none" strokeLinecap="round" style={{ transition: "d 60ms linear" }} />
-          </svg>
-          <div style={{ position: "relative", zIndex: 1, marginTop: 8, color: "#E0E7FF", fontSize: 18, fontFamily: "'KaTeX_Math', serif" }} dangerouslySetInnerHTML={{ __html: mathHtml }} />
-          <input
-            type="range" min="0.5" max="5" step="0.1" value={a}
-            onChange={(e) => setInteractiveParam("a", Number(e.target.value))}
-            style={{ position: "relative", zIndex: 1, width: 200, marginTop: 8, accentColor: "#818CF8" }}
-          />
-          <div style={{ position: "absolute", top: 20, left: 28, fontSize: 22, fontWeight: 800, color: "#FFFFFF", letterSpacing: "-0.02em", zIndex: 1 }}>MathCore</div>
-          <div style={{ position: "absolute", top: 46, left: 28, fontSize: 12, color: "rgba(255,255,255,0.5)", zIndex: 1 }}>数学与应用数学学习平台</div>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+            <div style={{ textAlign: "center", padding: "20px 24px", background: "#F9FAFB", borderRadius: 16, minWidth: 100 }}>
+              <div style={{ fontSize: 32, fontWeight: 800, color: "#4F46E5" }}>{streak}天</div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 4 }}>连续学习</div>
+            </div>
+            <div style={{ textAlign: "center", padding: "20px 24px", background: "#F9FAFB", borderRadius: 16, minWidth: 100 }}>
+              <div style={{ fontSize: 32, fontWeight: 800, color: "#111827" }}>{ALL_QUESTIONS.length}+</div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 4 }}>题库规模</div>
+            </div>
+            <div style={{ textAlign: "center", padding: "20px 24px", background: "#F9FAFB", borderRadius: 16, minWidth: 100 }}>
+              <div style={{ fontSize: 32, fontWeight: 800, color: "#111827" }}>{FLASHCARDS.length}</div>
+              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 4 }}>记忆卡</div>
+            </div>
+          </div>
         </div>
 
-        {/* Lower: Login form */}
-        <div style={{ padding: "32px 40px 36px" }}>
+        <div style={{ height: 1, background: "#F3F4F6" }} />
+
+        {/* Login Form */}
+        <div style={{ maxWidth: 420 }}>
           <div style={{ display: "flex", background: "#F3F4F6", borderRadius: 12, padding: 4, marginBottom: 24 }}>
             {[["login", "登录"], ["register", "注册"]].map(([m, l]) => (
               <button key={m} onClick={() => { setMode(m); setError(""); setSuccess(""); }} style={{ flex: 1, padding: "10px 0", fontSize: 14, fontFamily: "inherit", border: "none", cursor: "pointer", borderRadius: 10, fontWeight: mode === m ? 600 : 400, background: mode === m ? "#fff" : "transparent", color: mode === m ? "#111827" : "#9CA3AF", boxShadow: mode === m ? "0 2px 8px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>{l}</button>
@@ -3313,7 +3303,6 @@ function AuthPage() {
                 </div>
               </>
             )}
-
             <div>
               <label style={{ fontSize: 15, fontWeight: 700, color: "#111827", display: "block", marginBottom: 8 }}>输入账号</label>
               <input style={inputStyle} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="输入账号或注册邮箱..." onFocus={focusInput} onBlur={blurInput} />
