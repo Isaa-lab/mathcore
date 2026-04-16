@@ -3224,57 +3224,64 @@ function AuthPage() {
     setLoading(false);
   };
 
-  const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); return d.days || 1; } catch { return 1; } })();
-  const inputStyle = { background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 14, padding: "16px 18px", fontSize: 16, width: "100%", boxSizing: "border-box", transition: "all 0.2s", outline: "none", fontFamily: "inherit", color: "#111827" };
-  const focusInput = (e) => { e.target.style.borderColor = "#4F46E5"; e.target.style.boxShadow = "0 0 0 3px rgba(79, 70, 229, 0.1)"; };
-  const blurInput = (e) => { e.target.style.borderColor = "#E5E7EB"; e.target.style.boxShadow = "none"; };
+  const inputStyle = { background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 14, padding: "18px 20px", fontSize: 16, width: "100%", boxSizing: "border-box", outline: "none", fontFamily: "inherit", color: "#111827", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", transition: "border-color 0.2s, box-shadow 0.2s" };
+  const focusInput = (e) => { e.target.style.borderColor = "#4F46E5"; e.target.style.boxShadow = "0 4px 16px rgba(79, 70, 229, 0.12)"; };
+  const blurInput = (e) => { e.target.style.borderColor = "#E5E7EB"; e.target.style.boxShadow = "0 2px 8px rgba(0,0,0,0.04)"; };
+  const btnDisabled = loading || (mode === "register" && cooldown > 0);
 
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", width: "100vw", background: "var(--bg-global, #FAFAFC)" }}>
+    <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", width: "100vw", background: "#FAFAFC", overflow: "hidden" }}>
+      {/* Abstract geometric depth elements */}
+      <div style={{ position: "absolute", top: "-15%", right: "-10%", width: 520, height: 520, borderRadius: "50%", background: "radial-gradient(circle, rgba(79,70,229,0.04) 0%, transparent 70%)", pointerEvents: "none" }} />
+      <div style={{ position: "absolute", bottom: "-12%", left: "-8%", width: 440, height: 440, borderRadius: "50%", background: "radial-gradient(circle, rgba(99,102,241,0.03) 0%, transparent 70%)", pointerEvents: "none" }} />
+      <div style={{ position: "absolute", top: "20%", left: "8%", width: 200, height: 200, borderRadius: 32, background: "rgba(243,244,246,0.6)", transform: "rotate(15deg)", pointerEvents: "none" }} />
+      <div style={{ position: "absolute", bottom: "15%", right: "6%", width: 160, height: 160, borderRadius: 28, background: "rgba(243,244,246,0.5)", transform: "rotate(-12deg)", pointerEvents: "none" }} />
+
+      {/* Full-width floating panel */}
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ type: "spring", stiffness: 260, damping: 24 }}
-        className="premium-card"
-        style={{ width: "100%", maxWidth: 860, borderRadius: 20, padding: "48px 56px", display: "flex", flexDirection: "column", gap: 40, margin: "0 32px" }}
+        initial={{ opacity: 0, y: 30, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ type: "spring", stiffness: 200, damping: 26 }}
+        style={{
+          position: "relative", zIndex: 1,
+          width: "calc(100% - 80px)", maxWidth: 960, minHeight: 540,
+          background: "#FFFFFF", borderRadius: 20,
+          boxShadow: "0 15px 40px rgba(0,0,0,0.06)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: "64px 40px",
+        }}
       >
-        {/* Data Dashboard Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 32, flexWrap: "wrap" }}>
-          <div>
-            <div style={{ fontSize: 14, color: "#9CA3AF", fontWeight: 500, marginBottom: 6 }}>欢迎来到</div>
-            <div style={{ fontSize: 36, fontWeight: 800, color: "#111827", letterSpacing: "-0.03em", lineHeight: 1.2 }}>MathCore</div>
-            <div style={{ fontSize: 15, color: "#6B7280", marginTop: 8 }}>数学与应用数学学习平台</div>
-          </div>
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-            <div style={{ textAlign: "center", padding: "20px 24px", background: "#F9FAFB", borderRadius: 16, minWidth: 100 }}>
-              <div style={{ fontSize: 32, fontWeight: 800, color: "#4F46E5" }}>{streak}天</div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 4 }}>连续学习</div>
-            </div>
-            <div style={{ textAlign: "center", padding: "20px 24px", background: "#F9FAFB", borderRadius: 16, minWidth: 100 }}>
-              <div style={{ fontSize: 32, fontWeight: 800, color: "#111827" }}>{ALL_QUESTIONS.length}+</div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 4 }}>题库规模</div>
-            </div>
-            <div style={{ textAlign: "center", padding: "20px 24px", background: "#F9FAFB", borderRadius: 16, minWidth: 100 }}>
-              <div style={{ fontSize: 32, fontWeight: 800, color: "#111827" }}>{FLASHCARDS.length}</div>
-              <div style={{ fontSize: 13, color: "#6B7280", marginTop: 4 }}>记忆卡</div>
-            </div>
-          </div>
-        </div>
+        {/* Central Login Pod */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 240, damping: 22, delay: 0.12 }}
+          style={{ width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", alignItems: "center" }}
+        >
+          {/* Logo */}
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: "spring", stiffness: 300, damping: 20, delay: 0.06 }}
+            style={{ width: 56, height: 56, borderRadius: 16, background: "#111827", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20, boxShadow: "0 6px 20px rgba(17,24,39,0.15)" }}
+          >
+            <span style={{ color: "#fff", fontSize: 24, fontWeight: 800, lineHeight: 1 }}>M</span>
+          </motion.div>
 
-        <div style={{ height: 1, background: "#F3F4F6" }} />
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#111827", letterSpacing: "-0.03em", marginBottom: 6 }}>MathCore</div>
+          <div style={{ fontSize: 15, color: "#9CA3AF", marginBottom: 36 }}>数学与应用数学学习平台</div>
 
-        {/* Login Form */}
-        <div style={{ maxWidth: 420 }}>
-          <div style={{ display: "flex", background: "#F3F4F6", borderRadius: 12, padding: 4, marginBottom: 24 }}>
+          {/* Tab switcher */}
+          <div style={{ display: "flex", background: "#F3F4F6", borderRadius: 12, padding: 4, marginBottom: 28, width: "100%" }}>
             {[["login", "登录"], ["register", "注册"]].map(([m, l]) => (
-              <button key={m} onClick={() => { setMode(m); setError(""); setSuccess(""); }} style={{ flex: 1, padding: "10px 0", fontSize: 14, fontFamily: "inherit", border: "none", cursor: "pointer", borderRadius: 10, fontWeight: mode === m ? 600 : 400, background: mode === m ? "#fff" : "transparent", color: mode === m ? "#111827" : "#9CA3AF", boxShadow: mode === m ? "0 2px 8px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>{l}</button>
+              <button key={m} onClick={() => { setMode(m); setError(""); setSuccess(""); }} style={{ flex: 1, padding: "11px 0", fontSize: 14, fontFamily: "inherit", border: "none", cursor: "pointer", borderRadius: 10, fontWeight: mode === m ? 600 : 400, background: mode === m ? "#fff" : "transparent", color: mode === m ? "#111827" : "#9CA3AF", boxShadow: mode === m ? "0 2px 10px rgba(0,0,0,0.07)" : "none", transition: "all 0.15s" }}>{l}</button>
             ))}
           </div>
 
-          {error && <div style={{ padding: "12px 16px", background: "#FEF2F2", color: "#DC2626", borderRadius: 12, fontSize: 14, marginBottom: 16, lineHeight: 1.6 }}>{error}</div>}
+          {error && <div style={{ padding: "12px 16px", background: "#FEF2F2", color: "#DC2626", borderRadius: 12, fontSize: 14, marginBottom: 16, lineHeight: 1.6, width: "100%" }}>{error}</div>}
           {success && (
-            <div style={{ padding: "14px 16px", background: "#ECFDF5", color: "#065F46", borderRadius: 12, fontSize: 14, marginBottom: 16, lineHeight: 1.7 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>✉️ 验证邮件已发送！</div>
+            <div style={{ padding: "14px 16px", background: "#ECFDF5", color: "#065F46", borderRadius: 12, fontSize: 14, marginBottom: 16, lineHeight: 1.7, width: "100%" }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>验证邮件已发送！</div>
               <div>请打开邮箱点击验证链接完成注册。</div>
               <div style={{ marginTop: 6, fontSize: 13, color: "#047857" }}>
                 没收到？请检查<strong>垃圾邮件</strong>文件夹。
@@ -3286,46 +3293,48 @@ function AuthPage() {
             </div>
           )}
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 20, width: "100%" }}>
             {mode === "register" && (
               <>
-                <div>
-                  <label style={{ fontSize: 15, fontWeight: 700, color: "#111827", display: "block", marginBottom: 8 }}>输入姓名</label>
+                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 260, damping: 22 }}>
+                  <label style={{ fontSize: 14, fontWeight: 600, color: "#374151", display: "block", marginBottom: 8 }}>输入姓名</label>
                   <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="你的名字" onFocus={focusInput} onBlur={blurInput} />
-                </div>
-                <div>
-                  <label style={{ fontSize: 15, fontWeight: 700, color: "#111827", display: "block", marginBottom: 8 }}>选择身份</label>
+                </motion.div>
+                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 260, damping: 22, delay: 0.04 }}>
+                  <label style={{ fontSize: 14, fontWeight: 600, color: "#374151", display: "block", marginBottom: 8 }}>选择身份</label>
                   <div style={{ display: "flex", gap: 12 }}>
                     {[["student", "学生"], ["teacher", "教师"]].map(([r, l]) => (
-                      <button key={r} onClick={() => setRole(r)} style={{ flex: 1, padding: "14px 0", fontSize: 15, fontFamily: "inherit", border: role === r ? "2px solid #111827" : "1px solid #E5E7EB", borderRadius: 14, cursor: "pointer", fontWeight: role === r ? 700 : 500, background: role === r ? "#111827" : "#F9FAFB", color: role === r ? "#fff" : "#6B7280", transition: "all 0.15s" }}>{l}</button>
+                      <motion.button key={r} onClick={() => setRole(r)} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} style={{ flex: 1, padding: "14px 0", fontSize: 15, fontFamily: "inherit", border: role === r ? "2px solid #111827" : "1px solid #E5E7EB", borderRadius: 14, cursor: "pointer", fontWeight: role === r ? 700 : 500, background: role === r ? "#111827" : "#fff", color: role === r ? "#fff" : "#6B7280", boxShadow: role === r ? "0 4px 14px rgba(17,24,39,0.12)" : "0 2px 8px rgba(0,0,0,0.04)", transition: "background 0.15s, color 0.15s, border-color 0.15s" }}>{l}</motion.button>
                     ))}
                   </div>
-                </div>
+                </motion.div>
               </>
             )}
             <div>
-              <label style={{ fontSize: 15, fontWeight: 700, color: "#111827", display: "block", marginBottom: 8 }}>输入账号</label>
+              <label style={{ fontSize: 14, fontWeight: 600, color: "#374151", display: "block", marginBottom: 8 }}>输入账号</label>
               <input style={inputStyle} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="输入账号或注册邮箱..." onFocus={focusInput} onBlur={blurInput} />
             </div>
             <div>
-              <label style={{ fontSize: 15, fontWeight: 700, color: "#111827", display: "block", marginBottom: 8 }}>输入密码</label>
+              <label style={{ fontSize: 14, fontWeight: 600, color: "#374151", display: "block", marginBottom: 8 }}>输入密码</label>
               <input style={inputStyle} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={mode === "register" ? "至少 6 位密码..." : "输入密码..."} onKeyDown={e => { if (e.key === "Enter") { if (mode === "login") handleLogin(); else handleRegister(); }}} onFocus={focusInput} onBlur={blurInput} />
             </div>
           </div>
 
           <motion.button
-            disabled={loading || (mode === "register" && cooldown > 0)}
+            disabled={btnDisabled}
             onClick={mode === "login" ? handleLogin : handleRegister}
-            whileHover={!(loading || (mode === "register" && cooldown > 0)) ? { scale: 1.02, y: -2 } : undefined}
-            whileTap={!(loading || (mode === "register" && cooldown > 0)) ? { scale: 0.98 } : undefined}
-            style={{ width: "100%", padding: 16, fontSize: 16, fontWeight: 600, fontFamily: "inherit", background: loading || (mode === "register" && cooldown > 0) ? "#D1D5DB" : "#111827", color: "#fff", border: "none", borderRadius: 14, cursor: loading || (mode === "register" && cooldown > 0) ? "not-allowed" : "pointer", marginTop: 24, transition: "background 0.2s" }}
+            whileHover={!btnDisabled ? { scale: 1.03, y: -3, boxShadow: "0 8px 28px rgba(17,24,39,0.18)" } : undefined}
+            whileTap={!btnDisabled ? { scale: 0.97 } : undefined}
+            transition={{ type: "spring", stiffness: 400, damping: 18 }}
+            style={{ width: "100%", padding: 18, fontSize: 16, fontWeight: 700, fontFamily: "inherit", background: btnDisabled ? "#D1D5DB" : "#111827", color: "#fff", border: "none", borderRadius: 14, cursor: btnDisabled ? "not-allowed" : "pointer", marginTop: 28, boxShadow: btnDisabled ? "none" : "0 6px 20px rgba(17,24,39,0.12)", letterSpacing: "0.01em" }}
           >
             {loading ? "处理中…" : mode === "register" && cooldown > 0 ? `重新发送（${cooldown}s）` : mode === "login" ? "登录" : "注册账号"}
           </motion.button>
-          <div style={{ textAlign: "center", marginTop: 16, fontSize: 14, color: "#9CA3AF" }}>
+
+          <div style={{ textAlign: "center", marginTop: 20, fontSize: 14, color: "#9CA3AF" }}>
             {mode === "login" ? <>还没有账号？<span onClick={() => setMode("register")} style={{ color: "#4F46E5", cursor: "pointer", fontWeight: 600 }}>立即注册</span></> : <>已有账号？<span onClick={() => setMode("login")} style={{ color: "#4F46E5", cursor: "pointer", fontWeight: 600 }}>直接登录</span></>}
           </div>
-        </div>
+        </motion.div>
       </motion.div>
     </div>
   );
