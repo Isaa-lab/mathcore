@@ -20,6 +20,7 @@ export default async function handler(req, res) {
   if (!hasUserKey && !hasServerKey) {
     return res.status(500).json({ error: "暂无可用 AI 服务。请在首页点击「AI 设置」输入你的 API Key（推荐免费的 Groq）。" });
   }
+  
 
   const isChatMode = (mode === "chat" || mode === "tutor") && chatQuestion;
 
