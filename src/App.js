@@ -6,6 +6,10 @@ import { useMathStore } from "./store/useMathStore";
 import QuizPageView from "./pages/QuizPage";
 import MaterialChatPageView from "./pages/MaterialChatPage";
 import InteractiveMathChart from "./components/InteractiveMathChart";
+import InteractiveVisualizer from "./components/InteractiveVisualizer";
+import TopNavBar from "./components/TopNav";
+import StudyWorkspace from "./layouts/StudyWorkspace";
+import ExamWorkspace from "./layouts/ExamWorkspace";
 import "katex/dist/katex.min.css";
 
 // Inject global CSS animations
@@ -6878,6 +6882,49 @@ function GatewayPage({ profile, onMaterial, onExam }) {
   );
 }
 
+function KnowledgeTreePanel({ onOpenKnowledge, onOpenChat }) {
+  return (
+    <div className="premium-card" style={{ padding: 18 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-secondary)", marginBottom: 10, letterSpacing: "0.06em" }}>KNOWLEDGE TREE</div>
+      <div style={{ display: "grid", gap: 10 }}>
+        <button type="button" onClick={onOpenKnowledge} style={{ padding: "12px 14px", borderRadius: 14, border: "1px solid rgba(0,0,0,0.06)", background: "#fff", textAlign: "left", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, color: "#111827" }}>
+          知识点详情
+        </button>
+        <button type="button" onClick={onOpenChat} style={{ padding: "12px 14px", borderRadius: 14, border: "1px solid rgba(0,0,0,0.06)", background: "#fff", textAlign: "left", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, color: "#111827" }}>
+          AI 探索
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReportDashboardCard({ setPage }) {
+  const examDate = localStorage.getItem("mc_exam_date");
+  const subject = localStorage.getItem("mc_exam_subject") || "考试";
+  const days = examDate ? Math.ceil((new Date(examDate) - new Date()) / 86400000) : null;
+  return (
+    <div className="premium-card" style={{ padding: 22 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>距离考试</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: "#111827" }}>{days != null ? `${days} 天` : "--"}</div>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>{subject}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>今日任务</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#111827", lineHeight: 1.6 }}>完成 10 道题并复盘错题</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>行动</div>
+          <button type="button" onClick={() => setPage("学习报告")} style={{ padding: "10px 14px", borderRadius: 12, border: "none", background: "#111827", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>
+            打开完整报告
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GlassSideNav({ page, setPage }) {
   const items = [
     ["首页", "🏠"],
@@ -6916,6 +6963,8 @@ export default function App() {
   const [emailJustConfirmed, setEmailJustConfirmed] = useState(false);
   const [surface, setSurface] = useState("gateway");
   const springNav = { type: "spring", stiffness: 260, damping: 25 };
+  const workspaceMode = useMathStore((s) => s.workspaceMode);
+  const setWorkspaceMode = useMathStore((s) => s.setWorkspaceMode);
   const recordAnswer = async (qid, correct, chapter, questionPayload = null) => {
     try {
       const updated = { ...sessionAnswers, [qid]: { correct, chapter } };
@@ -7018,6 +7067,27 @@ export default function App() {
     return null;
   };
 
+  const studyWorkspaceView = (
+    <StudyWorkspace
+      knowledgeTree={<KnowledgeTreePanel onOpenKnowledge={() => handleSetPage("知识点")} onOpenChat={() => handleSetPage("资料对话")} />}
+      knowledgePage={
+        <div style={{ display: "grid", gap: 16 }}>
+          <InteractiveVisualizer />
+          <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} />
+        </div>
+      }
+      materialChatPage={<MaterialChatPage setPage={handleSetPage} profile={profile} />}
+    />
+  );
+
+  const examWorkspaceView = (
+    <ExamWorkspace
+      reportDashboard={<ReportDashboardCard setPage={handleSetPage} />}
+      quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
+      wrongBook={<WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} />}
+    />
+  );
+
   return (
     <div style={{ minHeight: "100vh", background: "#FAFAFC" }}>
       <AnimatePresence mode="wait">
@@ -7048,11 +7118,17 @@ export default function App() {
             <div className="app-shell-light">
               <GlassSideNav page={page} setPage={handleSetPage} />
               <div className="app-main-area" style={{ paddingBottom: 24 }}>
-                <TopNav page={page} setPage={handleSetPage} profile={profile} onLogout={handleLogout} onOpenGateway={() => setSurface("gateway")} />
+                <TopNavBar title="MathCore Workspaces" />
                 <AnimatePresence mode="wait">
-                  <motion.div key={page} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} transition={springNav}>
-                    {renderPage()}
-                  </motion.div>
+                  {workspaceMode === "study" ? (
+                    <motion.div key="study" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.3 }}>
+                      {studyWorkspaceView}
+                    </motion.div>
+                  ) : (
+                    <motion.div key="exam" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.3 }}>
+                      {examWorkspaceView}
+                    </motion.div>
+                  )}
                 </AnimatePresence>
               </div>
             </div>
