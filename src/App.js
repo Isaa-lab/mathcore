@@ -3224,7 +3224,23 @@ function AuthPage() {
     setLoading(false);
   };
 
-  const inputStyle = { background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 12, padding: "14px 16px", fontSize: 15, width: "100%", boxSizing: "border-box", transition: "all 0.2s", outline: "none", fontFamily: "inherit", color: "#111827" };
+  const a = useMathStore((s) => s.interactiveParams.a ?? 2);
+  const setInteractiveParam = useMathStore((s) => s.setInteractiveParam);
+  const mathString = `f(x) = ${a.toFixed(1)} \\cdot \\sin(x)`;
+  const mathHtml = useMemo(() => katex.renderToString(mathString, { throwOnError: false, displayMode: true }), [mathString]);
+  const vizPath = useMemo(() => {
+    const pts = [];
+    for (let i = 0; i <= 200; i++) {
+      const x = -Math.PI * 2 + (4 * Math.PI * i) / 200;
+      const y = a * Math.sin(x);
+      const px = 40 + ((x + Math.PI * 2) / (4 * Math.PI)) * 420;
+      const py = 100 - y * (70 / Math.max(a + 0.5, 2));
+      pts.push(`${i === 0 ? "M" : "L"} ${px.toFixed(1)} ${py.toFixed(1)}`);
+    }
+    return pts.join(" ");
+  }, [a]);
+
+  const inputStyle = { background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 14, padding: "16px 18px", fontSize: 16, width: "100%", boxSizing: "border-box", transition: "all 0.2s", outline: "none", fontFamily: "inherit", color: "#111827" };
   const focusInput = (e) => { e.target.style.borderColor = "#4F46E5"; e.target.style.boxShadow = "0 0 0 3px rgba(79, 70, 229, 0.1)"; };
   const blurInput = (e) => { e.target.style.borderColor = "#E5E7EB"; e.target.style.boxShadow = "none"; };
 
@@ -3233,72 +3249,93 @@ function AuthPage() {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
+        transition={{ type: "spring", stiffness: 260, damping: 24 }}
         className="premium-card"
-        style={{ width: 400, padding: 48, borderRadius: 24, display: "flex", flexDirection: "column", alignItems: "center" }}
+        style={{ width: 520, borderRadius: 28, display: "flex", flexDirection: "column", overflow: "hidden" }}
       >
-        <div style={{ fontSize: 28, fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", marginBottom: 4 }}>MathCore</div>
-        <div style={{ fontSize: 14, color: "#6B7280", marginBottom: 32 }}>数学与应用数学学习平台</div>
-
-        <div style={{ display: "flex", background: "#F3F4F6", borderRadius: 12, padding: 4, marginBottom: 24, width: "100%" }}>
-          {[["login", "登录"], ["register", "注册"]].map(([m, l]) => (
-            <button key={m} onClick={() => { setMode(m); setError(""); setSuccess(""); }} style={{ flex: 1, padding: "10px 0", fontSize: 14, fontFamily: "inherit", border: "none", cursor: "pointer", borderRadius: 10, fontWeight: mode === m ? 600 : 400, background: mode === m ? "#fff" : "transparent", color: mode === m ? "#111827" : "#9CA3AF", boxShadow: mode === m ? "0 2px 8px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>{l}</button>
-          ))}
+        {/* Upper: Interactive math visualization */}
+        <div style={{ height: 260, background: "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 32px", position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", inset: 0, opacity: 0.06 }}>
+            <svg width="100%" height="100%"><pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M 24 0 L 0 0 0 24" fill="none" stroke="#fff" strokeWidth="0.5" /></pattern><rect width="100%" height="100%" fill="url(#grid)" /></svg>
+          </div>
+          <svg width="100%" viewBox="0 0 500 200" preserveAspectRatio="xMidYMid meet" style={{ position: "relative", zIndex: 1, maxHeight: 120 }}>
+            <line x1="40" y1="100" x2="460" y2="100" stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
+            <line x1="250" y1="20" x2="250" y2="180" stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
+            <path d={vizPath} stroke="#818CF8" strokeWidth="2.5" fill="none" strokeLinecap="round" style={{ transition: "d 60ms linear" }} />
+          </svg>
+          <div style={{ position: "relative", zIndex: 1, marginTop: 8, color: "#E0E7FF", fontSize: 18, fontFamily: "'KaTeX_Math', serif" }} dangerouslySetInnerHTML={{ __html: mathHtml }} />
+          <input
+            type="range" min="0.5" max="5" step="0.1" value={a}
+            onChange={(e) => setInteractiveParam("a", Number(e.target.value))}
+            style={{ position: "relative", zIndex: 1, width: 200, marginTop: 8, accentColor: "#818CF8" }}
+          />
+          <div style={{ position: "absolute", top: 20, left: 28, fontSize: 22, fontWeight: 800, color: "#FFFFFF", letterSpacing: "-0.02em", zIndex: 1 }}>MathCore</div>
+          <div style={{ position: "absolute", top: 46, left: 28, fontSize: 12, color: "rgba(255,255,255,0.5)", zIndex: 1 }}>数学与应用数学学习平台</div>
         </div>
 
-        {error && <div style={{ padding: "12px 16px", background: "#FEF2F2", color: "#DC2626", borderRadius: 12, fontSize: 14, marginBottom: 16, width: "100%", lineHeight: 1.6 }}>{error}</div>}
-        {success && (
-          <div style={{ padding: "14px 16px", background: "#ECFDF5", color: "#065F46", borderRadius: 12, fontSize: 14, marginBottom: 16, width: "100%", lineHeight: 1.7 }}>
-            <div style={{ fontWeight: 700, marginBottom: 6 }}>✉️ 验证邮件已发送！</div>
-            <div>请打开你注册时填写的邮箱，点击邮件中的链接完成验证后即可登录。</div>
-            <div style={{ marginTop: 6, fontSize: 13, color: "#047857" }}>
-              没收到？请检查<strong>垃圾邮件</strong>文件夹。
-              {cooldown > 0
-                ? <span style={{ marginLeft: 6, color: "#6B7280" }}>重新发送需等待 <strong style={{ color: "#065F46" }}>{cooldown}s</strong></span>
-                : <span style={{ marginLeft: 6 }}>如仍未收到，可重新注册触发再次发送。</span>
-              }
-            </div>
+        {/* Lower: Login form */}
+        <div style={{ padding: "32px 40px 36px" }}>
+          <div style={{ display: "flex", background: "#F3F4F6", borderRadius: 12, padding: 4, marginBottom: 24 }}>
+            {[["login", "登录"], ["register", "注册"]].map(([m, l]) => (
+              <button key={m} onClick={() => { setMode(m); setError(""); setSuccess(""); }} style={{ flex: 1, padding: "10px 0", fontSize: 14, fontFamily: "inherit", border: "none", cursor: "pointer", borderRadius: 10, fontWeight: mode === m ? 600 : 400, background: mode === m ? "#fff" : "transparent", color: mode === m ? "#111827" : "#9CA3AF", boxShadow: mode === m ? "0 2px 8px rgba(0,0,0,0.08)" : "none", transition: "all 0.15s" }}>{l}</button>
+            ))}
           </div>
-        )}
 
-        <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 14 }}>
-          {mode === "register" && (
-            <>
-              <div>
-                <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 6 }}>姓名</label>
-                <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="你的名字" onFocus={focusInput} onBlur={blurInput} />
+          {error && <div style={{ padding: "12px 16px", background: "#FEF2F2", color: "#DC2626", borderRadius: 12, fontSize: 14, marginBottom: 16, lineHeight: 1.6 }}>{error}</div>}
+          {success && (
+            <div style={{ padding: "14px 16px", background: "#ECFDF5", color: "#065F46", borderRadius: 12, fontSize: 14, marginBottom: 16, lineHeight: 1.7 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>✉️ 验证邮件已发送！</div>
+              <div>请打开邮箱点击验证链接完成注册。</div>
+              <div style={{ marginTop: 6, fontSize: 13, color: "#047857" }}>
+                没收到？请检查<strong>垃圾邮件</strong>文件夹。
+                {cooldown > 0
+                  ? <span style={{ marginLeft: 6, color: "#6B7280" }}>等待 <strong style={{ color: "#065F46" }}>{cooldown}s</strong></span>
+                  : <span style={{ marginLeft: 6 }}>可重新注册触发再次发送。</span>
+                }
               </div>
-              <div>
-                <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 6 }}>身份</label>
-                <div style={{ display: "flex", gap: 10 }}>
-                  {[["student", "学生"], ["teacher", "教师"]].map(([r, l]) => (
-                    <button key={r} onClick={() => setRole(r)} style={{ flex: 1, padding: "12px 0", fontSize: 14, fontFamily: "inherit", border: role === r ? "2px solid #111827" : "1px solid #E5E7EB", borderRadius: 12, cursor: "pointer", fontWeight: role === r ? 700 : 500, background: role === r ? "#111827" : "#F9FAFB", color: role === r ? "#fff" : "#6B7280", transition: "all 0.15s" }}>{l}</button>
-                  ))}
-                </div>
-              </div>
-            </>
+            </div>
           )}
 
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 6 }}>邮箱</label>
-            <input style={inputStyle} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" onFocus={focusInput} onBlur={blurInput} />
-          </div>
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 6 }}>密码</label>
-            <input style={inputStyle} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={mode === "register" ? "至少 6 位" : "输入密码"} onKeyDown={e => { if (e.key === "Enter") { if (mode === "login") handleLogin(); else handleRegister(); }}} onFocus={focusInput} onBlur={blurInput} />
-          </div>
-        </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            {mode === "register" && (
+              <>
+                <div>
+                  <label style={{ fontSize: 15, fontWeight: 700, color: "#111827", display: "block", marginBottom: 8 }}>输入姓名</label>
+                  <input style={inputStyle} value={name} onChange={e => setName(e.target.value)} placeholder="你的名字" onFocus={focusInput} onBlur={blurInput} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 15, fontWeight: 700, color: "#111827", display: "block", marginBottom: 8 }}>选择身份</label>
+                  <div style={{ display: "flex", gap: 12 }}>
+                    {[["student", "学生"], ["teacher", "教师"]].map(([r, l]) => (
+                      <button key={r} onClick={() => setRole(r)} style={{ flex: 1, padding: "14px 0", fontSize: 15, fontFamily: "inherit", border: role === r ? "2px solid #111827" : "1px solid #E5E7EB", borderRadius: 14, cursor: "pointer", fontWeight: role === r ? 700 : 500, background: role === r ? "#111827" : "#F9FAFB", color: role === r ? "#fff" : "#6B7280", transition: "all 0.15s" }}>{l}</button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
 
-        <motion.button
-          disabled={loading || (mode === "register" && cooldown > 0)}
-          onClick={mode === "login" ? handleLogin : handleRegister}
-          whileHover={!(loading || (mode === "register" && cooldown > 0)) ? { scale: 1.02, y: -2 } : undefined}
-          whileTap={!(loading || (mode === "register" && cooldown > 0)) ? { scale: 0.98 } : undefined}
-          style={{ width: "100%", padding: 14, fontSize: 16, fontWeight: 600, fontFamily: "inherit", background: loading || (mode === "register" && cooldown > 0) ? "#D1D5DB" : "#111827", color: "#fff", border: "none", borderRadius: 12, cursor: loading || (mode === "register" && cooldown > 0) ? "not-allowed" : "pointer", marginTop: 20, transition: "background 0.2s" }}
-        >
-          {loading ? "处理中…" : mode === "register" && cooldown > 0 ? `重新发送（${cooldown}s）` : mode === "login" ? "登录" : "注册账号"}
-        </motion.button>
-        <div style={{ textAlign: "center", marginTop: 16, fontSize: 14, color: "#9CA3AF" }}>
-          {mode === "login" ? <>还没有账号？<span onClick={() => setMode("register")} style={{ color: "#4F46E5", cursor: "pointer", fontWeight: 600 }}>立即注册</span></> : <>已有账号？<span onClick={() => setMode("login")} style={{ color: "#4F46E5", cursor: "pointer", fontWeight: 600 }}>直接登录</span></>}
+            <div>
+              <label style={{ fontSize: 15, fontWeight: 700, color: "#111827", display: "block", marginBottom: 8 }}>输入账号</label>
+              <input style={inputStyle} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="输入账号或注册邮箱..." onFocus={focusInput} onBlur={blurInput} />
+            </div>
+            <div>
+              <label style={{ fontSize: 15, fontWeight: 700, color: "#111827", display: "block", marginBottom: 8 }}>输入密码</label>
+              <input style={inputStyle} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder={mode === "register" ? "至少 6 位密码..." : "输入密码..."} onKeyDown={e => { if (e.key === "Enter") { if (mode === "login") handleLogin(); else handleRegister(); }}} onFocus={focusInput} onBlur={blurInput} />
+            </div>
+          </div>
+
+          <motion.button
+            disabled={loading || (mode === "register" && cooldown > 0)}
+            onClick={mode === "login" ? handleLogin : handleRegister}
+            whileHover={!(loading || (mode === "register" && cooldown > 0)) ? { scale: 1.02, y: -2 } : undefined}
+            whileTap={!(loading || (mode === "register" && cooldown > 0)) ? { scale: 0.98 } : undefined}
+            style={{ width: "100%", padding: 16, fontSize: 16, fontWeight: 600, fontFamily: "inherit", background: loading || (mode === "register" && cooldown > 0) ? "#D1D5DB" : "#111827", color: "#fff", border: "none", borderRadius: 14, cursor: loading || (mode === "register" && cooldown > 0) ? "not-allowed" : "pointer", marginTop: 24, transition: "background 0.2s" }}
+          >
+            {loading ? "处理中…" : mode === "register" && cooldown > 0 ? `重新发送（${cooldown}s）` : mode === "login" ? "登录" : "注册账号"}
+          </motion.button>
+          <div style={{ textAlign: "center", marginTop: 16, fontSize: 14, color: "#9CA3AF" }}>
+            {mode === "login" ? <>还没有账号？<span onClick={() => setMode("register")} style={{ color: "#4F46E5", cursor: "pointer", fontWeight: 600 }}>立即注册</span></> : <>已有账号？<span onClick={() => setMode("login")} style={{ color: "#4F46E5", cursor: "pointer", fontWeight: 600 }}>直接登录</span></>}
+          </div>
         </div>
       </motion.div>
     </div>
