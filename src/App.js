@@ -7,9 +7,8 @@ import QuizPageView from "./pages/QuizPage";
 import MaterialChatPageView from "./pages/MaterialChatPage";
 import InteractiveMathChart from "./components/InteractiveMathChart";
 import InteractiveVisualizer from "./components/InteractiveVisualizer";
-import TopNavBar from "./components/TopNav";
 import StudyWorkspace from "./layouts/StudyWorkspace";
-import ExamWorkspace from "./layouts/ExamWorkspace";
+import SprintWorkspace from "./layouts/SprintWorkspace";
 import "katex/dist/katex.min.css";
 
 // Inject global CSS animations
@@ -56,43 +55,19 @@ import "katex/dist/katex.min.css";
       border: 1px solid rgba(0,0, 0, 0.04);
       transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     }
-    .app-shell-light {
-      min-height: 100vh;
-      display: flex;
-      gap: 16px;
-      padding: 16px;
-      max-width: 1280px;
-      margin: 0 auto;
-    }
-    .app-nav-rail {
-      width: 88px;
-      position: sticky;
-      top: 16px;
-      height: calc(100vh - 32px);
+    .btn-secondary {
       padding: 12px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 10px;
-    }
-    .app-main-area {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    .rail-icon-btn {
-      width: 48px;
-      height: 48px;
-      border-radius: 14px;
-      border: 1px solid var(--mc-border);
-      background: #FFFFFF;
-      color: #111827;
-      font-size: 20px;
+      text-align: center;
+      background: #F3F4F6;
+      border-radius: 12px;
+      border: none;
       cursor: pointer;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.04);
+      font-weight: 600;
+      font-size: 14px;
+      color: #111827;
+      font-family: inherit;
     }
+    .btn-secondary:hover { background: #E5E7EB; }
     @keyframes popIn {
       0% { transform: scale(0.5); opacity: 0; }
       70% { transform: scale(1.08); opacity: 1; }
@@ -313,10 +288,8 @@ const T = {
 };
 
 const AppShell = ({ children }) => (
-  <div style={{ minHeight: "100vh", background: T.bg }}>
-    <div style={{ maxWidth: 1240, margin: "0 auto", padding: "0 18px 24px" }} className="mc-page-enter">
-      {children}
-    </div>
+  <div style={{ height: "100vh", width: "100vw", overflow: "hidden", background: T.bg, display: "flex", flexDirection: "column" }}>
+    {children}
   </div>
 );
 
@@ -3688,7 +3661,7 @@ function HomePage({ setPage, profile }) {
   );
 }
 
-function KnowledgePage({ setPage, setChapterFilter }) {
+function KnowledgePage({ setPage, setChapterFilter, showVisualizer = false }) {
   const [materials, setMaterials] = useState([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState(null);
   const [aiTopics, setAiTopics] = useState([]);
@@ -3843,6 +3816,8 @@ function KnowledgePage({ setPage, setChapterFilter }) {
               </Btn>
             </div>
           </div>
+
+          {showVisualizer && <InteractiveVisualizer />}
 
           {/* Knowledge topic cards grouped by chapter */}
           {courseTopics.length > 0 ? (
@@ -6853,7 +6828,7 @@ function GatewayPage({ profile, onMaterial, onExam }) {
     { label: "徽章", value: unlocked + "/" + BADGES.length },
   ];
   return (
-    <div style={{ minHeight: "100vh", background: "#FAFAFC", padding: "48px 24px 64px", boxSizing: "border-box" }}>
+    <div style={{ height: "100vh", overflow: "hidden", background: "#FAFAFC", padding: "48px 24px 64px", boxSizing: "border-box", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
       <motion.div className="premium-card" style={{ maxWidth: 920, margin: "0 auto 40px", padding: "28px 32px" }} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={spring}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-muted)", letterSpacing: "0.06em", marginBottom: 8 }}>欢迎回来</div>
         <div style={{ fontSize: 32, fontWeight: 800, color: "var(--text-main)", letterSpacing: "-0.03em", marginBottom: 20 }}>{displayName}</div>
@@ -7042,7 +7017,7 @@ export default function App() {
   };
 
   if (loading) return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #f0fdf8, #e8f4ff)" }}>
+    <div style={{ height: "100vh", width: "100vw", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #f0fdf8, #e8f4ff)" }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ width: 48, height: 48, borderRadius: 14, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, margin: "0 auto 14px" }}>📐</div>
         <div style={{ fontSize: 15, color: "#888" }}>加载中…</div>
@@ -7076,40 +7051,22 @@ export default function App() {
     return null;
   };
 
-  const studyWorkspaceView = (
-    <StudyWorkspace
-      knowledgeTree={<KnowledgeTreePanel onOpenKnowledge={() => handleSetPage("知识点")} onOpenChat={() => handleSetPage("资料对话")} />}
-      knowledgePage={
-        <div style={{ display: "grid", gap: 16 }}>
-          <InteractiveVisualizer />
-          <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} />
-        </div>
-      }
-      materialChatPage={<MaterialChatPage setPage={handleSetPage} profile={profile} />}
-    />
-  );
-
-  const examWorkspaceView = (
-    <ExamWorkspace
-      reportDashboard={
-        <>
-          <DashboardMetricCard title="距离考试" value={(localStorage.getItem("mc_exam_date") ? `${Math.ceil((new Date(localStorage.getItem("mc_exam_date")) - new Date()) / 86400000)} 天` : "14 天")} />
-          <DashboardMetricCard title="今日任务" value="微积分 错题巩固" />
-          <DashboardMetricCard title="掌握度" value="78%" />
-        </>
-      }
-      quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
-      wrongBook={<WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} />}
-    />
-  );
+  const renderStudyTab = (tab) => {
+    if (tab === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
+    if (tab === "AI对话") return <MaterialChatPage setPage={handleSetPage} profile={profile} />;
+    if (tab === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} showVisualizer />;
+    if (tab === "知识树") return <SkillTreePage setPage={handleSetPage} />;
+    if (tab === "小测") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
+    return null;
+  };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#FAFAFC" }}>
+    <div style={{ height: "100vh", width: "100vw", overflow: "hidden", background: "#FAFAFC", display: "flex", flexDirection: "column" }}>
       <AnimatePresence mode="wait">
         {surface === "gateway" ? (
           <motion.div
             key="gateway"
-            style={{ minHeight: "100vh" }}
+            style={{ height: "100vh" }}
             initial={{ opacity: 0, y: 15, scale: 0.99 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -15, filter: "blur(4px)" }}
@@ -7117,36 +7074,59 @@ export default function App() {
           >
             <GatewayPage
               profile={profile}
-              onMaterial={() => { setPage("资料库"); setSurface("workbench"); }}
-              onExam={() => { setPage("学习报告"); setSurface("workbench"); }}
+              onMaterial={() => { setWorkspaceMode("study"); setSurface("workbench"); }}
+              onExam={() => { setWorkspaceMode("sprint"); setSurface("workbench"); }}
             />
           </motion.div>
         ) : (
           <motion.div
             key="workbench"
-            style={{ minHeight: "100vh" }}
+            style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}
             initial={{ opacity: 0, y: 15, scale: 0.99 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -15, filter: "blur(4px)" }}
             transition={springNav}
           >
-            <div className="app-shell-light">
-              <GlassSideNav page={page} setPage={handleSetPage} />
-              <div className="app-main-area" style={{ paddingBottom: 24 }}>
-                <TopNavBar title="MathCore Workspaces" />
-                <AnimatePresence mode="wait">
-                  {workspaceMode === "study" ? (
-                    <motion.div key="study" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.3 }}>
-                      {studyWorkspaceView}
-                    </motion.div>
-                  ) : (
-                    <motion.div key="exam" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.3 }}>
-                      {examWorkspaceView}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+            {/* 64px Header */}
+            <header style={{ height: 64, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", borderBottom: "1px solid #E5E7EB", background: "#FFFFFF" }}>
+              <h1 style={{ fontSize: 18, fontWeight: "bold", color: "#111827", margin: 0 }}>MathCore 学习操作系统</h1>
+              <div style={{ display: "flex", background: "#F3F4F6", padding: 4, borderRadius: 9999, position: "relative" }}>
+                {[{ id: "study", label: "学习模式" }, { id: "sprint", label: "考前冲刺模式" }].map(({ id, label }) => (
+                  <button
+                    key={id}
+                    onClick={() => setWorkspaceMode(id)}
+                    style={{ padding: "6px 20px", position: "relative", zIndex: 10, background: "transparent", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, color: workspaceMode === id ? "#111827" : "#6B7280", fontFamily: "inherit" }}
+                  >
+                    {label}
+                    {workspaceMode === id && (
+                      <motion.div layoutId="modePill" style={{ position: "absolute", inset: 0, background: "#FFFFFF", borderRadius: 9999, boxShadow: "0 2px 8px rgba(0,0,0,0.08)", zIndex: -1 }} transition={{ type: "spring", stiffness: 300, damping: 25 }} />
+                    )}
+                  </button>
+                ))}
               </div>
-            </div>
+              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#10B981", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+                {(profile?.name || "ISAA").slice(0, 4)}
+              </div>
+            </header>
+
+            {/* Workspace area */}
+            <AnimatePresence mode="wait">
+              {workspaceMode === "study" ? (
+                <motion.div key="study" style={{ flex: 1, overflow: "hidden" }} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.25 }}>
+                  <StudyWorkspace renderTab={renderStudyTab} />
+                </motion.div>
+              ) : (
+                <motion.div key="sprint" style={{ flex: 1, overflow: "hidden" }} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25 }}>
+                  <SprintWorkspace
+                    calendar={<ReportPage setPage={handleSetPage} setChapterFilter={setChapterFilter} />}
+                    chatPage={<MaterialChatPage setPage={handleSetPage} profile={profile} />}
+                    quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
+                    onViewPlan={() => handleSetPage("学习报告")}
+                    onViewWrong={() => handleSetPage("错题本")}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>
