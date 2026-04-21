@@ -49,14 +49,50 @@ const IconComparison = ({ size = 16, color }) => (
   </svg>
 );
 
-// ── LaTeX Pre-processor ────────────────────────────────────────────────────
+// ── LaTeX Pre-processor + Bare-Math Rescuer ────────────────────────────────
+// Defense in depth: even if the AI forgets to wrap formulas in $...$, we
+// rescue the most common slip-ups (derivatives, exponentials, integrals).
+// We are *conservative* — only wrap patterns that are unambiguously math,
+// and we skip any chunk already inside $...$ or $$...$$ fences.
+function rescueBareMath(text) {
+  if (!text) return text;
+  // Split by existing math fences; rescue only the non-math chunks
+  const parts = text.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g);
+  return parts.map((chunk) => {
+    if (!chunk) return chunk;
+    if (chunk.startsWith("$")) return chunk;
+    let out = chunk;
+    // Higher-order derivative first (order matters): d^2y/dx^2, d²y/dx²
+    out = out.replace(/\bd\^?(\d+)([a-zA-Z])\/d([a-zA-Z])\^?\1\b/g, "$$d^{$1}$2/d$3^{$1}$$");
+    out = out.replace(/\bd²([a-zA-Z])\/d([a-zA-Z])²/g, "$$d^{2}$1/d$2^{2}$$");
+    // First-order derivative: dy/dx, du/dt
+    out = out.replace(/\bd([a-zA-Z])\/d([a-zA-Z])\b/g, "$$d$1/d$2$$");
+    // Partial derivative: ∂y/∂x
+    out = out.replace(/∂([a-zA-Z])\/∂([a-zA-Z])/g, "$$\\partial $1/\\partial $2$$");
+    // Exponentials bare: e^{...}, e^(...)
+    out = out.replace(/\be\^\{([^{}\n]{1,50})\}/g, "$$e^{$1}$$");
+    out = out.replace(/\be\^\(([^()\n]{1,50})\)/g, "$$e^{$1}$$");
+    // Integration constants with exponential: Ce^{-2x}, Ae^{kt}
+    out = out.replace(/\b([A-Z])\s?e\^\{([^{}\n]{1,50})\}/g, "$$$1 e^{$2}$$");
+    // Summations / integrals with trailing measure: ∫ f(x) dx, ∑ a_n
+    out = out.replace(/∫([^.\n]{1,60}?)\s?d([a-zA-Z])\b/g, "$$\\int $1\\,d$2$$");
+    out = out.replace(/∑_\{([^{}]{1,20})\}\^\{([^{}]{1,20})\}\s?([A-Za-z_]\w{0,10})/g, "$$\\sum_{$1}^{$2} $3$$");
+    // Primes on y / f (standalone, followed by space / operator / punctuation)
+    out = out.replace(/\b(y|f|g)('{1,3})(?=[\s+\-=()]|$)/g, "$$$1$2$$");
+    return out;
+  }).join("");
+}
+
 function preprocessLaTeX(content) {
   if (!content) return "";
   let processed = String(content);
+  // Normalize whitespace around $$ fences
   processed = processed.replace(/\$\$\s*\n\s*\n+/g, "$$\n");
   processed = processed.replace(/\n\s*\n+\s*\$\$/g, "\n$$");
   processed = processed.replace(/\$\$[ \t]+/g, "$$");
   processed = processed.replace(/[ \t]+\$\$/g, "$$");
+  // Apply rescuer AFTER fence normalization (so splits are stable)
+  processed = rescueBareMath(processed);
   return processed;
 }
 
