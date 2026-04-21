@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import InteractiveLab from "./InteractiveLab";
 
 const TABS = ["资料库", "AI对话", "知识点", "知识树", "小测"];
 const TAB_ICONS = { "资料库": "📚", "AI对话": "🤖", "知识点": "📖", "知识树": "🌌", "小测": "🧩" };
@@ -55,6 +56,9 @@ export default function StudyWorkspace({ renderTab }) {
             {renderTab(activeTab)}
           </motion.div>
         </AnimatePresence>
+
+        {/* Full-screen Interactive Lab overlay (triggered by chat viz cards) */}
+        <InteractiveLab />
       </div>
     </div>
   );

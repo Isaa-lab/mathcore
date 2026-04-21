@@ -406,10 +406,14 @@ export default function MaterialChatPage({
   onOpenChart,
 }) {
   const stream = messages || conversationHistory || [];
+  const openLab = useMathStore((s) => s.openLab);
   const context = {
     renderChart,
     onOpenChart: (cfg) => {
-      if (onOpenChart) { onOpenChart(cfg); return; }
+      // Always launch the in-canvas full-screen Interactive Lab overlay
+      openLab(cfg);
+      // Allow caller to perform additional side-effects (e.g. analytics)
+      if (onOpenChart) onOpenChart(cfg);
     },
   };
   return (

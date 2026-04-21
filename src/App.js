@@ -5968,7 +5968,6 @@ function MaterialChatPage({ setPage, profile }) {
             conversationHistory={history}
             currentMaterial={selectedMaterial}
             renderChart={() => <InteractiveMathChart />}
-            onOpenChart={() => setPage && setPage("知识点")}
           />
         </motion.div>
         {chatting && (
