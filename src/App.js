@@ -240,6 +240,18 @@ import "katex/dist/katex.min.css";
       from { opacity: 0; transform: translateY(-4px) scale(0.98); }
       to   { opacity: 1; transform: translateY(0)     scale(1); }
     }
+    .mc-typing-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #6366F1;
+      display: inline-block;
+      animation: mcTypingBounce 1.2s ease-in-out infinite;
+    }
+    @keyframes mcTypingBounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+      40%           { transform: translateY(-4px); opacity: 1; }
+    }
   `
   document.head.appendChild(style);
 })();
@@ -4131,8 +4143,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [selectedTypes, setSelectedTypes] = useState([]);
   const [showAIHelp, setShowAIHelp] = useState(false);
   const [aiHelpInput, setAIHelpInput] = useState("");
-  const [aiHelpReply, setAIHelpReply] = useState("");
-  const [aiHelpLoading, setAIHelpLoading] = useState(false);
+  // 真正的对话流：保留所有轮次。每条消息 { id, role: "user"|"assistant", content, isStreaming?, isError? }
+  const [aiMessages, setAIMessages] = useState([]);
+  const [aiIsBusy, setAIIsBusy] = useState(false);
+  const aiScrollRef = useRef(null);
   const [quizCount, setQuizCount] = useState(10);
   const [timerOn, setTimerOn] = useState(!!isSprint);
   // 新版设置界面状态
@@ -4347,20 +4361,49 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   // 最近一次 askQuestionAI 的输入，用于失败后"重试"按钮
   const [lastAskInput, setLastAskInput] = useState("");
-  const askQuestionAI = async (userMsg) => {
+  // 对话更新后自动滚到底
+  useEffect(() => {
+    const el = aiScrollRef.current;
+    if (el) {
+      requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    }
+  }, [aiMessages, showAIHelp]);
+  // —— 统一的对话发送逻辑：追加用户消息 + AI 占位 → 发请求 → 用真实回复替换占位 ——
+  // historyOverride 可用于在首轮对话时显式传入空历史，避免 state 异步读不到最新值
+  const sendChatMessage = async (userText, historyOverride) => {
     if (!q) return;
-    setAIHelpLoading(true);
-    setAIHelpReply("");
-    setLastAskInput(userMsg);
+    const text = String(userText || "").trim();
+    if (!text) return;
+    setLastAskInput(text);
+
+    const userId = "u_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    const aiId = "a_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    const newUser = { id: userId, role: "user", content: text };
+    const placeholder = { id: aiId, role: "assistant", content: "", isStreaming: true };
+
+    // 组装发给后端的对话历史（不含当前这条用户消息和占位）
+    const prior = historyOverride !== undefined ? historyOverride : aiMessages;
+    const history = prior
+      .filter(m => !m.isError && m.content)
+      .map(m => ({ role: m.role, content: m.content }));
+
+    setAIMessages(prev => [...prev, newUser, placeholder]);
+    setAIIsBusy(true);
+
+    const updateMsg = (patch) => {
+      setAIMessages(prev => prev.map(m => m.id === aiId ? { ...m, ...patch } : m));
+    };
+
     try {
       // ⚠️ 后端以 { question: chatQuestion } 解构 —— 必须用 question 作为 key，
-      // 否则 isChatMode 为 false，整个请求会被误当成"出题"任务处理（这是之前 JSON 解析失败 bug 的根因）
+      // 否则 isChatMode 为 false，整个请求会被误当成"出题"任务处理
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: "socratic",
-          question: userMsg,
+          question: text,
+          conversationHistory: history,
           questionContext: {
             stem: q.question,
             options: q.options || null,
@@ -4373,24 +4416,30 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           materialTitle: "数学题目复盘"
         })
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) {
-        // 不把技术错误（JSON解析失败 / stack trace / token 超限）丢给用户，统一降级
-        setAIHelpReply("__FRIENDLY_ERROR__");
+        // 技术错误统一翻译成人话，并标记为可重试
+        updateMsg({ content: "抱歉，我这会儿有点卡住了。要不再问一次？", isError: true, isStreaming: false });
       } else {
-        const answer = data.answer || data.text || data.result || "";
-        // 即使走到这，也要防御 AI 把 JSON 数组当成答案返回（例如服务端 fallback 失效）
-        if (/^\s*[\[{]/.test(answer.trim()) && /"question"\s*:/.test(answer)) {
-          setAIHelpReply("__FRIENDLY_ERROR__");
+        const answer = String(data.answer || data.text || data.result || "").trim();
+        // 防御 AI 把 JSON 数组当成答案返回（fallback 失效时）
+        if (!answer) {
+          updateMsg({ content: "这次没接上 —— 换个方式再问我一次？", isError: true, isStreaming: false });
+        } else if (/^\s*[\[{]/.test(answer) && /"question"\s*:/.test(answer)) {
+          updateMsg({ content: "这次答得有点跑偏，你能换个方式再问一下吗？", isError: true, isStreaming: false });
         } else {
-          setAIHelpReply(answer || "__FRIENDLY_ERROR__");
+          updateMsg({ content: answer, isStreaming: false });
         }
       }
     } catch (e) {
-      setAIHelpReply("__FRIENDLY_ERROR__");
+      updateMsg({ content: "网络有点慢，要不再试一次？", isError: true, isStreaming: false });
+    } finally {
+      setAIIsBusy(false);
     }
-    setAIHelpLoading(false);
   };
+
+  // 兼容旧调用方：委托给 sendChatMessage
+  const askQuestionAI = (userMsg) => sendChatMessage(userMsg);
 
   const normalizeText = (v) => String(v || "").trim().replace(/\s+/g, "").toLowerCase();
   const isTextQuestion = (question) => {
@@ -4474,7 +4523,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     setAnswerText("");
     setShowHint(false);
     setShowAIHelp(false);
-    setAIHelpReply("");
+    setAIMessages([]);
     setAIHelpInput("");
     setAIContextPrompt("");
   };
@@ -5013,20 +5062,23 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   })();
   // 上下文感知 AI 引导：构造 prompt 并打开 AI 面板
   const askAIInContext = (kind) => {
-    const stem = String(q.question || "");
-    const optLine = opts ? `\n【选项】\n${normalizedOptions.map((o,i) => `  ${letters[i]}. ${o}`).join("\n")}` : "";
-    let userMsg = "";
+    // 给用户看的短消息（会显示在对话流里作为第一条 user bubble）
+    // 给后端发的完整上下文不再需要 —— questionContext 已经每次都随 payload 一起发送
+    let seed = "";
     if (kind === "explore" || !isWrongAnswered) {
-      userMsg = `我刚答对了这道题，想深入理解一下这个知识点。\n\n【题目】${stem}${optLine}\n【正确答案】${q.answer}\n\n请确认我的思路，并补一个延伸的例子或应用场景，用轻松口吻。`;
+      seed = "我刚答对了这道题，想深入理解这个知识点 —— 帮我确认思路，再举一个延伸的例子或应用场景。";
     } else if (kind === "reveal" || revealedAnswer) {
-      userMsg = `我已经看过正确答案了，但想弄清为什么我选错。\n\n【题目】${stem}${optLine}\n【我的选择】${userChoiceText || letters[selectedOptionIndex]}\n【正确答案】${q.answer}${misconceptionForChoice ? `\n【可能误解】${misconceptionForChoice}` : ""}\n\n请用 3 步拆解我思路里的漏洞，给一个更稳的思考框架。`;
+      seed = "我已经看过正确答案了，但还没想明白为什么我选错 —— 帮我拆解一下思路漏洞。";
     } else {
-      userMsg = `我这道题选错了，先别告诉我正确答案。请用苏格拉底式提问，帮我重新梳理一下思路。\n\n【题目】${stem}${optLine}\n【我的选择】${userChoiceText || letters[selectedOptionIndex]}${misconceptionForChoice ? `\n【背景线索】${misconceptionForChoice}` : ""}\n\n只问 1 个关键问题，等我回答了你再继续。`;
+      seed = "先别告诉我正确答案，请用苏格拉底式提问一步步帮我梳理思路，一次只问一个关键问题。";
     }
-    setAIContextPrompt(userMsg);
+    // dev 模式下保留"完整 prompt"视图用
+    setAIContextPrompt(seed);
     setShowAIHelp(true);
-    setAIHelpReply("");
-    askQuestionAI(userMsg);
+    setAIMessages([]);
+    setAIHelpInput("");
+    // 明确传入空 history，避免 setAIMessages 的异步性影响首轮请求
+    sendChatMessage(seed, []);
   };
   // 题目来源 / 知识点徽章
   const metaKnowledge = Array.isArray(q.knowledgePoints) && q.knowledgePoints.length
@@ -5130,13 +5182,26 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         revealed={revealedAnswer}
       />
 
-      {/* 未提交：提交按钮独占一行（不再与"下一题"混在一起） */}
+      {/* 未提交：底部操作栏 —— 语义分组（导航在左，主/辅操作在右） */}
       {!answered && (
-        <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+        <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <Btn onClick={() => { if (current > 0) jumpTo(current - 1); }} disabled={current === 0}>← 上一题</Btn>
-          <Btn variant="primary" onClick={handleSubmit} disabled={(!isTextQuestion(q) && selected === null) || (isTextQuestion(q) && !answerText.trim())}>
-            提交答案
-          </Btn>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <Btn size="sm" onClick={() => {
+              try {
+                const bookmarks = JSON.parse(localStorage.getItem("mc_quiz_bookmarks") || "[]");
+                const key = q.id || q.question;
+                if (bookmarks.includes(key)) {
+                  localStorage.setItem("mc_quiz_bookmarks", JSON.stringify(bookmarks.filter(b => b !== key)));
+                } else {
+                  localStorage.setItem("mc_quiz_bookmarks", JSON.stringify([...bookmarks, key]));
+                }
+              } catch {}
+            }}>★ 标记</Btn>
+            <Btn variant="primary" onClick={handleSubmit} disabled={(!isTextQuestion(q) && selected === null) || (isTextQuestion(q) && !answerText.trim())}>
+              提交答案
+            </Btn>
+          </div>
         </div>
       )}
 
@@ -5227,7 +5292,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         </motion.div>
       )}
 
-      {/* 内联 AI 引导面板（上下文感知 · 纯对话，不暴露 prompt） */}
+      {/* 内联 AI 引导面板 —— 真实多轮对话流（消息气泡 / typing indicator / 可重试） */}
       {showAIHelp && (
         <motion.div
           initial={{ opacity: 0, height: 0 }}
@@ -5238,64 +5303,131 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <div style={{ fontSize: 14, fontWeight: 800, color: "#4338CA" }}>💬 AI 正在和你一起拆解这道题</div>
-            <button onClick={() => { setShowAIHelp(false); setAIHelpReply(""); setAIContextPrompt(""); }} style={{ border: "none", background: "transparent", color: "#6B7280", cursor: "pointer", fontSize: 13 }}>收起 ×</button>
+            <button onClick={() => { setShowAIHelp(false); setAIMessages([]); setAIHelpInput(""); setAIContextPrompt(""); }} style={{ border: "none", background: "transparent", color: "#6B7280", cursor: "pointer", fontSize: 13 }}>收起 ×</button>
           </div>
-          {aiHelpLoading && (
-            <div style={{ fontSize: 13, color: "#6366F1", display: "flex", alignItems: "center", gap: 8 }}>
-              <span className="mc-pulse-dot" style={{ width: 8, height: 8, borderRadius: "50%", background: "#6366F1", display: "inline-block" }} />
-              AI 正在思考中…
-            </div>
-          )}
-          {!aiHelpLoading && aiHelpReply === "__FRIENDLY_ERROR__" && (
-            <div style={{ padding: "12px 14px", background: "#FEF3C7", borderRadius: 12, color: "#92400E" }}>
-              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>哎呀，AI 引导这会儿没接上 🤔</div>
-              <div style={{ fontSize: 13, marginBottom: 10 }}>可能是网络抖动或 API 配额暂满，要不要再试一次？</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Btn size="sm" variant="primary" onClick={() => { if (lastAskInput) askQuestionAI(lastAskInput); }}>重试一次</Btn>
-                <Btn size="sm" onClick={() => { setShowAIHelp(false); setAIHelpReply(""); }}>稍后再说</Btn>
+
+          {/* 消息流容器 */}
+          <div
+            ref={aiScrollRef}
+            style={{
+              maxHeight: 380,
+              overflowY: "auto",
+              padding: "4px 2px 8px",
+              background: "linear-gradient(180deg, rgba(99,102,241,0.03) 0%, transparent 60px)",
+              borderRadius: 10,
+            }}
+          >
+            {aiMessages.length === 0 && (
+              <div style={{ fontSize: 13, color: "#9CA3AF", padding: "12px 8px", textAlign: "center" }}>
+                对话即将开始…
               </div>
-            </div>
-          )}
-          {!aiHelpLoading && aiHelpReply && aiHelpReply !== "__FRIENDLY_ERROR__" && (
-            <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)" }}>
-              <MathText text={aiHelpReply} />
-            </div>
-          )}
+            )}
+            {aiMessages.map((m) => (
+              m.role === "user" ? (
+                <div key={m.id} style={{ display: "flex", justifyContent: "flex-end", margin: "10px 0" }}>
+                  <div style={{
+                    maxWidth: "78%",
+                    background: "linear-gradient(135deg, #4F46E5 0%, #6366F1 100%)",
+                    color: "#FFFFFF",
+                    padding: "10px 14px",
+                    borderRadius: "18px 18px 4px 18px",
+                    fontSize: 14,
+                    lineHeight: 1.65,
+                    wordBreak: "break-word",
+                    boxShadow: "0 2px 8px rgba(79,70,229,0.18)",
+                  }}>
+                    <MathText text={m.content} />
+                  </div>
+                </div>
+              ) : (
+                <div key={m.id} style={{ display: "flex", justifyContent: "flex-start", margin: "10px 0", gap: 8, alignItems: "flex-start" }}>
+                  <div style={{
+                    width: 30, height: 30, flexShrink: 0, borderRadius: "50%",
+                    background: m.isError ? "#FEF3C7" : "#EEF2FF",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 15, marginTop: 2,
+                  }}>💬</div>
+                  <div style={{
+                    maxWidth: "78%",
+                    background: m.isError ? "#FEF3C7" : "#F3F4F6",
+                    color: m.isError ? "#92400E" : "var(--text-primary)",
+                    padding: "10px 14px",
+                    borderRadius: "18px 18px 18px 4px",
+                    fontSize: 14,
+                    lineHeight: 1.7,
+                    wordBreak: "break-word",
+                    border: m.isError ? "1px solid #FDE68A" : "none",
+                  }}>
+                    {m.isStreaming && !m.content ? (
+                      <span style={{ display: "inline-flex", gap: 4, alignItems: "center", padding: "2px 0" }}>
+                        <span className="mc-typing-dot" style={{ animationDelay: "0ms" }} />
+                        <span className="mc-typing-dot" style={{ animationDelay: "150ms" }} />
+                        <span className="mc-typing-dot" style={{ animationDelay: "300ms" }} />
+                      </span>
+                    ) : (
+                      <>
+                        <MathText text={m.content} />
+                        {m.isError && (
+                          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                            <Btn size="sm" variant="primary" onClick={() => { if (lastAskInput) sendChatMessage(lastAskInput); }}>重试</Btn>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )
+            ))}
+          </div>
+
+          {/* 输入区 */}
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <input
               type="text"
               value={aiHelpInput}
               onChange={(e) => setAIHelpInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && aiHelpInput.trim()) { askQuestionAI(aiHelpInput); setAIHelpInput(""); } }}
-              placeholder="继续追问，比如：那如果条件改成…"
-              style={{ flex: 1, padding: "10px 14px", borderRadius: 12, border: "1px solid rgba(0,0,0,0.12)", fontSize: 14, fontFamily: "inherit", outline: "none" }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && aiHelpInput.trim() && !aiIsBusy) {
+                  e.preventDefault();
+                  const txt = aiHelpInput;
+                  setAIHelpInput("");
+                  sendChatMessage(txt);
+                }
+              }}
+              placeholder={aiIsBusy ? "AI 正在回复…" : "继续追问，比如：那如果条件改成…"}
+              disabled={aiIsBusy}
+              style={{
+                flex: 1, padding: "10px 14px", borderRadius: 12,
+                border: "1px solid rgba(0,0,0,0.12)", fontSize: 14,
+                fontFamily: "inherit", outline: "none",
+                background: aiIsBusy ? "#F9FAFB" : "#FFFFFF",
+                color: aiIsBusy ? "#9CA3AF" : "inherit",
+              }}
             />
-            <Btn size="sm" onClick={() => { if (aiHelpInput.trim()) { askQuestionAI(aiHelpInput); setAIHelpInput(""); } }}>发送</Btn>
+            <Btn
+              size="sm"
+              variant="primary"
+              disabled={aiIsBusy || !aiHelpInput.trim()}
+              onClick={() => {
+                if (!aiHelpInput.trim() || aiIsBusy) return;
+                const txt = aiHelpInput;
+                setAIHelpInput("");
+                sendChatMessage(txt);
+              }}
+            >
+              {aiIsBusy ? "思考中…" : "发送 ↵"}
+            </Btn>
           </div>
+
           {/* dev-only: 查看真实发给 AI 的 prompt 原文 */}
           {process.env.NODE_ENV === "development" && aiContextPrompt && (
             <details style={{ marginTop: 10, fontSize: 11, color: "#9CA3AF" }}>
-              <summary style={{ cursor: "pointer" }}>🔧 dev: 查看 prompt</summary>
+              <summary style={{ cursor: "pointer" }}>🔧 dev: 查看初始 prompt</summary>
               <pre style={{ whiteSpace: "pre-wrap", marginTop: 6, padding: 8, background: "#F9FAFB", borderRadius: 8, maxHeight: 180, overflow: "auto" }}>{aiContextPrompt}</pre>
             </details>
           )}
         </motion.div>
       )}
-
-      {/* 底部辅助工具栏（只留"标记"，移除重复的"上一题"—— 顶部已有可跳转进度条 + 未答题时的上一题按钮） */}
-      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: 14, padding: "0 4px" }}>
-        <Btn size="sm" onClick={() => {
-          try {
-            const bookmarks = JSON.parse(localStorage.getItem("mc_quiz_bookmarks") || "[]");
-            const key = q.id || q.question;
-            if (bookmarks.includes(key)) {
-              localStorage.setItem("mc_quiz_bookmarks", JSON.stringify(bookmarks.filter(b => b !== key)));
-            } else {
-              localStorage.setItem("mc_quiz_bookmarks", JSON.stringify([...bookmarks, key]));
-            }
-          } catch {}
-        }}>★ 标记</Btn>
-      </div>
     </div>
   );
 }
