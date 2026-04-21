@@ -7006,34 +7006,36 @@ function TeacherPage({ setPage, profile }) {
 //   - sym: 数学符号身份（禁用 emoji，保证视觉一致）
 //   - estMin: 预计学习时长（分钟）
 //   - bullet: 一句话要点（hover/选中面板展示）
+//   - chapter: 对应题库章节（"ODE Ch.2"、"线性代数 Ch.5" 等），用于跳题库
+//   - topics: 对应到 CHAPTERS / KNOWLEDGE_CONTENT 的知识点名，用于打开 TopicModal
 const SKILL_TREE = [
   // ── 数值分析 ──────────────────────────────────────────────
-  { id: "err",    label: "误差分析",   sym: "ε",     course: "数值分析", x: 80,   y: 70,  estMin: 25, bullet: "相对误差 / 绝对误差 / 截断误差", deps: [] },
-  { id: "float",  label: "浮点数系统", sym: "2⁻⁵²", course: "数值分析", x: 80,   y: 200, estMin: 30, bullet: "IEEE 754 · 机器精度 · 舍入",       deps: [{ id: "err", kind: "strong" }] },
-  { id: "root",   label: "方程求解",   sym: "f⁻¹",  course: "数值分析", x: 80,   y: 340, estMin: 40, bullet: "二分 / Newton / 不动点迭代",        deps: [{ id: "float", kind: "strong" }] },
-  { id: "interp", label: "插值法",     sym: "P(x)", course: "数值分析", x: 240,  y: 340, estMin: 45, bullet: "Lagrange · Newton · 样条",           deps: [{ id: "err", kind: "weak" }] },
-  { id: "quad",   label: "数值积分",   sym: "∫",    course: "数值分析", x: 80,   y: 480, estMin: 40, bullet: "梯形 / Simpson / Gauss 求积",        deps: [{ id: "interp", kind: "strong" }] },
-  { id: "diff",   label: "数值微分",   sym: "Δ",    course: "数值分析", x: 240,  y: 480, estMin: 30, bullet: "前向 / 中心差分 · 截断分析",          deps: [{ id: "interp", kind: "strong" }] },
+  { id: "err",    label: "误差分析",   sym: "ε",     course: "数值分析", x: 80,   y: 70,  estMin: 25, bullet: "相对误差 / 绝对误差 / 截断误差", chapter: "数值分析 Ch.1", topics: ["误差分析", "有效数字与舍入误差"],                     deps: [] },
+  { id: "float",  label: "浮点数系统", sym: "2⁻⁵²", course: "数值分析", x: 80,   y: 200, estMin: 30, bullet: "IEEE 754 · 机器精度 · 舍入",       chapter: "数值分析 Ch.0", topics: ["二进制与浮点数", "有效数字与舍入误差"],                 deps: [{ id: "err", kind: "strong" }] },
+  { id: "root",   label: "方程求解",   sym: "f⁻¹",  course: "数值分析", x: 80,   y: 340, estMin: 40, bullet: "二分 / Newton / 不动点迭代",        chapter: "数值分析 Ch.1", topics: ["二分法", "不动点迭代", "Newton 法", "割线法"],          deps: [{ id: "float", kind: "strong" }] },
+  { id: "interp", label: "插值法",     sym: "P(x)", course: "数值分析", x: 240,  y: 340, estMin: 45, bullet: "Lagrange · Newton · 样条",           chapter: "数值分析 Ch.3", topics: ["Lagrange 插值", "Newton 差商", "三次样条", "Chebyshev 插值"], deps: [{ id: "err", kind: "weak" }] },
+  { id: "quad",   label: "数值积分",   sym: "∫",    course: "数值分析", x: 80,   y: 480, estMin: 40, bullet: "梯形 / Simpson / Gauss 求积",        chapter: "数值分析 Ch.5", topics: ["梯形法 / Simpson 法", "Romberg 积分", "Gauss 积分"],      deps: [{ id: "interp", kind: "strong" }] },
+  { id: "diff",   label: "数值微分",   sym: "Δ",    course: "数值分析", x: 240,  y: 480, estMin: 30, bullet: "前向 / 中心差分 · 截断分析",          chapter: "数值分析 Ch.5", topics: ["有限差分公式"],                                          deps: [{ id: "interp", kind: "strong" }] },
 
   // ── 线性代数（单列垂直链）──────────────────────────────────
-  { id: "mat",    label: "矩阵运算",   sym: "A·B",  course: "线性代数", x: 520,  y: 70,  estMin: 30, bullet: "加减乘 · 转置 · 逆",                 deps: [] },
-  { id: "det",    label: "行列式",     sym: "|A|",  course: "线性代数", x: 520,  y: 200, estMin: 25, bullet: "展开式 · 性质 · Cramer",             deps: [{ id: "mat", kind: "strong" }] },
-  { id: "linsys", label: "线性方程组", sym: "Ax=b", course: "线性代数", x: 520,  y: 340, estMin: 45, bullet: "高斯消元 · 可解性判定",              deps: [{ id: "det", kind: "strong" }, { id: "mat", kind: "strong" }] },
-  { id: "vspace", label: "向量空间",   sym: "V",    course: "线性代数", x: 520,  y: 480, estMin: 50, bullet: "基 · 维数 · 线性变换",                deps: [{ id: "linsys", kind: "strong" }] },
-  { id: "eigen",  label: "特征值",     sym: "λv",   course: "线性代数", x: 520,  y: 620, estMin: 55, bullet: "特征多项式 · 对角化",                 deps: [{ id: "vspace", kind: "strong" }, { id: "det", kind: "weak" }] },
+  { id: "mat",    label: "矩阵运算",   sym: "A·B",  course: "线性代数", x: 520,  y: 70,  estMin: 30, bullet: "加减乘 · 转置 · 逆",                 chapter: "线性代数 Ch.1", topics: ["矩阵运算与初等变换", "Gauss-Jordan 消去", "矩阵的秩"],   deps: [] },
+  { id: "det",    label: "行列式",     sym: "|A|",  course: "线性代数", x: 520,  y: 200, estMin: 25, bullet: "展开式 · 性质 · Cramer",             chapter: "线性代数 Ch.2", topics: ["行列式定义与性质", "余子式与代数余子式", "Cramer 法则"], deps: [{ id: "mat", kind: "strong" }] },
+  { id: "linsys", label: "线性方程组", sym: "Ax=b", course: "线性代数", x: 520,  y: 340, estMin: 45, bullet: "高斯消元 · 可解性判定",              chapter: "线性代数 Ch.1", topics: ["Gauss-Jordan 消去", "向量的线性组合", "矩阵的秩"],      deps: [{ id: "det", kind: "strong" }, { id: "mat", kind: "strong" }] },
+  { id: "vspace", label: "向量空间",   sym: "V",    course: "线性代数", x: 520,  y: 480, estMin: 50, bullet: "基 · 维数 · 线性变换",                chapter: "线性代数 Ch.3", topics: ["子空间", "基与维数", "列空间与零空间", "坐标变换"],     deps: [{ id: "linsys", kind: "strong" }] },
+  { id: "eigen",  label: "特征值",     sym: "λv",   course: "线性代数", x: 520,  y: 620, estMin: 55, bullet: "特征多项式 · 对角化",                 chapter: "线性代数 Ch.5", topics: ["特征方程", "对角化", "对称矩阵的谱定理"],               deps: [{ id: "vspace", kind: "strong" }, { id: "det", kind: "weak" }] },
 
   // ── ODE ──────────────────────────────────────────────────
-  { id: "ode1",   label: "一阶 ODE",     sym: "y'",   course: "ODE",      x: 780,  y: 70,  estMin: 30, bullet: "IVP · 存在唯一性",                  deps: [] },
-  { id: "sep",    label: "分离变量法",   sym: "∫dy", course: "ODE",      x: 720,  y: 200, estMin: 30, bullet: "dy/g(y)=f(x)dx 型",                 deps: [{ id: "ode1", kind: "strong" }] },
-  { id: "intfact",label: "积分因子法",   sym: "μ",   course: "ODE",      x: 880,  y: 200, estMin: 35, bullet: "y'+Py=Q 线性型",                    deps: [{ id: "ode1", kind: "strong" }, { id: "sep", kind: "peer" }] },
-  { id: "ode2",   label: "二阶 ODE",     sym: "y''", course: "ODE",      x: 780,  y: 620, estMin: 50, bullet: "常系数 · 待定系数 / 常数变易",      deps: [{ id: "intfact", kind: "strong" }, { id: "eigen", kind: "strong" }] },
-  { id: "lap",    label: "Laplace 变换", sym: "𝓛",  course: "ODE",      x: 780,  y: 760, estMin: 55, bullet: "s 域 · IVP 求解 · 卷积",             deps: [{ id: "ode2", kind: "strong" }] },
+  { id: "ode1",   label: "一阶 ODE",     sym: "y'",   course: "ODE",      x: 780,  y: 70,  estMin: 30, bullet: "IVP · 存在唯一性",                  chapter: "ODE Ch.1", topics: ["存在唯一性定理"],                                                       deps: [] },
+  { id: "sep",    label: "分离变量法",   sym: "∫dy", course: "ODE",      x: 720,  y: 200, estMin: 30, bullet: "dy/g(y)=f(x)dx 型",                 chapter: "ODE Ch.1", topics: ["分离变量法"],                                                            deps: [{ id: "ode1", kind: "strong" }] },
+  { id: "intfact",label: "积分因子法",   sym: "μ",   course: "ODE",      x: 880,  y: 200, estMin: 35, bullet: "y'+Py=Q 线性型",                    chapter: "ODE Ch.1", topics: ["线性方程与积分因子", "Bernoulli 方程"],                                 deps: [{ id: "ode1", kind: "strong" }, { id: "sep", kind: "peer" }] },
+  { id: "ode2",   label: "二阶 ODE",     sym: "y''", course: "ODE",      x: 780,  y: 620, estMin: 50, bullet: "常系数 · 待定系数 / 常数变易",      chapter: "ODE Ch.2", topics: ["特征方程法", "叠加原理与 Wronskian", "待定系数法", "常数变易法"],        deps: [{ id: "intfact", kind: "strong" }, { id: "eigen", kind: "strong" }] },
+  { id: "lap",    label: "Laplace 变换", sym: "𝓛",  course: "ODE",      x: 780,  y: 760, estMin: 55, bullet: "s 域 · IVP 求解 · 卷积",             chapter: "ODE Ch.3", topics: ["Laplace 变换定义与性质", "逆变换与部分分式", "卷积定理", "用 Laplace 变换求解 IVP"], deps: [{ id: "ode2", kind: "strong" }] },
 
   // ── 概率论 ────────────────────────────────────────────────
-  { id: "prob",   label: "概率基础",   sym: "P(A)", course: "概率论",   x: 1060, y: 70,  estMin: 25, bullet: "样本空间 · 条件概率 · 独立",         deps: [] },
-  { id: "rv",     label: "随机变量",   sym: "X",    course: "概率论",   x: 1060, y: 200, estMin: 35, bullet: "分布律 · 密度 · 联合分布",           deps: [{ id: "prob", kind: "strong" }] },
-  { id: "ev",     label: "期望方差",   sym: "𝔼",   course: "概率论",   x: 1060, y: 340, estMin: 40, bullet: "线性性 · 独立性 · 协方差",            deps: [{ id: "rv", kind: "strong" }] },
-  { id: "lln",    label: "大数定律",   sym: "n→∞", course: "概率论",   x: 1060, y: 480, estMin: 45, bullet: "弱/强 LLN · CLT",                    deps: [{ id: "ev", kind: "strong" }] },
+  { id: "prob",   label: "概率基础",   sym: "P(A)", course: "概率论",   x: 1060, y: 70,  estMin: 25, bullet: "样本空间 · 条件概率 · 独立",         chapter: "概率论 Ch.1", topics: ["样本空间与事件", "概率公理", "条件概率", "全概率公式与 Bayes 定理"], deps: [] },
+  { id: "rv",     label: "随机变量",   sym: "X",    course: "概率论",   x: 1060, y: 200, estMin: 35, bullet: "分布律 · 密度 · 联合分布",           chapter: "概率论 Ch.2", topics: ["离散型随机变量", "连续型随机变量", "分布函数", "常见分布（Bernoulli/Poisson/正态/指数）"], deps: [{ id: "prob", kind: "strong" }] },
+  { id: "ev",     label: "期望方差",   sym: "𝔼",   course: "概率论",   x: 1060, y: 340, estMin: 40, bullet: "线性性 · 独立性 · 协方差",            chapter: "概率论 Ch.3", topics: ["数学期望", "方差与标准差", "协方差与相关系数", "矩母函数"],       deps: [{ id: "rv", kind: "strong" }] },
+  { id: "lln",    label: "大数定律",   sym: "n→∞", course: "概率论",   x: 1060, y: 480, estMin: 45, bullet: "弱/强 LLN · CLT",                    chapter: "概率论 Ch.4", topics: ["大数定律（弱/强）", "中心极限定理", "收敛性概念", "正态近似应用"], deps: [{ id: "ev", kind: "strong" }] },
 ];
 
 const NODE_INDEX = Object.fromEntries(SKILL_TREE.map(n => [n.id, n]));
@@ -7075,7 +7077,7 @@ function computeRecommendations(progress) {
 
 const MS_DAY = 86400000;
 
-function SkillTreePage({ setPage }) {
+function SkillTreePage({ setPage, setChapterFilter }) {
   // 新数据模型：{ [id]: { status, updatedAt, masteredAt } }
   // 向后兼容旧的 mc_skill_mastery (number 0/1/2)
   const [progress, setProgress] = useState(() => {
@@ -7099,6 +7101,19 @@ function SkillTreePage({ setPage }) {
 
   const [selectedId, setSelectedId] = useState(null);
   const [selectedCourse, setSelectedCourse] = useState("全部");
+  // 打开知识点详情弹窗：{ name, chapterNum, course }
+  const [modalTopic, setModalTopic] = useState(null);
+
+  const openTopicModal = (nodeCourse, nodeChapter, topicName) => {
+    const chapterNum = (nodeChapter || "").split(/\s+/).pop() || null; // "ODE Ch.2" -> "Ch.2"
+    setModalTopic({ name: topicName, chapterNum, course: nodeCourse });
+  };
+
+  const openQuizForNode = (node) => {
+    if (!node) return;
+    if (typeof setChapterFilter === "function") setChapterFilter(node.chapter || null);
+    if (typeof setPage === "function") setPage("题库练习");
+  };
 
   const courses = useMemo(() => ["全部", ...Array.from(new Set(SKILL_TREE.map(s => s.course)))], []);
   const visibleNodes = useMemo(() => (
@@ -7147,9 +7162,11 @@ function SkillTreePage({ setPage }) {
   const selected = selectedId ? NODE_INDEX[selectedId] : null;
   const selectedStatus = selected ? deriveStatus(selected, progress) : null;
 
-  // 画布尺寸
+  // 画布尺寸（预留顶部 24 / 底部 40 的呼吸空间；推荐光晕与阴影越界不再被裁切）
+  const CANVAS_TOP_PAD = 24;
+  const CANVAS_BOTTOM_PAD = 40;
   const maxX = Math.max(...visibleNodes.map(n => n.x), 800) + 160;
-  const maxY = Math.max(...visibleNodes.map(n => n.y), 300) + 100;
+  const maxY = Math.max(...visibleNodes.map(n => n.y), 300) + CANVAS_TOP_PAD + CANVAS_BOTTOM_PAD;
 
   const NODE_W = 136;
   const NODE_H = 68;
@@ -7188,6 +7205,17 @@ function SkillTreePage({ setPage }) {
   const backTarget = (typeof setPage === "function") ? (() => setPage("首页")) : null;
 
   return (
+    <>
+      {modalTopic && (
+        <TopicModal
+          topic={modalTopic.name}
+          onClose={() => setModalTopic(null)}
+          setPage={setPage}
+          setChapterFilter={setChapterFilter}
+          chapterNum={modalTopic.chapterNum}
+          course={modalTopic.course}
+        />
+      )}
     <div style={{ padding: "0 0 20px", maxWidth: 1280, margin: "0 auto" }}>
       {/* ══ Header ══ */}
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
@@ -7227,7 +7255,7 @@ function SkillTreePage({ setPage }) {
 
       {/* ══ Canvas ══ */}
       <div style={{ background: "#FFFFFF", borderRadius: 18, border: "1px solid #EEF2F7", padding: 0, overflow: "auto", maxHeight: 640, position: "relative" }}>
-        <svg width={Math.max(maxX, 1200)} height={Math.max(maxY, 320)} style={{ minWidth: "100%", display: "block", background: "linear-gradient(180deg,#FAFBFD 0%,#FFFFFF 120px)" }}>
+        <svg width={Math.max(maxX, 1200)} height={Math.max(maxY, 340)} style={{ minWidth: "100%", display: "block", background: "linear-gradient(180deg,#FAFBFD 0%,#FFFFFF 140px)" }}>
           <defs>
             <marker id="mc-arrow-strong" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 Z" fill="#64748B" />
@@ -7243,6 +7271,7 @@ function SkillTreePage({ setPage }) {
             </marker>
           </defs>
 
+          <g transform={`translate(0, ${CANVAS_TOP_PAD})`}>
           {/* Edges first so nodes overlay */}
           {edges.map(({ from, to, kind }, i) => {
             const crossCourse = from.course !== to.course;
@@ -7359,6 +7388,7 @@ function SkillTreePage({ setPage }) {
               </g>
             );
           })}
+          </g>
         </svg>
       </div>
 
@@ -7403,28 +7433,73 @@ function SkillTreePage({ setPage }) {
                 );
               })}
             </div>
+
+            {/* 相关知识点 —— 点击进入 TopicModal，补全了从 DAG 到知识库内容的链路 */}
+            {(selected.topics || []).length > 0 && (
+              <>
+                <div style={{ fontSize: 12, color: "#64748B", margin: "14px 0 4px", fontWeight: 600, letterSpacing: "0.05em" }}>
+                  相关知识点 <span style={{ color: "#CBD5E1", fontWeight: 500 }}>· 点击打开讲义</span>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {(selected.topics || []).map(t => {
+                    const hasDetail = !!KNOWLEDGE_CONTENT[t];
+                    const c = COURSE_COLORS_TREE[selected.course];
+                    return (
+                      <button key={t} onClick={() => openTopicModal(selected.course, selected.chapter, t)} style={{
+                        fontSize: 11.5, padding: "5px 12px", borderRadius: 999,
+                        border: "1px solid " + (hasDetail ? c.ring : "#E2E8F0"),
+                        background: hasDetail ? c.soft : "#F8FAFC",
+                        color: hasDetail ? c.ink : "#94A3B8",
+                        fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                        display: "inline-flex", alignItems: "center", gap: 5,
+                      }} title={hasDetail ? "查看讲义内容" : "内容建设中（仍可查看练习）"}>
+                        <span style={{ fontSize: 10, opacity: 0.7 }}>{hasDetail ? "📘" : "○"}</span>
+                        {t}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+            <div style={{ fontSize: 11, color: "#CBD5E1", marginTop: 10 }}>
+              对应章节：<span style={{ color: "#94A3B8", fontWeight: 600 }}>{selected.chapter || "—"}</span>
+            </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 180 }}>
+            {/* 通用：知识点 & 题库入口（所有状态都可用） */}
+            {(selected.topics || []).length > 0 && (
+              <Btn variant="primary" onClick={() => openTopicModal(selected.course, selected.chapter, selected.topics[0])}>
+                📘 查看知识点
+              </Btn>
+            )}
+            {selected.chapter && (
+              <Btn onClick={() => openQuizForNode(selected)}>
+                ✏️ 练习题目（{selected.chapter}）
+              </Btn>
+            )}
+
+            {/* 状态专属操作 */}
+            <div style={{ height: 1, background: "#EEF2F7", margin: "2px 0" }} />
             {selectedStatus === "locked" && (
               <div style={{ fontSize: 12, color: "#94A3B8", padding: "10px 12px", background: "#F8FAFC", borderRadius: 10, border: "1px dashed #CBD5E1" }}>
-                完成全部<strong style={{ color: "#475569" }}>强依赖</strong>后自动解锁
+                完成全部<strong style={{ color: "#475569" }}>强依赖</strong>后自动解锁，但你仍可提前预览讲义 / 做题
               </div>
             )}
             {selectedStatus === "unlocked" && (
-              <Btn variant="primary" onClick={() => actStart(selected.id)}>🚀 开始学习</Btn>
+              <Btn onClick={() => actStart(selected.id)}>🚀 标记为学习中</Btn>
             )}
             {selectedStatus === "learning" && (
               <>
-                <Btn variant="primary" onClick={() => actMaster(selected.id)}>✓ 标记已掌握</Btn>
+                <Btn onClick={() => actMaster(selected.id)}>✓ 标记已掌握</Btn>
                 <Btn onClick={() => actReset(selected.id)}>⏸ 暂停 / 撤销</Btn>
                 <div style={{ fontSize: 11, color: "#94A3B8", lineHeight: 1.45 }}>
-                  建议通过小测确认：打开「AI 对话 · 讲解」或练习题后再点确认
+                  建议先做完上面的「练习题目」再点已掌握
                 </div>
               </>
             )}
             {selectedStatus === "mastered" && (
               <>
-                <Btn variant="primary" onClick={() => actReview(selected.id)}>🔁 刚复习过一次</Btn>
+                <Btn onClick={() => actReview(selected.id)}>🔁 刚复习过一次</Btn>
                 <Btn onClick={() => actPause(selected.id)}>重置为学习中</Btn>
                 <Btn variant="danger" onClick={() => actReset(selected.id)}>清除此节点进度</Btn>
               </>
@@ -7520,6 +7595,7 @@ function SkillTreePage({ setPage }) {
         </div>
       </div>
     </div>
+    </>
   );
 }
 
@@ -7874,7 +7950,7 @@ export default function App() {
     }
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
-    if (page === "技能树") return <SkillTreePage setPage={handleSetPage} />;
+    if (page === "技能树") return <SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
     if (page === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} />;
     if (page === "教师管理") return <TeacherPage setPage={handleSetPage} profile={profile} />;
     return null;
@@ -7884,7 +7960,7 @@ export default function App() {
     if (tab === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
     if (tab === "AI对话") return <MaterialChatPage setPage={handleSetPage} profile={profile} />;
     if (tab === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
-    if (tab === "知识树") return <SkillTreePage setPage={handleSetPage} />;
+    if (tab === "知识树") return <SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
     if (tab === "小测") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
     return null;
   };
