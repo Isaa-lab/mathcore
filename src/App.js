@@ -5073,7 +5073,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
               <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", marginBottom: 12, padding: "10px 14px", background: "#FEF3C7", borderRadius: 12 }}>
                 {misconceptionForChoice
                   ? <><b>可能的思维陷阱：</b>{misconceptionForChoice}</>
-                  : "别急着看答案——先和 AI 一起重新梳理一下思路，学习发生在这一刻，不在"看到答案"那一刻。"}
+                  : <>别急着看答案 —— 先和 AI 一起重新梳理一下思路。学习发生在「重新思考」的那一刻，不在「看到答案」的那一刻。</>}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
