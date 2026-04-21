@@ -5956,10 +5956,29 @@ function MaterialChatPage({ setPage, profile }) {
       {/* Scrollable chat canvas — full-bleed, generous horizontal padding */}
       <div style={{ flex: 1, overflowY: "auto", padding: "32px 48px 12px" }}>
         {history.length === 0 && (
-          <div style={{ padding: "24px 0", color: "#9CA3AF", fontSize: 14, lineHeight: 1.85 }}>
-            {chatMode === "tutor"
-              ? "试着输入：帮我制定 3 天复习计划；先从第一章讲起；输出 [VAR:a,1,10] 与 [CHART] 进行可视化。"
-              : "试着输入：这份资料的核心知识点是什么？并输出 [VAR:a,1,10] 与 [CHART]。"}
+          <div
+            style={{
+              flex: 1,
+              minHeight: 280,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: 0.7,
+              pointerEvents: "none",
+              userSelect: "none",
+            }}
+          >
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "#6B7280" }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#818CF8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.85 }}>
+                <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+                <path d="M20 3v4" /><path d="M22 5h-4" /><path d="M4 17v2" /><path d="M5 18H3" />
+              </svg>
+              <p style={{ margin: 0, fontSize: 13.5, fontWeight: 500, letterSpacing: "0.02em", lineHeight: 1.5 }}>
+                {chatMode === "tutor"
+                  ? "试着输入：帮我制定 3 天复习计划；先从第一章讲起。"
+                  : "试着输入：这份资料的核心知识点是什么？"}
+              </p>
+            </div>
           </div>
         )}
         <motion.div initial="hidden" animate="visible" variants={{ visible: { transition: { staggerChildren: 0.08 } } }}>
