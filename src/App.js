@@ -474,11 +474,298 @@ const getFileExt = (name = "") => {
 };
 
 // ── AI 配置工具（读/写 localStorage）────────────────────────────────────────
-const getAIConfig = () => ({
-  provider: localStorage.getItem("mc_ai_provider") || "groq",
-  key: localStorage.getItem("mc_ai_key") || "",
-  customUrl: localStorage.getItem("mc_ai_custom_url") || "",
-});
+// AI Provider 元数据 —— 单一真源。logo 是文字/emoji，颜色用于头像底色
+const AI_PROVIDER_META = {
+  groq:      { id: "groq",      name: "Groq",      logo: "G",  desc: "免费·速度最快",      placeholder: "gsk_...",    link: "https://console.groq.com/keys",                   color: "#F55036", free: true },
+  gemini:    { id: "gemini",    name: "Gemini",    logo: "✦",  desc: "Google·免费 Key",    placeholder: "AIzaSy...",  link: "https://aistudio.google.com/apikey",              color: "#4285F4" },
+  deepseek:  { id: "deepseek",  name: "DeepSeek",  logo: "🐋", desc: "国内·价格低廉",      placeholder: "sk-...",     link: "https://platform.deepseek.com/api_keys",          color: "#4D6BFE" },
+  kimi:      { id: "kimi",      name: "Kimi",      logo: "K",  desc: "月之暗面·国内可访问", placeholder: "sk-...",     link: "https://platform.moonshot.cn/console/api-keys",   color: "#6F5BD9" },
+  anthropic: { id: "anthropic", name: "Claude",    logo: "A",  desc: "Anthropic",          placeholder: "sk-ant-...", link: "https://console.anthropic.com/",                  color: "#D97757" },
+  custom:    { id: "custom",    name: "自定义",    logo: "⚙",  desc: "任意 OpenAI 兼容接口", placeholder: "sk-...",    link: null,                                              color: "#6B7280" },
+  server:    { id: "server",    name: "平台内置",  logo: "🎓", desc: "无需配置·平台承担",  placeholder: null,         link: null,                                              color: "#10B981" },
+};
+const AI_PROVIDER_ORDER = ["server", "groq", "gemini", "deepseek", "kimi", "anthropic", "custom"];
+
+// 多 Key 存储：{ groq: "gsk_...", deepseek: "sk-...", ... }
+// 兼容老版本的 mc_ai_key（会在首次读取时自动迁移）
+const _readAIKeys = () => {
+  let all = {};
+  try { all = JSON.parse(localStorage.getItem("mc_ai_keys") || "{}") || {}; } catch {}
+  const legacy = localStorage.getItem("mc_ai_key");
+  const legacyProv = localStorage.getItem("mc_ai_provider");
+  if (legacy && legacyProv && !all[legacyProv]) {
+    all[legacyProv] = legacy;
+    try { localStorage.setItem("mc_ai_keys", JSON.stringify(all)); } catch {}
+  }
+  return all;
+};
+
+const getAIConfig = () => {
+  const rawProvider = localStorage.getItem("mc_ai_provider") || "server";
+  // 兼容：老账号可能没写过"server"选项，默认仍给到 groq 行为
+  const provider = (rawProvider === "server") ? "server" : (AI_PROVIDER_META[rawProvider] ? rawProvider : "groq");
+  const allKeys = _readAIKeys();
+  return {
+    provider,
+    key: provider === "server" ? "" : (allKeys[provider] || ""),
+    customUrl: localStorage.getItem("mc_ai_custom_url") || "",
+    allKeys,
+  };
+};
+
+const setActiveAIProvider = (providerId) => {
+  if (!AI_PROVIDER_META[providerId]) return;
+  localStorage.setItem("mc_ai_provider", providerId);
+};
+
+const setAIKeyFor = (providerId, key) => {
+  const all = _readAIKeys();
+  if (key && key.trim()) all[providerId] = key.trim();
+  else delete all[providerId];
+  try { localStorage.setItem("mc_ai_keys", JSON.stringify(all)); } catch {}
+  // 兼容：同步更新老 key（当切到这个 provider 时）
+  if (localStorage.getItem("mc_ai_provider") === providerId) {
+    if (key && key.trim()) localStorage.setItem("mc_ai_key", key.trim());
+    else localStorage.removeItem("mc_ai_key");
+  }
+};
+
+// 后端以 userProvider / userKey 解构；"server" 需要不发送这俩字段让后端走服务器 Key
+const buildAIBody = () => {
+  const cfg = getAIConfig();
+  if (cfg.provider === "server") return {};
+  return {
+    userProvider: cfg.provider,
+    userKey: cfg.key,
+    userCustomUrl: cfg.customUrl,
+  };
+};
+
+// ── ProviderAvatar ── 根据当前 provider 渲染一个圆形头像（chat 气泡 / 面板徽章共用）
+function ProviderAvatar({ providerId, size = 30, showRing = false }) {
+  const meta = AI_PROVIDER_META[providerId] || AI_PROVIDER_META.server;
+  return (
+    <div style={{
+      width: size, height: size, flexShrink: 0, borderRadius: "50%",
+      background: meta.color,
+      color: "#FFFFFF",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: Math.round(size * 0.48), fontWeight: 700,
+      lineHeight: 1,
+      boxShadow: showRing ? `0 0 0 2px #fff, 0 0 0 3px ${meta.color}55` : "none",
+      fontFamily: "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif",
+      userSelect: "none",
+    }} title={meta.name}>
+      {meta.logo}
+    </div>
+  );
+}
+
+// ── ProviderSwitcherPopover ── 头像下拉：一键切换 AI 引擎
+// · 列出所有 provider，对每个 provider 显示当前连接状态
+// · 已经存过 Key 的：点击即切换，不要求重复输入
+// · 未配置的：展开内嵌输入框填 Key，保存后立刻切换
+// · 切换 provider 不会清空其它 provider 的 Key —— 可以多套 Key 并存
+function ProviderSwitcherPopover({ profile, onClose, onSwitched }) {
+  const [tick, setTick] = useState(0);       // 用于切换后触发重渲染
+  const [expanded, setExpanded] = useState(null); // 展开输入框的 provider id
+  const [inputKey, setInputKey] = useState("");
+  const [inputUrl, setInputUrl] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [savedPing, setSavedPing] = useState(null);
+  const popRef = useRef(null);
+  const cfg = getAIConfig();
+
+  // 点击外部关闭
+  useEffect(() => {
+    const onDown = (e) => { if (popRef.current && !popRef.current.contains(e.target)) onClose(); };
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [onClose]);
+
+  const activate = (providerId) => {
+    setActiveAIProvider(providerId);
+    // 把老字段同步一下，让依赖 mc_ai_key 的老逻辑也能命中
+    const all = _readAIKeys();
+    const k = all[providerId] || "";
+    if (k) localStorage.setItem("mc_ai_key", k); else localStorage.removeItem("mc_ai_key");
+    setSavedPing(providerId);
+    setTick(t => t + 1);
+    if (onSwitched) onSwitched(providerId);
+    setTimeout(() => setSavedPing(null), 900);
+  };
+
+  const expand = (providerId) => {
+    setExpanded(providerId);
+    const all = _readAIKeys();
+    setInputKey(all[providerId] || "");
+    setInputUrl(providerId === "custom" ? (localStorage.getItem("mc_ai_custom_url") || "") : "");
+    setShowKey(false);
+  };
+
+  const saveInput = () => {
+    if (!expanded) return;
+    const k = inputKey.trim();
+    if (!k) return;
+    setAIKeyFor(expanded, k);
+    if (expanded === "custom") {
+      if (inputUrl.trim()) localStorage.setItem("mc_ai_custom_url", inputUrl.trim());
+      else localStorage.removeItem("mc_ai_custom_url");
+    }
+    activate(expanded);
+    setExpanded(null);
+  };
+
+  const clearKey = (providerId) => {
+    setAIKeyFor(providerId, "");
+    // 如果正在用的 provider 被清了，回落到 server
+    if (cfg.provider === providerId) setActiveAIProvider("server");
+    setTick(t => t + 1);
+  };
+
+  const freshCfg = getAIConfig(); // 每次渲染取最新
+  void tick;
+
+  return (
+    <div ref={popRef} style={{
+      position: "absolute", top: 48, right: 0,
+      width: 340, maxHeight: "min(560px, calc(100vh - 80px))", overflow: "auto",
+      background: "#FFFFFF", borderRadius: 14,
+      boxShadow: "0 10px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.05)",
+      border: "1px solid #E5E7EB",
+      zIndex: 9998,
+      padding: "14px 0 10px",
+      fontSize: 13,
+    }}>
+      {/* Header */}
+      <div style={{ padding: "0 16px 10px", borderBottom: "1px solid #F3F4F6", marginBottom: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 34, height: 34, borderRadius: "50%", background: "#10B981", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>
+            {(profile?.name || "ISAA").slice(0, 4)}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{profile?.name || "ISAA"}</div>
+            <div style={{ fontSize: 11, color: "#6B7280", display: "flex", alignItems: "center", gap: 4 }}>
+              当前 AI：
+              <ProviderAvatar providerId={freshCfg.provider} size={14} />
+              <span style={{ fontWeight: 600, color: AI_PROVIDER_META[freshCfg.provider]?.color || "#374151" }}>
+                {AI_PROVIDER_META[freshCfg.provider]?.name || "未选择"}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: "4px 10px", fontSize: 11, color: "#9CA3AF", fontWeight: 600, letterSpacing: 0.3 }}>AI 引擎</div>
+
+      {/* Provider list */}
+      {AI_PROVIDER_ORDER.map((pid) => {
+        const meta = AI_PROVIDER_META[pid];
+        const isActive = freshCfg.provider === pid;
+        const hasKey = pid === "server" ? true : !!(freshCfg.allKeys[pid]);
+        const isExpanded = expanded === pid;
+        const flashed = savedPing === pid;
+        return (
+          <div key={pid} style={{ margin: "2px 8px" }}>
+            <div
+              onClick={() => {
+                if (isExpanded) return;
+                if (hasKey) activate(pid);
+                else expand(pid);
+              }}
+              style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "8px 10px", borderRadius: 10,
+                cursor: isExpanded ? "default" : "pointer",
+                background: flashed ? "#ECFDF5" : (isActive ? "#F5F3FF" : "transparent"),
+                border: isActive ? "1px solid #DDD6FE" : "1px solid transparent",
+                transition: "background 0.15s, border-color 0.15s",
+              }}
+              onMouseEnter={(e) => { if (!isActive && !isExpanded) e.currentTarget.style.background = "#F9FAFB"; }}
+              onMouseLeave={(e) => { if (!isActive && !isExpanded && !flashed) e.currentTarget.style.background = "transparent"; }}
+            >
+              <ProviderAvatar providerId={pid} size={28} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", display: "flex", alignItems: "center", gap: 6 }}>
+                  {meta.name}
+                  {meta.free && <span style={{ fontSize: 9, fontWeight: 700, background: "#D1FAE5", color: "#065F46", padding: "1px 6px", borderRadius: 4 }}>免费</span>}
+                </div>
+                <div style={{ fontSize: 11, color: "#6B7280", marginTop: 1 }}>{meta.desc}</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                {isActive ? (
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "#6D28D9", background: "#EDE9FE", padding: "2px 7px", borderRadius: 999 }}>使用中</span>
+                ) : hasKey ? (
+                  <span style={{ fontSize: 10.5, color: "#059669", fontWeight: 600 }}>已连接</span>
+                ) : (
+                  <span style={{ fontSize: 10.5, color: "#9CA3AF" }}>未配置</span>
+                )}
+                {pid !== "server" && hasKey && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); expand(pid); }}
+                    title="更换 Key"
+                    style={{ border: "none", background: "transparent", color: "#6B7280", cursor: "pointer", fontSize: 12, padding: 2 }}
+                  >✏️</button>
+                )}
+              </div>
+            </div>
+            {/* 内嵌 Key 输入 */}
+            {isExpanded && pid !== "server" && (
+              <div style={{ padding: "8px 10px 10px", margin: "0 2px", background: "#F9FAFB", borderRadius: 10, border: "1px solid #E5E7EB", marginTop: 4 }}>
+                {pid === "custom" && (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: "#4B5563", marginBottom: 4 }}>接口 Base URL</div>
+                    <input
+                      value={inputUrl}
+                      onChange={(e) => setInputUrl(e.target.value)}
+                      placeholder="https://your-api.com/v1"
+                      style={{ width: "100%", padding: "7px 9px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, fontFamily: "inherit", boxSizing: "border-box" }}
+                    />
+                  </div>
+                )}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "#4B5563" }}>API Key</div>
+                  {meta.link && (
+                    <a href={meta.link} target="_blank" rel="noreferrer" style={{ fontSize: 10.5, color: "#6366F1", textDecoration: "none" }}>免费获取 →</a>
+                  )}
+                </div>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type={showKey ? "text" : "password"}
+                    value={inputKey}
+                    onChange={(e) => setInputKey(e.target.value)}
+                    placeholder={meta.placeholder || "sk-..."}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveInput(); }}
+                    style={{ width: "100%", padding: "7px 32px 7px 9px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, fontFamily: "inherit", boxSizing: "border-box" }}
+                  />
+                  <button onClick={() => setShowKey(v => !v)} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 13, padding: 0 }}>{showKey ? "🙈" : "👁"}</button>
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
+                  {hasKey && (
+                    <button onClick={() => { clearKey(pid); setExpanded(null); }} style={{ fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, color: "#6B7280", cursor: "pointer", fontFamily: "inherit" }}>清除</button>
+                  )}
+                  <button onClick={() => setExpanded(null)} style={{ fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, color: "#6B7280", cursor: "pointer", fontFamily: "inherit" }}>取消</button>
+                  <button onClick={saveInput} disabled={!inputKey.trim()} style={{ fontSize: 11, padding: "5px 12px", background: inputKey.trim() ? "#10B981" : "#D1D5DB", border: "none", borderRadius: 6, color: "#fff", cursor: inputKey.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontWeight: 600 }}>保存并切换</button>
+                </div>
+                <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 6 }}>Key 仅保存在你本地浏览器，不上传服务器。</div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Footer */}
+      <div style={{ borderTop: "1px solid #F3F4F6", marginTop: 8, paddingTop: 8 }}>
+        <button
+          onClick={() => { onClose(); useMathStore.getState().openAISettings(); }}
+          style={{ width: "calc(100% - 20px)", margin: "0 10px", padding: "8px 10px", fontSize: 12, fontWeight: 600, background: "#F9FAFB", color: "#4B5563", border: "1px solid #E5E7EB", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+        >⚙️ 打开完整 AI 设置…</button>
+      </div>
+    </div>
+  );
+}
 
 // ── AI 设置弹窗 ───────────────────────────────────────────────────────────────
 function AISettingsModal({ onClose }) {
@@ -500,13 +787,15 @@ function AISettingsModal({ onClose }) {
 
   const handleSave = () => {
     if (key.trim()) {
-      localStorage.setItem("mc_ai_provider", provider);
-      localStorage.setItem("mc_ai_key", key.trim());
+      // 写入多 Key 存储 + 老字段（兼容），同时切到当前 provider
+      setAIKeyFor(provider, key.trim());
+      setActiveAIProvider(provider);
       if (provider === "custom") localStorage.setItem("mc_ai_custom_url", customUrl.trim());
       else localStorage.removeItem("mc_ai_custom_url");
     } else {
-      localStorage.removeItem("mc_ai_provider");
-      localStorage.removeItem("mc_ai_key");
+      // 清空当前 provider 的 Key，并把激活态落回 server（平台内置）
+      setAIKeyFor(provider, "");
+      setActiveAIProvider("server");
       localStorage.removeItem("mc_ai_custom_url");
     }
     setSaved(true);
@@ -514,9 +803,11 @@ function AISettingsModal({ onClose }) {
   };
 
   const handleClear = () => {
-    localStorage.removeItem("mc_ai_provider");
+    // 清空所有 provider 的 Key，回落到平台内置
+    try { localStorage.removeItem("mc_ai_keys"); } catch {}
     localStorage.removeItem("mc_ai_key");
     localStorage.removeItem("mc_ai_custom_url");
+    setActiveAIProvider("server");
     setKey(""); setCustomUrl(""); setProvider("groq");
     setSaved(true);
     setTimeout(() => { setSaved(false); onClose(); }, 800);
@@ -4380,8 +4671,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
     const userId = "u_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
     const aiId = "a_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+    const activeProvider = getAIConfig().provider;
     const newUser = { id: userId, role: "user", content: text };
-    const placeholder = { id: aiId, role: "assistant", content: "", isStreaming: true };
+    const placeholder = { id: aiId, role: "assistant", content: "", isStreaming: true, providerId: activeProvider };
 
     // 组装发给后端的对话历史（不含当前这条用户消息和占位）
     const prior = historyOverride !== undefined ? historyOverride : aiMessages;
@@ -4415,7 +4707,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             misconception: misconceptionForChoice || null,
             knowledgePoints: Array.isArray(q.knowledgePoints) ? q.knowledgePoints : null,
           },
-          materialTitle: "数学题目复盘"
+          materialTitle: "数学题目复盘",
+          // ⚠️ 以前这里漏了 user credentials —— 导致 Vercel 上没配服务器 Key 时
+          // 请求必然 500。现在统一走 buildAIBody()。
+          ...buildAIBody(),
         })
       });
       const data = await res.json().catch(() => ({}));
@@ -5361,12 +5656,18 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                 </div>
               ) : (
                 <div key={m.id} style={{ display: "flex", justifyContent: "flex-start", margin: "10px 0", gap: 8, alignItems: "flex-start" }}>
-                  <div style={{
-                    width: 30, height: 30, flexShrink: 0, borderRadius: "50%",
-                    background: m.isError ? "#FEF3C7" : "#EEF2FF",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 15, marginTop: 2,
-                  }}>💬</div>
+                  <div style={{ marginTop: 2 }}>
+                    {m.isError ? (
+                      <div style={{
+                        width: 30, height: 30, borderRadius: "50%",
+                        background: "#FEF3C7",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 15,
+                      }}>⚠️</div>
+                    ) : (
+                      <ProviderAvatar providerId={m.providerId || getAIConfig().provider} size={30} />
+                    )}
+                  </div>
                   <div style={{
                     maxWidth: "82%",
                     background: m.isError ? "#FEF3C7" : "#F3F4F6",
@@ -5389,12 +5690,17 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                         <MathText text={m.content} />
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
                           {m.errorCategory === "no_key" ? (
-                            <Btn size="sm" variant="primary" onClick={() => useMathStore.getState().openAISettings()}>⚙️ 去 AI 设置</Btn>
+                            <>
+                              <Btn size="sm" variant="primary" onClick={() => useMathStore.getState().openAISettings()}>⚙️ 去 AI 设置</Btn>
+                              <Btn size="sm" disabled={aiIsBusy} onClick={() => { if (lastAskInput && !aiIsBusy) sendChatMessage(lastAskInput); }}>先试一下</Btn>
+                            </>
                           ) : (
-                            <Btn size="sm" variant="primary" disabled={aiIsBusy} onClick={() => { if (lastAskInput && !aiIsBusy) sendChatMessage(lastAskInput); }}>🔄 重试</Btn>
-                          )}
-                          {m.errorCategory === "no_key" && (
-                            <Btn size="sm" disabled={aiIsBusy} onClick={() => { if (lastAskInput && !aiIsBusy) sendChatMessage(lastAskInput); }}>先试一下</Btn>
+                            <>
+                              <Btn size="sm" variant="primary" disabled={aiIsBusy} onClick={() => { if (lastAskInput && !aiIsBusy) sendChatMessage(lastAskInput); }}>🔄 重试</Btn>
+                              {(m.errorCategory === "provider_down" || m.errorCategory === "rate_limit" || m.errorCategory === "timeout") && (
+                                <Btn size="sm" onClick={() => useMathStore.getState().openAISettings()}>🔀 换个 AI</Btn>
+                              )}
+                            </>
                           )}
                         </div>
                         {m.errorDetail && (
@@ -9443,9 +9749,7 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#10B981", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
-                {(profile?.name || "ISAA").slice(0, 4)}
-              </div>
+              <UserAvatarMenu profile={profile} />
             </header>
 
             {/* Workspace area */}
@@ -9479,4 +9783,52 @@ function GlobalAISettingsPortal() {
   const close = useMathStore((s) => s.closeAISettings);
   if (!open) return null;
   return <AISettingsModal onClose={close} />;
+}
+
+// 顶栏右上头像 —— 点击弹出 ProviderSwitcherPopover
+function UserAvatarMenu({ profile }) {
+  const [open, setOpen] = useState(false);
+  const [tick, setTick] = useState(0);
+  const cfg = getAIConfig();
+  void tick;
+  return (
+    <div style={{ position: "relative", flexShrink: 0 }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        title={`当前 AI：${AI_PROVIDER_META[cfg.provider]?.name || "未设置"}`}
+        style={{
+          position: "relative",
+          width: 36, height: 36, borderRadius: "50%",
+          background: "#10B981", color: "white",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 12, fontWeight: 700, border: "none", cursor: "pointer",
+          fontFamily: "inherit", padding: 0,
+          boxShadow: open ? "0 0 0 3px rgba(16,185,129,0.25)" : "none",
+          transition: "box-shadow 0.15s",
+        }}
+      >
+        {(profile?.name || "ISAA").slice(0, 4)}
+        {/* 右下角的 provider 小徽章：一眼看到当前在用哪家 */}
+        <span style={{
+          position: "absolute", right: -2, bottom: -2,
+          width: 16, height: 16, borderRadius: "50%",
+          background: AI_PROVIDER_META[cfg.provider]?.color || "#6B7280",
+          color: "#fff",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 9, fontWeight: 700,
+          border: "2px solid #fff",
+          lineHeight: 1,
+        }}>
+          {AI_PROVIDER_META[cfg.provider]?.logo || "?"}
+        </span>
+      </button>
+      {open && (
+        <ProviderSwitcherPopover
+          profile={profile}
+          onClose={() => setOpen(false)}
+          onSwitched={() => setTick(t => t + 1)}
+        />
+      )}
+    </div>
+  );
 }
