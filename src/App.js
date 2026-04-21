@@ -5837,6 +5837,31 @@ function RenderMathAndChart({ content }) {
   return <MathText text={content || ""} />;
 }
 
+// ── Chat session persistence (localStorage) ────────────────────────────────
+const MC_SESSIONS_KEY = "mc_chat_sessions_v1";
+function mcLoadSessions() {
+  try { return JSON.parse(localStorage.getItem(MC_SESSIONS_KEY) || "[]") || []; } catch { return []; }
+}
+function mcSaveSessions(list) {
+  try { localStorage.setItem(MC_SESSIONS_KEY, JSON.stringify(list.slice(0, 100))); } catch {}
+}
+function mcMakeSessionId() {
+  return `s_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+function mcFormatTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+  const isYesterday = d.toDateString() === yest.toDateString();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  if (isToday) return `今天 ${hh}:${mm}`;
+  if (isYesterday) return `昨天 ${hh}:${mm}`;
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${hh}:${mm}`;
+}
+
 function MaterialChatPage({ setPage, profile }) {
   const [materials, setMaterials] = useState([]);
   const [materialId, setMaterialId] = useState("");
@@ -5844,10 +5869,84 @@ function MaterialChatPage({ setPage, profile }) {
   const [chatting, setChatting] = useState(false);
   const [history, setHistory] = useState([]);
   const [chatMode, setChatMode] = useState("chat");
+  // Session management: auto-new on material switch, history drawer to resume
+  const [sessions, setSessions] = useState(() => mcLoadSessions());
+  const [activeSessionId, setActiveSessionId] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const resumingRef = useRef(false);
   const chatEndRef = useRef(null);
   const selectedMaterial = materials.find(m => m.id === materialId);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [history]);
+
+  // ── New-session trigger: whenever the user switches material or mode,
+  // auto-archive the current thread (already persisted) and start a fresh
+  // empty conversation. A `resumingRef` guard skips this when loadSession()
+  // programmatically switches material/mode to restore a past thread.
+  useEffect(() => {
+    if (!materialId) return;
+    if (resumingRef.current) { resumingRef.current = false; return; }
+    setActiveSessionId(mcMakeSessionId());
+    setHistory([]);
+  }, [materialId, chatMode]);
+
+  // ── Persist live session: writes to localStorage whenever messages grow.
+  // Empty sessions are never recorded to keep the history drawer clean.
+  useEffect(() => {
+    if (!activeSessionId || history.length === 0) return;
+    const now = Date.now();
+    const selected = materials.find(m => m.id === materialId);
+    const firstUserMsg = history.find(h => h.role === "user")?.text || "新对话";
+    const title = String(firstUserMsg).replace(/\s+/g, " ").slice(0, 28) || "新对话";
+    setSessions(prev => {
+      const existing = prev.find(s => s.id === activeSessionId);
+      const others = prev.filter(s => s.id !== activeSessionId);
+      const entry = {
+        id: activeSessionId,
+        materialId,
+        materialTitle: selected?.title || "未命名资料",
+        materialCourse: selected?.course || "",
+        chatMode,
+        title,
+        messages: history,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      };
+      const next = [entry, ...others];
+      mcSaveSessions(next);
+      return next;
+    });
+  }, [history, activeSessionId, materialId, chatMode, materials]);
+
+  const startNewSession = () => {
+    setActiveSessionId(mcMakeSessionId());
+    setHistory([]);
+    setHistoryOpen(false);
+  };
+
+  const loadSession = (s) => {
+    resumingRef.current = true;
+    setMaterialId(s.materialId);
+    setChatMode(s.chatMode || "chat");
+    setActiveSessionId(s.id);
+    setHistory(Array.isArray(s.messages) ? s.messages : []);
+    setHistoryOpen(false);
+    setTimeout(() => { resumingRef.current = false; }, 60);
+  };
+
+  const deleteSession = (id) => {
+    setSessions(prev => {
+      const next = prev.filter(s => s.id !== id);
+      mcSaveSessions(next);
+      return next;
+    });
+    if (activeSessionId === id) startNewSession();
+  };
+
+  // Sessions scoped to the currently selected material (most recent first)
+  const materialSessions = sessions
+    .filter(s => s.materialId === materialId)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 
   useEffect(() => {
     const loadChatMaterials = async () => {
@@ -5936,7 +6035,7 @@ function MaterialChatPage({ setPage, profile }) {
 
   const canSend = !chatting && materialId && question.trim();
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden", background: "#FAFAFC" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", overflow: "hidden", background: "#FAFAFC", position: "relative" }}>
       {/* Minimalist control header */}
       <header style={{ flexShrink: 0, padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, background: "rgba(255,255,255,0.85)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)", borderBottom: "1px solid #F3F4F6", zIndex: 5, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#FAFAFC", border: "1px solid #F3F4F6", padding: "8px 14px", borderRadius: 14, flex: "0 1 auto", minWidth: 0 }}>
@@ -5946,10 +6045,45 @@ function MaterialChatPage({ setPage, profile }) {
             {materials.map(m => <option key={m.id} value={m.id}>{m.title} · {m.course || "未分类"}</option>)}
           </select>
         </div>
-        <div style={{ display: "flex", background: "#FAFAFC", border: "1px solid #F3F4F6", padding: 4, borderRadius: 14 }}>
-          {[["chat", "自由对话"], ["tutor", "复习助教"]].map(([m, l]) => (
-            <button key={m} type="button" onClick={() => { setChatMode(m); setHistory([]); }} style={{ padding: "8px 20px", borderRadius: 10, border: "none", fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: chatMode === m ? 700 : 500, background: chatMode === m ? "#FFFFFF" : "transparent", color: chatMode === m ? "#111827" : "#6B7280", boxShadow: chatMode === m ? "0 2px 8px rgba(0,0,0,0.06)" : "none", transition: "all 0.15s" }}>{l}</button>
-          ))}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", background: "#FAFAFC", border: "1px solid #F3F4F6", padding: 4, borderRadius: 14 }}>
+            {[["chat", "自由对话"], ["tutor", "复习助教"]].map(([m, l]) => (
+              <button key={m} type="button" onClick={() => setChatMode(m)} style={{ padding: "8px 20px", borderRadius: 10, border: "none", fontSize: 13, fontFamily: "inherit", cursor: "pointer", fontWeight: chatMode === m ? 700 : 500, background: chatMode === m ? "#FFFFFF" : "transparent", color: chatMode === m ? "#111827" : "#6B7280", boxShadow: chatMode === m ? "0 2px 8px rgba(0,0,0,0.06)" : "none", transition: "all 0.15s" }}>{l}</button>
+            ))}
+          </div>
+          <motion.button
+            type="button"
+            onClick={startNewSession}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
+            title="新建对话"
+            aria-label="新建对话"
+            style={{ width: 38, height: 38, borderRadius: 12, background: "#FAFAFC", border: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontFamily: "inherit" }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            </svg>
+          </motion.button>
+          <motion.button
+            type="button"
+            onClick={() => setHistoryOpen(true)}
+            whileHover={{ scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
+            title="历史对话"
+            aria-label="历史对话"
+            style={{ position: "relative", height: 38, padding: "0 12px", borderRadius: 12, background: "#FAFAFC", border: "1px solid #F3F4F6", display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontFamily: "inherit" }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#111827" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+              <polyline points="3 3 3 8 8 8" />
+              <polyline points="12 7 12 12 15 14" />
+            </svg>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>历史</span>
+            {materialSessions.length > 0 && (
+              <span style={{ minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, background: "#6366F1", color: "#fff", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", letterSpacing: 0 }}>{materialSessions.length}</span>
+            )}
+          </motion.button>
         </div>
       </header>
 
@@ -6032,6 +6166,119 @@ function MaterialChatPage({ setPage, profile }) {
           </motion.button>
         </div>
       </div>
+
+      {/* History Drawer — sessions for current material, right-side slide-in */}
+      <AnimatePresence>
+        {historyOpen && (
+          <>
+            <motion.div
+              key="mc-hist-scrim"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              onClick={() => setHistoryOpen(false)}
+              style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.28)", zIndex: 20, backdropFilter: "blur(2px)", WebkitBackdropFilter: "blur(2px)" }}
+            />
+            <motion.aside
+              key="mc-hist-drawer"
+              initial={{ x: 420, opacity: 0.2 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 420, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 280, damping: 30 }}
+              style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: 380, maxWidth: "92%", background: "#FFFFFF", borderLeft: "1px solid #F3F4F6", boxShadow: "-20px 0 40px rgba(0,0,0,0.06)", zIndex: 25, display: "flex", flexDirection: "column" }}
+            >
+              <header style={{ flexShrink: 0, padding: "20px 24px 16px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: "#111827", letterSpacing: "-0.01em" }}>历史对话</span>
+                  <span style={{ fontSize: 12, color: "#6B7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {selectedMaterial ? `当前资料：${selectedMaterial.title}` : "请先选择资料"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHistoryOpen(false)}
+                  aria-label="关闭"
+                  style={{ width: 32, height: 32, borderRadius: 10, background: "#FAFAFC", border: "1px solid #F3F4F6", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </header>
+
+              <div style={{ padding: "14px 20px 8px", flexShrink: 0 }}>
+                <motion.button
+                  type="button"
+                  onClick={startNewSession}
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.99 }}
+                  style={{ width: "100%", padding: "12px 16px", borderRadius: 14, background: "#111827", color: "#FFFFFF", border: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, boxShadow: "0 4px 14px rgba(17,24,39,0.15)" }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  新建对话
+                </motion.button>
+              </div>
+
+              <div style={{ flex: 1, overflowY: "auto", padding: "6px 14px 20px" }}>
+                {materialSessions.length === 0 ? (
+                  <div style={{ padding: "48px 24px", textAlign: "center", color: "#9CA3AF" }}>
+                    <div style={{ width: 48, height: 48, borderRadius: 14, background: "#FAFAFC", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    </div>
+                    <p style={{ margin: 0, fontSize: 13, fontWeight: 500 }}>这份资料还没有历史对话</p>
+                    <p style={{ margin: "4px 0 0", fontSize: 12, color: "#BDBFC6" }}>开始提问即可自动保存</p>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {materialSessions.map(s => {
+                      const isActive = s.id === activeSessionId;
+                      const modeLabel = s.chatMode === "tutor" ? "复习助教" : "自由对话";
+                      const msgCount = Array.isArray(s.messages) ? s.messages.length : 0;
+                      return (
+                        <motion.div
+                          key={s.id}
+                          whileHover={{ y: -1 }}
+                          transition={{ type: "spring", stiffness: 300, damping: 24 }}
+                          style={{ position: "relative", padding: "12px 14px", borderRadius: 14, border: isActive ? "1px solid #6366F1" : "1px solid #F3F4F6", background: isActive ? "#EEF2FF" : "#FFFFFF", cursor: "pointer", transition: "background 0.15s" }}
+                          onClick={() => loadSession(s)}
+                        >
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                            <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: isActive ? "#6366F1" : "#FAFAFC", border: isActive ? "none" : "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isActive ? "#FFFFFF" : "#6B7280"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", lineHeight: 1.3 }}>
+                                {s.title || "新对话"}
+                              </div>
+                              <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 6, color: "#6B7280", fontSize: 11, flexWrap: "wrap" }}>
+                                <span>{mcFormatTime(s.updatedAt)}</span>
+                                <span style={{ width: 2, height: 2, borderRadius: 999, background: "#D1D5DB" }} />
+                                <span style={{ padding: "1px 7px", borderRadius: 999, background: isActive ? "rgba(99,102,241,0.14)" : "#F3F4F6", color: isActive ? "#4F46E5" : "#6B7280", fontWeight: 600 }}>{modeLabel}</span>
+                                <span style={{ width: 2, height: 2, borderRadius: 999, background: "#D1D5DB" }} />
+                                <span>{msgCount} 条</span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }}
+                              aria-label="删除对话"
+                              title="删除"
+                              style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 8, background: "transparent", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.6, fontFamily: "inherit" }}
+                              onMouseEnter={(e) => { e.currentTarget.style.opacity = 1; e.currentTarget.style.background = "#FEE2E2"; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.opacity = 0.6; e.currentTarget.style.background = "transparent"; }}
+                            >
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+                            </button>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
