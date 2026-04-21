@@ -4,7 +4,7 @@ import katex from "katex";
 import { AnimatePresence, motion } from "framer-motion";
 import { useMathStore } from "./store/useMathStore";
 import QuizPageView from "./pages/QuizPage";
-import MaterialChatPageView from "./pages/MaterialChatPage";
+import MaterialChatPageView, { DynamicVizCard, normalizeVizIntent } from "./pages/MaterialChatPage";
 import InteractiveMathChart from "./components/InteractiveMathChart";
 import StudyWorkspace from "./layouts/StudyWorkspace";
 import SprintWorkspace from "./layouts/SprintWorkspace";
@@ -4147,6 +4147,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [aiMessages, setAIMessages] = useState([]);
   const [aiIsBusy, setAIIsBusy] = useState(false);
   const aiScrollRef = useRef(null);
+  // 全屏可视化实验室入口（来自 MaterialChatPage 的同一套工具）
+  const openLab = useMathStore((s) => s.openLab);
   const [quizCount, setQuizCount] = useState(10);
   const [timerOn, setTimerOn] = useState(!!isSprint);
   // 新版设置界面状态
@@ -5322,8 +5324,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                 对话即将开始…
               </div>
             )}
-            {aiMessages.map((m) => (
-              m.role === "user" ? (
+            {aiMessages.map((m, mi) => {
+              const isLastAssistant = m.role === "assistant" && !m.isStreaming && !m.isError && m.content &&
+                mi === aiMessages.length - 1;
+              const blocks = m.role === "assistant" && !m.isError ? splitQuizChatBlocks(m.content) : null;
+              return m.role === "user" ? (
                 <div key={m.id} style={{ display: "flex", justifyContent: "flex-end", margin: "10px 0" }}>
                   <div style={{
                     maxWidth: "78%",
@@ -5348,7 +5353,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                     fontSize: 15, marginTop: 2,
                   }}>💬</div>
                   <div style={{
-                    maxWidth: "78%",
+                    maxWidth: "82%",
                     background: m.isError ? "#FEF3C7" : "#F3F4F6",
                     color: m.isError ? "#92400E" : "var(--text-primary)",
                     padding: "10px 14px",
@@ -5364,20 +5369,74 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                         <span className="mc-typing-dot" style={{ animationDelay: "150ms" }} />
                         <span className="mc-typing-dot" style={{ animationDelay: "300ms" }} />
                       </span>
-                    ) : (
+                    ) : m.isError ? (
                       <>
                         <MathText text={m.content} />
-                        {m.isError && (
-                          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                            <Btn size="sm" variant="primary" onClick={() => { if (lastAskInput) sendChatMessage(lastAskInput); }}>重试</Btn>
+                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                          <Btn size="sm" variant="primary" onClick={() => { if (lastAskInput) sendChatMessage(lastAskInput); }}>重试</Btn>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {blocks && blocks.map((b, bi) => (
+                          b.type === "text" ? (
+                            b.content.trim() ? <MathText key={bi} text={b.content} /> : null
+                          ) : (
+                            // [VIZ:...] → 渲染预览卡（点击进入 InteractiveLab 全屏）
+                            (() => {
+                              const intent = normalizeVizIntent(b.content);
+                              if (!intent) {
+                                return (
+                                  <div key={bi} style={{ margin: "8px 0", padding: 10, background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 10, fontSize: 12, color: "#92400E" }}>
+                                    AI 给出的可视化指令解析失败 —— 已折叠。
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div key={bi} style={{ margin: "10px 0 6px", display: "flex" }}>
+                                  <DynamicVizCard intent={intent} onOpen={() => openLab(intent)} />
+                                </div>
+                              );
+                            })()
+                          )
+                        ))}
+                        {/* 快捷追问 —— 只对最后一条完成态的 AI 消息显示，把能力暴露给用户 */}
+                        {isLastAssistant && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12, paddingTop: 10, borderTop: "1px dashed rgba(0,0,0,0.08)" }}>
+                            <span style={{ fontSize: 11, color: "#6B7280", marginRight: 2, alignSelf: "center" }}>💡 你可能想:</span>
+                            {[
+                              { label: "🎨 画一张图", text: "能给我画一张可视化图吗？用最直观的结构把关键逻辑画出来。" },
+                              { label: "📐 分步推导", text: "能把这个知识点分步骤推导一下吗？" },
+                              { label: "📊 对比相关概念", text: "能把相关的概念放在一起做一次对比吗？" },
+                              { label: "🔍 举个例子", text: "能举一个具体的例子说明吗？" },
+                            ].map((chip, ci) => (
+                              <button
+                                key={ci}
+                                onClick={() => { if (!aiIsBusy) sendChatMessage(chip.text); }}
+                                disabled={aiIsBusy}
+                                style={{
+                                  fontSize: 11.5, padding: "4px 10px", borderRadius: 999,
+                                  border: "1px solid rgba(99,102,241,0.25)",
+                                  background: "#FFFFFF", color: "#4338CA",
+                                  cursor: aiIsBusy ? "not-allowed" : "pointer",
+                                  opacity: aiIsBusy ? 0.5 : 1,
+                                  transition: "all 0.15s ease",
+                                  fontFamily: "inherit", fontWeight: 600,
+                                }}
+                                onMouseEnter={(e) => { if (!aiIsBusy) { e.currentTarget.style.background = "#EEF2FF"; e.currentTarget.style.borderColor = "rgba(99,102,241,0.5)"; } }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = "#FFFFFF"; e.currentTarget.style.borderColor = "rgba(99,102,241,0.25)"; }}
+                              >
+                                {chip.label}
+                              </button>
+                            ))}
                           </div>
                         )}
                       </>
                     )}
                   </div>
                 </div>
-              )
-            ))}
+              );
+            })}
           </div>
 
           {/* 输入区 */}
@@ -6695,6 +6754,39 @@ function SimpleChart({ config }) {
 // ── 小测/解析场景下的"裸公式抢救器" ────────────────────────────────
 // AI 偶尔会把数学内容吐成纯文本（如 "d²θ/dt² + sinθ = 0"、"u(x) = e^∫p(x)dx"）。
 // 这里用保守的模式匹配补上 $...$ 包裹，避免前端展平成 "d t 2"。
+// ── 从 AI 回复里切出 [VIZ:{...}] 工具调用 —— 用于 QuizPage 的内联对话流 ──
+// 返回 [{type:"text", content}, {type:"viz", content (raw JSON string)}, ...]
+function splitQuizChatBlocks(text) {
+  if (!text) return [];
+  const src = String(text);
+  const out = [];
+  let buf = "";
+  let i = 0;
+  const flushText = () => {
+    if (buf) { out.push({ type: "text", content: buf }); buf = ""; }
+  };
+  while (i < src.length) {
+    // [VIZ:{...}] 或 [CHART:{...}] 兼容
+    const prefix = src.slice(i, i + 5) === "[VIZ:" ? "[VIZ:" : src.slice(i, i + 7) === "[CHART:" ? "[CHART:" : null;
+    if (prefix) {
+      let depth = 1, j = i + prefix.length;
+      while (j < src.length && depth > 0) {
+        if (src[j] === "[") depth++;
+        else if (src[j] === "]") depth--;
+        j++;
+      }
+      flushText();
+      out.push({ type: "viz", content: src.slice(i + prefix.length, j - 1).trim() });
+      i = j;
+      continue;
+    }
+    buf += src[i];
+    i++;
+  }
+  flushText();
+  return out;
+}
+
 function rescueQuizMath(input) {
   if (!input) return "";
   const parts = String(input).split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g);

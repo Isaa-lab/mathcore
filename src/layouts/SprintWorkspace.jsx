@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import InteractiveLab from "./InteractiveLab";
 
 function VerticalMiniCalendar() {
   const [selectedDate, setSelectedDate] = useState(new Date().getDate());
@@ -168,6 +169,7 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewPlan, onView
           </motion.div>
         </AnimatePresence>
       </div>
+      <InteractiveLab />
     </div>
   );
 }

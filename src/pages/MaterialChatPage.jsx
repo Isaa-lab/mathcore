@@ -239,7 +239,7 @@ const VIZ_DICTIONARY = {
 };
 
 // Normalize any incoming viz config into a canonical `vizIntent` shape
-function normalizeVizIntent(rawOrJson) {
+export function normalizeVizIntent(rawOrJson) {
   if (!rawOrJson) return null;
   let cfg = rawOrJson;
   if (typeof rawOrJson === "string") {
@@ -278,7 +278,7 @@ function normalizeVizIntent(rawOrJson) {
 }
 
 // ── DynamicVizCard — metadata-driven preview chip ──────────────────────────
-function DynamicVizCard({ intent, onOpen }) {
+export function DynamicVizCard({ intent, onOpen }) {
   const structure = intent?.structure && VIZ_DICTIONARY[intent.structure] ? intent.structure : "parametric";
   const cfg = VIZ_DICTIONARY[structure];
   const level = intent?.interactionLevel || "L1";
