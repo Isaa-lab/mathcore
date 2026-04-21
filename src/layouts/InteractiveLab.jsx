@@ -362,73 +362,199 @@ function TreeNode({ node, depth, accent, path }) {
 // ───────────────────────────────────────────────────────────────────────────
 //                            STAGE 3: PROCESS
 // ───────────────────────────────────────────────────────────────────────────
+// 把 "$a$ 行内" 和 "$$a$$ 块级" 渲染成 KaTeX；其余走纯文本。
+// 之前 ProcessStage 只展示 title/desc/formula，Groq 新输出的 narrative/math/insight/substeps
+// 全部被丢弃，详情页就显得空。这个 helper 让 narrative / insight 里的内联 LaTeX 也能直接渲染。
+function renderInlineKatex(text) {
+  if (text == null) return null;
+  const str = String(text);
+  const parts = str.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g);
+  return parts.map((part, i) => {
+    if (!part) return null;
+    if (part.startsWith("$$") && part.endsWith("$$") && part.length > 4) {
+      try {
+        const html = katex.renderToString(part.slice(2, -2).trim(), { throwOnError: false, displayMode: true });
+        return <span key={i} style={{ display: "block", overflowX: "auto", margin: "8px 0" }} dangerouslySetInnerHTML={{ __html: html }} />;
+      } catch { return <code key={i}>{part}</code>; }
+    }
+    if (part.startsWith("$") && part.endsWith("$") && part.length > 2) {
+      try {
+        const html = katex.renderToString(part.slice(1, -1).trim(), { throwOnError: false, displayMode: false });
+        return <span key={i} dangerouslySetInnerHTML={{ __html: html }} />;
+      } catch { return <code key={i}>{part}</code>; }
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
+function renderBlockKatex(latex) {
+  if (!latex) return null;
+  try {
+    const html = katex.renderToString(String(latex), { throwOnError: false, displayMode: true });
+    return <span style={{ display: "block", overflowX: "auto" }} dangerouslySetInnerHTML={{ __html: html }} />;
+  } catch {
+    return <code style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13 }}>{String(latex)}</code>;
+  }
+}
+
+// 归一化单步：兼容 Schema v1（title/desc/formula）和 Schema v2（title/narrative/math.latex/insight/substeps）。
+function normalizeProcessStep(raw, idx) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const title = (typeof src.title === "string" && src.title.trim()) || `第 ${idx + 1} 步`;
+  const narrative = typeof src.narrative === "string" && src.narrative.trim()
+    ? src.narrative.trim()
+    : (typeof src.desc === "string" ? src.desc.trim() : "");
+  let math = null;
+  if (src.math && typeof src.math === "object" && (src.math.latex || src.math.explanation)) {
+    math = {
+      latex: typeof src.math.latex === "string" ? src.math.latex : "",
+      explanation: typeof src.math.explanation === "string" ? src.math.explanation : "",
+    };
+  } else if (typeof src.formula === "string" && src.formula.trim()) {
+    // 旧 schema 里 formula 可能是 LaTeX，也可能只是一段等式字符串 —— 都塞进 math.latex 让 KaTeX 试着渲
+    math = { latex: src.formula.trim(), explanation: "" };
+  }
+  const insight = typeof src.insight === "string" ? src.insight.trim() : "";
+  const substeps = Array.isArray(src.substeps) ? src.substeps.filter((s) => typeof s === "string" && s.trim()) : [];
+  const connects = typeof src.connects_to_next === "string" ? src.connects_to_next.trim() : "";
+  return { title, narrative, math, insight, substeps, connects };
+}
+
 function ProcessStage({ intent, accent }) {
-  const steps = Array.isArray(intent?.data?.steps) && intent.data.steps.length > 0
+  const rawSteps = Array.isArray(intent?.data?.steps) && intent.data.steps.length > 0
     ? intent.data.steps
-    : [{ title: "暂无步骤", desc: "AI 未提供步骤数据" }];
+    : [{ title: "暂无步骤", narrative: "AI 未提供步骤数据" }];
+  const steps = rawSteps.map((s, i) => normalizeProcessStep(s, i));
   const [active, setActive] = useState(0);
 
-  return (
-    <div style={{ flex: 1, padding: 32, display: "flex", gap: 28, minHeight: 0 }}>
-      <div style={{ width: 380, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
-        {steps.map((step, i) => {
-          const isActive = i === active;
-          const isPast = i < active;
-          return (
-            <motion.button
-              key={i}
-              type="button"
-              onClick={() => setActive(i)}
-              whileHover={{ y: -1 }}
-              transition={{ type: "spring", stiffness: 300, damping: 24 }}
-              style={{
-                display: "flex", alignItems: "flex-start", gap: 12,
-                padding: "14px 16px", borderRadius: 16,
-                background: isActive ? accent.bg : "#FFFFFF",
-                border: `1px solid ${isActive ? accent.accent : "#F3F4F6"}`,
-                boxShadow: isActive ? `0 8px 24px ${accent.accent}22` : "0 2px 8px rgba(0,0,0,0.02)",
-                cursor: "pointer", fontFamily: "inherit", textAlign: "left",
-              }}
-            >
-              <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 999, background: isActive ? accent.accent : (isPast ? "#FFFFFF" : "#FAFAFC"), border: `2px solid ${isActive || isPast ? accent.accent : "#E5E7EB"}`, display: "flex", alignItems: "center", justifyContent: "center", color: isActive ? "#FFFFFF" : accent.fg, fontSize: 13, fontWeight: 800 }}>
-                {isPast ? <IconCheck size={14} color={accent.accent} /> : i + 1}
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 800, color: isActive ? accent.fg : "#111827", letterSpacing: "-0.01em" }}>{step.title}</div>
-                {step.desc && <div style={{ marginTop: 3, fontSize: 12, color: "#6B7280", lineHeight: 1.55, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{step.desc}</div>}
-              </div>
-            </motion.button>
-          );
-        })}
-      </div>
+  // 顶层叙事元数据（Schema v2 新增）：title / subtitle / conclusion
+  const dataTitle = typeof intent?.data?.title === "string" ? intent.data.title.trim() : "";
+  const subtitle = typeof intent?.data?.subtitle === "string" ? intent.data.subtitle.trim() : "";
+  const conclusion = typeof intent?.data?.conclusion === "string" ? intent.data.conclusion.trim() : "";
 
-      <div style={{ flex: 1, background: "#FFFFFF", borderRadius: 28, padding: "40px 48px", border: "1px solid #F3F4F6", boxShadow: "0 15px 50px rgba(0,0,0,0.04)", overflowY: "auto" }}>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={active}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.18 }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-              <span style={{ padding: "3px 10px", borderRadius: 999, background: accent.bg, color: accent.fg, fontSize: 11, fontWeight: 800, letterSpacing: "0.06em" }}>STEP {active + 1} / {steps.length}</span>
-              <span style={{ height: 3, flex: 1, background: "#F3F4F6", borderRadius: 999, overflow: "hidden" }}>
-                <motion.span style={{ display: "block", height: "100%", background: accent.accent, borderRadius: 999 }} initial={{ width: 0 }} animate={{ width: `${((active + 1) / steps.length) * 100}%` }} transition={{ type: "spring", stiffness: 220, damping: 26 }} />
-              </span>
+  const current = steps[active] || steps[0];
+
+  return (
+    <div style={{ flex: 1, padding: 32, display: "flex", flexDirection: "column", gap: 18, minHeight: 0 }}>
+      {/* 顶部叙事横幅：题目标题 + 聚焦副标题 + 结论（若有）—— 给"为什么学这一串步骤"定调 */}
+      {(dataTitle || subtitle || conclusion) && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "14px 20px", borderRadius: 18, background: `linear-gradient(135deg, ${accent.bg} 0%, #FFFFFF 100%)`, border: `1px solid ${accent.accent}33` }}>
+          {dataTitle && <div style={{ fontSize: 17, fontWeight: 800, color: "#111827", letterSpacing: "-0.015em" }}>{renderInlineKatex(dataTitle)}</div>}
+          {subtitle && <div style={{ fontSize: 13, color: "#4B5563", fontStyle: "italic" }}>{renderInlineKatex(subtitle)}</div>}
+          {conclusion && (
+            <div style={{ marginTop: 2, display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, color: accent.fg, fontWeight: 700 }}>
+              <span style={{ flexShrink: 0 }}>🎯</span>
+              <span style={{ fontWeight: 600, color: "#111827" }}>最终结论：{renderInlineKatex(conclusion)}</span>
             </div>
-            <h2 style={{ margin: "0 0 14px", fontSize: 24, fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.3 }}>{steps[active].title}</h2>
-            <p style={{ margin: 0, fontSize: 14.5, color: "#374151", lineHeight: 1.75, whiteSpace: "pre-wrap" }}>{steps[active].desc || "（无说明）"}</p>
-            {steps[active].formula && (
-              <div style={{ marginTop: 20, padding: "16px 20px", background: "#0F172A", borderRadius: 16, color: "#E0E7FF", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 14 }}>
-                {steps[active].formula}
+          )}
+        </div>
+      )}
+
+      <div style={{ flex: 1, display: "flex", gap: 28, minHeight: 0 }}>
+        <div style={{ width: 380, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+          {steps.map((step, i) => {
+            const isActive = i === active;
+            const isPast = i < active;
+            return (
+              <motion.button
+                key={i}
+                type="button"
+                onClick={() => setActive(i)}
+                whileHover={{ y: -1 }}
+                transition={{ type: "spring", stiffness: 300, damping: 24 }}
+                style={{
+                  display: "flex", alignItems: "flex-start", gap: 12,
+                  padding: "14px 16px", borderRadius: 16,
+                  background: isActive ? accent.bg : "#FFFFFF",
+                  border: `1px solid ${isActive ? accent.accent : "#F3F4F6"}`,
+                  boxShadow: isActive ? `0 8px 24px ${accent.accent}22` : "0 2px 8px rgba(0,0,0,0.02)",
+                  cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                }}
+              >
+                <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 999, background: isActive ? accent.accent : (isPast ? "#FFFFFF" : "#FAFAFC"), border: `2px solid ${isActive || isPast ? accent.accent : "#E5E7EB"}`, display: "flex", alignItems: "center", justifyContent: "center", color: isActive ? "#FFFFFF" : accent.fg, fontSize: 13, fontWeight: 800 }}>
+                  {isPast ? <IconCheck size={14} color={accent.accent} /> : i + 1}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 800, color: isActive ? accent.fg : "#111827", letterSpacing: "-0.01em", lineHeight: 1.35 }}>{step.title}</div>
+                  {step.narrative && <div style={{ marginTop: 3, fontSize: 12, color: "#6B7280", lineHeight: 1.55, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{step.narrative}</div>}
+                </div>
+              </motion.button>
+            );
+          })}
+        </div>
+
+        <div style={{ flex: 1, background: "#FFFFFF", borderRadius: 28, padding: "36px 44px", border: "1px solid #F3F4F6", boxShadow: "0 15px 50px rgba(0,0,0,0.04)", overflowY: "auto" }}>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={active}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <span style={{ padding: "3px 10px", borderRadius: 999, background: accent.bg, color: accent.fg, fontSize: 11, fontWeight: 800, letterSpacing: "0.06em" }}>STEP {active + 1} / {steps.length}</span>
+                <span style={{ height: 3, flex: 1, background: "#F3F4F6", borderRadius: 999, overflow: "hidden" }}>
+                  <motion.span style={{ display: "block", height: "100%", background: accent.accent, borderRadius: 999 }} initial={{ width: 0 }} animate={{ width: `${((active + 1) / steps.length) * 100}%` }} transition={{ type: "spring", stiffness: 220, damping: 26 }} />
+                </span>
               </div>
-            )}
-          </motion.div>
-        </AnimatePresence>
-        <div style={{ marginTop: 32, display: "flex", justifyContent: "space-between", gap: 10 }}>
-          <motion.button type="button" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setActive((v) => Math.max(0, v - 1))} disabled={active === 0} style={{ padding: "10px 20px", borderRadius: 12, background: "#FAFAFC", border: "1px solid #F3F4F6", fontSize: 13, fontWeight: 700, color: active === 0 ? "#CBD5E1" : "#111827", cursor: active === 0 ? "not-allowed" : "pointer", fontFamily: "inherit" }}>← 上一步</motion.button>
-          <motion.button type="button" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setActive((v) => Math.min(steps.length - 1, v + 1))} disabled={active === steps.length - 1} style={{ padding: "10px 20px", borderRadius: 12, background: active === steps.length - 1 ? "#FAFAFC" : "#111827", border: active === steps.length - 1 ? "1px solid #F3F4F6" : "none", fontSize: 13, fontWeight: 700, color: active === steps.length - 1 ? "#CBD5E1" : "#FFFFFF", cursor: active === steps.length - 1 ? "not-allowed" : "pointer", fontFamily: "inherit" }}>下一步 →</motion.button>
+
+              <h2 style={{ margin: "0 0 14px", fontSize: 24, fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.3 }}>
+                {renderInlineKatex(current.title)}
+              </h2>
+
+              {current.narrative && (
+                <p style={{ margin: 0, fontSize: 14.5, color: "#374151", lineHeight: 1.75 }}>
+                  {renderInlineKatex(current.narrative)}
+                </p>
+              )}
+
+              {/* math.latex 块级渲染 + explanation 副标题 —— 这是 Schema v2 的核心展示位 */}
+              {current.math && current.math.latex && (
+                <div style={{ marginTop: 22, padding: "20px 24px", background: "#0F172A", borderRadius: 16, color: "#E0E7FF" }}>
+                  <div style={{ fontSize: 16, color: "#E0E7FF" }}>{renderBlockKatex(current.math.latex)}</div>
+                  {current.math.explanation && (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(148,163,184,0.25)", fontSize: 12.5, color: "#CBD5E1", lineHeight: 1.6 }}>
+                      {renderInlineKatex(current.math.explanation)}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 细分小步骤 */}
+              {current.substeps && current.substeps.length > 0 && (
+                <ul style={{ marginTop: 20, paddingLeft: 20, display: "flex", flexDirection: "column", gap: 6 }}>
+                  {current.substeps.map((ss, i) => (
+                    <li key={i} style={{ fontSize: 13.5, color: "#374151", lineHeight: 1.65 }}>
+                      {renderInlineKatex(ss)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* 关键洞察 —— 这一步能让人"豁然开朗"的那句 */}
+              {current.insight && (
+                <div style={{ marginTop: 22, padding: "14px 18px", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 14, display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <span style={{ flexShrink: 0, fontSize: 16, lineHeight: 1, marginTop: 1 }}>💡</span>
+                  <div style={{ flex: 1, fontSize: 13.5, color: "#92400E", lineHeight: 1.65, fontWeight: 600 }}>
+                    {renderInlineKatex(current.insight)}
+                  </div>
+                </div>
+              )}
+
+              {/* 过渡到下一步 */}
+              {current.connects && active < steps.length - 1 && (
+                <div style={{ marginTop: 14, fontSize: 12, color: "#6B7280", fontStyle: "italic" }}>
+                  → {renderInlineKatex(current.connects)}
+                </div>
+              )}
+            </motion.div>
+          </AnimatePresence>
+
+          <div style={{ marginTop: 32, display: "flex", justifyContent: "space-between", gap: 10 }}>
+            <motion.button type="button" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setActive((v) => Math.max(0, v - 1))} disabled={active === 0} style={{ padding: "10px 20px", borderRadius: 12, background: "#FAFAFC", border: "1px solid #F3F4F6", fontSize: 13, fontWeight: 700, color: active === 0 ? "#CBD5E1" : "#111827", cursor: active === 0 ? "not-allowed" : "pointer", fontFamily: "inherit" }}>← 上一步</motion.button>
+            <motion.button type="button" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} onClick={() => setActive((v) => Math.min(steps.length - 1, v + 1))} disabled={active === steps.length - 1} style={{ padding: "10px 20px", borderRadius: 12, background: active === steps.length - 1 ? "#FAFAFC" : "#111827", border: active === steps.length - 1 ? "1px solid #F3F4F6" : "none", fontSize: 13, fontWeight: 700, color: active === steps.length - 1 ? "#CBD5E1" : "#FFFFFF", cursor: active === steps.length - 1 ? "not-allowed" : "pointer", fontFamily: "inherit" }}>下一步 →</motion.button>
+          </div>
         </div>
       </div>
     </div>

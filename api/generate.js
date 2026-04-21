@@ -97,19 +97,19 @@ async function runHandler(req, res) {
     gemini: {
       preferredStructures: ["hierarchy", "process", "comparison", "concept"],
       maxVizPerReply: 1,
-      extraConstraint: "⚠️ Gemini 专属约束：优先用 LaTeX 写公式，只在真的需要『结构图』时画 [VIZ:...]。画图时 structure 必须在 {hierarchy, process, comparison, concept} 四种里选，禁用 annotation 和 parametric（这两种 LaTeX 嵌套多，你画不稳）。\n画 concept 图时要求节点 8-12 个、覆盖 ≥4 个 dimension，不要只画两三个节点糊弄。",
+      extraConstraint: "⚠️ Gemini 专属约束：优先用 LaTeX 写公式，只在真的需要『结构图』时画 [VIZ:...]。画图时 structure 必须在 {hierarchy, process, comparison, concept} 四种里选，禁用 annotation 和 parametric（这两种 LaTeX 嵌套多，你画不稳）。\n画 concept 图时要求节点 8-12 个、覆盖 ≥4 个 dimension，不要只画两三个节点糊弄。\n画 process 图必须 4-7 个 step，每个 step 都写 narrative + math.latex + insight；禁用\"步骤1/第一步/考虑简单情况\"这种占位表述。",
     },
     groq: {
       // Groq 上 llama-3.1-8b 非常不稳，结构严格限制，但 concept 必须放开——
       // 知识图谱是它最常见的可视化请求之一，屏蔽掉会退化成平铺文字。
       preferredStructures: ["hierarchy", "process", "comparison", "concept"],
       maxVizPerReply: 1,
-      extraConstraint: "⚠️ 你是 Llama 模型，结构化 JSON 能力有限。为避免括号/反斜杠错误：\n· 每轮最多一个 [VIZ:...]\n· structure 只允许用 hierarchy / process / comparison / concept 四种（避免 annotation/parametric 这种 LaTeX 深嵌套）\n· data 不要超过 4 层嵌套\n· 画 concept 图时给够 8-10 个节点、10+ 条边，label 用精确术语而不是\"公式/方法\"这种模糊词；level 字段优先给（0 中心 / 1 主分支 / 2 细节）\n· 输出前逐字符数一遍花括号、方括号是否配对；不确定就直接用文字讲，不要硬画",
+      extraConstraint: "⚠️ 你是 Llama 模型，结构化 JSON 能力有限。为避免括号/反斜杠错误：\n· 每轮最多一个 [VIZ:...]\n· structure 只允许用 hierarchy / process / comparison / concept 四种（避免 annotation/parametric 这种 LaTeX 深嵌套）\n· data 不要超过 4 层嵌套\n· 画 concept 图时给够 8-10 个节点、10+ 条边，label 用精确术语而不是\"公式/方法\"这种模糊词；level 字段优先给（0 中心 / 1 主分支 / 2 细节）\n· 画 process 图必须 4-7 步（少于 4 步直接判失败）；每步 title 用具体动作短句（如\"从 2 节点最简情形出发\"），不要写\"步骤1\"\"第一步\"\"Step 1\"这类占位；每步 narrative 要写清\"做什么+为什么\"，禁止\"考虑简单情况\"\"让我们\"\"进行推导\"这类空话；至少半数步包含 math.latex；每步都要有 insight 字段。\n· 输出前逐字符数一遍花括号、方括号是否配对；不确定就直接用文字讲，不要硬画",
     },
     kimi: {
       preferredStructures: ["hierarchy", "process", "comparison", "concept"],
       maxVizPerReply: 1,
-      extraConstraint: "⚠️ 你画 [VIZ:...] 时优先用 hierarchy/process/comparison/concept 这四种浅结构，避免深嵌套。画 concept 图至少给 8 个节点并尽量标 level 字段。",
+      extraConstraint: "⚠️ 你画 [VIZ:...] 时优先用 hierarchy/process/comparison/concept 这四种浅结构，避免深嵌套。画 concept 图至少给 8 个节点并尽量标 level 字段。画 process 图 4-7 个 step，每个 step 带 narrative/math/insight，禁用\"步骤1\"\"考虑简单情况\"等占位。",
     },
     custom: { preferredStructures: ["hierarchy", "process", "comparison"], maxVizPerReply: 1, extraConstraint: "" },
   };
@@ -226,8 +226,64 @@ async function runHandler(req, res) {
   · hierarchy → 层级树：
     data:{"root":{"name":"根","children":[{"name":"一级","desc":"可选说明","children":[{"name":"二级"}]}]}}
 
-  · process → 分步展开：
-    data:{"steps":[{"title":"第1步","desc":"...","formula":"可选 LaTeX"},{"title":"第2步","desc":"..."}]}
+  · process → 分步推演（这是"逐步引导用户理解为什么"，不是简单列提纲）：
+
+    【Schema v2 — 字段规范】
+    data:{
+      "title": "推演的主题（不超过 20 字，具体的问题，不是泛泛的"解题步骤"）",
+      "subtitle": "可选，点明推演焦点，如'为什么是 n 而不是 n-1'",
+      "conclusion": "最终要得出的核心结论，1 句话",
+      "steps": [
+        {
+          "title": "精确的动作短句 8-20 字（禁用'步骤1'/'第一步'/'Step 1'）",
+          "narrative": "1-2 句说明这一步在做什么、为什么重要（禁用'考虑简单情况'/'进行推导'/'让我们'/'接下来'等空话）",
+          "math": {
+            "latex": "相关 LaTeX 公式（反斜杠双写）",
+            "explanation": "这个公式说了什么，一句话"
+          },
+          "insight": "这一步能让人看懂的那个关键洞察（必须有，不是'这很重要'这种）"
+        }
+      ]
+    }
+    兼容：旧字段 desc / formula 仍被前端识别；但新输出请用 narrative / math.latex，这样详情页能正确展开。
+
+    【完整 Few-Shot 示例 — 严格按这个深度输出】
+    任务："Lagrange 插值次数为什么是 n 不是 n-1？"（n+1 个节点）
+    输出：
+    {"structure":"process","interactionLevel":"L2","title":"Lagrange 插值次数的推导",
+     "data":{
+       "title":"Lagrange 插值多项式次数的推导",
+       "subtitle":"n+1 个节点为什么对应次数 ≤ n",
+       "conclusion":"n+1 个节点唯一确定一个次数 ≤ n 的多项式",
+       "steps":[
+         {"title":"从 2 个节点的最简情形出发","narrative":"先看 n=1 的退化情况：只给 2 个点 (x₀,y₀),(x₁,y₁)，唯一过两点的多项式是一条直线","math":{"latex":"P(x)=y_0\\\\cdot\\\\frac{x-x_1}{x_0-x_1}+y_1\\\\cdot\\\\frac{x-x_0}{x_1-x_0}","explanation":"每个分式是 1 次多项式，线性组合次数仍为 1"},"insight":"2 节点 → 次数 1，初步规律：节点数 − 1 = 次数"},
+         {"title":"推广到 3 节点验证规律","narrative":"3 个点唯一确定一条抛物线，次数恰为 2，规律依然成立","math":{"latex":"P(x)=\\\\sum_{i=0}^{2}y_i\\\\prod_{j\\\\ne i}\\\\frac{x-x_j}{x_i-x_j}","explanation":"每个基函数 Lᵢ(x) 是 2 个一次因子之积，次数恰为 2"},"insight":"3 节点 → 次数 2，规律稳定：节点数 − 1 = 次数"},
+         {"title":"分析基函数 Lᵢ(x) 的次数","narrative":"推广到 n+1 个节点，每个基函数分子是 n 个 (x−xⱼ) 相乘","math":{"latex":"L_i(x)=\\\\prod_{j=0,j\\\\ne i}^{n}\\\\frac{x-x_j}{x_i-x_j}","explanation":"分子 n 项一次因子相乘，所以 Lᵢ 次数恰为 n"},"insight":"每个基函数次数为 n，这是整体次数的"天花板"由来"},
+         {"title":"线性组合不抬升次数","narrative":"P(x)=Σ yᵢLᵢ(x) 是有限个次数 ≤ n 的多项式的线性组合","math":{"latex":"\\\\deg(P)\\\\le\\\\max_i\\\\deg(L_i)=n","explanation":"多项式加法不会提高次数，所以整体 deg(P) ≤ n"},"insight":""次数 ≤ n" 的上界由基函数结构决定，与 yᵢ 具体取值无关"},
+         {"title":"由维数匹配确认唯一性","narrative":"次数 ≤ n 的多项式空间 ℙₙ 维数正好是 n+1，和 n+1 个插值条件恰好匹配","math":{"latex":"\\\\dim\\\\mathbb{P}_n=n+1=\\\\text{节点数}","explanation":"空间维数等于约束数 → 存在且唯一"},"insight":"结论：n+1 节点 ↔ 次数 ≤ n 的唯一多项式。答案是 n，不是 n−1"}
+       ]
+     }}
+
+    【硬指标】
+    · steps.length 必须 4-7（少于 4 判不合格，会被前端自动打回重做）
+    · 每步 title 8-20 字、精确的动作短句（"从 2 个节点的最简情形出发" ✓；"步骤1"/"第一步"/"Step 1"/"分析问题" ✗）
+    · 每步 narrative 至少 15 字、说清"做什么 + 为什么"
+    · 至少 ⌊steps.length/2⌋ 步必须含 math.latex（反斜杠双写）
+    · 每步都要有 insight（≥10 字、具体有信息量，不是"这很重要")
+    · 第 1 步必须从简单/特殊情形入手；最后 1 步必须呼应 conclusion
+
+    【narrative/title 黑名单 — 出现即不合格】
+    标题侧："步骤N"、"第N步"、"Step N"、"N."、"N、"
+    叙述侧："考虑简单情况"、"分析问题"、"进行推导"、"一步步来"、"让我们"、"接下来"、"首先"（作为整句开头且之后没有实质内容）
+
+    【输出前自检】
+    ① steps.length ∈ [4,7]？
+    ② 所有 title 都不是占位词？
+    ③ 所有 narrative 都不是黑名单空话？
+    ④ 至少半数步含 math.latex？
+    ⑤ 每步都有 insight？
+    ⑥ 最后一步呼应了 conclusion？
+    任一不满足 → 重新生成，不要提交。
 
   · comparison → 并列对比：
     data:{"columns":[{"title":"方法A","subtitle":"可选","points":[{"text":"优势","tone":"pro"},{"text":"劣势","tone":"con"},"普通点"]},{"title":"方法B","points":[...]}]}

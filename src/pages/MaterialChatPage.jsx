@@ -361,6 +361,43 @@ export function normalizeVizIntent(rawOrJson) {
   };
 }
 
+// 从 intent.data 里拎出"用户一眼能看懂"的真实计数，用在卡片角标，
+// 让"第一眼看到的数字"来自数据而不是装饰性 SVG 折线。
+// 为什么要这个：process 的预览 SVG 是硬编码 5 点折线，用户反馈说会被误以为是函数图像——
+// 补一个明确的 "5 步" 徽章能立刻消除歧义，且无须删掉原有的类型视觉身份。
+function extractCountBadge(structure, data) {
+  if (!data || typeof data !== "object") return null;
+  if (structure === "process") {
+    const n = Array.isArray(data.steps) ? data.steps.length : 0;
+    return n > 0 ? `${n} 步` : null;
+  }
+  if (structure === "concept") {
+    const n = Array.isArray(data.nodes) ? data.nodes.length : 0;
+    const e = Array.isArray(data.edges) ? data.edges.length : 0;
+    return n > 0 ? `${n} 节点 · ${e} 连接` : null;
+  }
+  if (structure === "comparison") {
+    const n = Array.isArray(data.columns) ? data.columns.length : 0;
+    return n > 0 ? `${n} 列对比` : null;
+  }
+  if (structure === "hierarchy") {
+    const countNodes = (node) => {
+      if (!node || typeof node !== "object") return 0;
+      const kids = Array.isArray(node.children) ? node.children : [];
+      return 1 + kids.reduce((s, c) => s + countNodes(c), 0);
+    };
+    const n = countNodes(data.root);
+    return n > 1 ? `${n} 节点` : null;
+  }
+  if (structure === "annotation") {
+    const n = Array.isArray(data.annotations) ? data.annotations.length
+            : Array.isArray(data.parts) ? data.parts.length
+            : 0;
+    return n > 0 ? `${n} 项标注` : null;
+  }
+  return null;
+}
+
 // ── DynamicVizCard — metadata-driven preview chip ──────────────────────────
 export function DynamicVizCard({ intent, onOpen }) {
   const structure = intent?.structure && VIZ_DICTIONARY[intent.structure] ? intent.structure : "parametric";
@@ -369,6 +406,7 @@ export function DynamicVizCard({ intent, onOpen }) {
   const isHighInteractive = level === "L2" || level === "L3";
   const title = intent?.title || "可视化";
   const StructIcon = cfg.Icon;
+  const countBadge = extractCountBadge(structure, intent?.data);
 
   const hoverLabel = isHighInteractive ? "进入全屏交互实验室" : "查看完整结构图谱";
 
@@ -390,6 +428,11 @@ export function DynamicVizCard({ intent, onOpen }) {
     >
       <div style={{ height: 84, width: "100%", background: cfg.bg, borderBottom: `1px solid ${cfg.border}`, position: "relative", overflow: "hidden" }}>
         {cfg.preview(cfg.accent)}
+        {countBadge && (
+          <div style={{ position: "absolute", top: 8, right: 8, display: "flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.96)", border: `1px solid ${cfg.border}`, fontSize: 10.5, fontWeight: 800, color: cfg.fg, letterSpacing: "0.02em", backdropFilter: "blur(4px)" }}>
+            {countBadge}
+          </div>
+        )}
         <div className="mc-viz-preview-hover" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", transition: "background 0.25s" }}>
           <div className="mc-viz-preview-chip" style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 999, background: "rgba(255,255,255,0.94)", backdropFilter: "blur(6px)", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", opacity: 0, transform: "translateY(6px)", transition: "opacity 0.22s, transform 0.22s" }}>
             <IconMaximize size={12} color={cfg.fg} />

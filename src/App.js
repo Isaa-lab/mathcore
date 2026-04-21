@@ -4840,10 +4840,17 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     const failedSnippet = String(failedBlock.content || "").slice(0, 300);
     const isQualityIssue = !failedBlock.parseError && !!failedBlock.qualityIssue;
     const reason = String(failedBlock.parseError || failedBlock.qualityIssue || "VIZ 生成未达标").slice(0, 200);
-    // 丰度问题 vs 语法问题，要给 AI 完全不同的修正指令，否则它只会原地转圈
-    const retryInstruction = isQualityIssue
-      ? `你刚才那个 [VIZ:...] 虽然 JSON 语法对了，但内容质量不合格：${reason}\n\n重新生成一次，这次必须满足：\n· 如果是 concept 结构：节点 ≥ 8（理想 10-12）个，边 ≥ 节点数 - 1；每条 edge 都要带 label 说明关系；节点至少分 level 0（1 个中心）/ level 1（3-6 个主分支）/ level 2（若干细节）两到三层；覆盖 definition/formula/construction/property/error/application/related 里至少 4 个 dimension。\n· 不要重复同样的浅薄结构。用精确的数学术语做节点名（如"基函数 Lᵢ(x)""Runge 现象""Chebyshev 节点""唯一性定理"），禁用模糊词（"公式/方法/性质/应用"）。\n· 如果真的这个知识点没那么多可画的东西，那就不画图，改用文字 + $LaTeX$ 讲清楚，不要硬凑两个节点。`
-      : `你刚才那个 [VIZ:...] 没解析成功。错误：${reason}\n失败片段前 300 字：\n${failedSnippet}\n\n请重做这条回复——文字部分可以保留或微调，但 [VIZ:...] 必须换用最简单的结构（从 hierarchy / process / comparison 中选一种），避免深嵌套和 LaTeX 反斜杠错误。如果这个知识点本来就不需要画图，就完全不画图，只用文字 + $LaTeX$ 讲清楚。再试一次。`;
+    const failedStructure = failedBlock?.intent?.structure || "";
+    // 丰度问题 vs 语法问题，要给 AI 完全不同的修正指令，否则它只会原地转圈。
+    // 质量问题里 concept / process 又要走不同的详细指令——前者是"网太稀"，后者是"推演太薄"。
+    let retryInstruction;
+    if (isQualityIssue && failedStructure === "process") {
+      retryInstruction = `你刚才那个 [VIZ:{structure:"process",...}] JSON 语法没问题，但推演质量不合格：${reason}\n\n重新生成这个 process 图，必须同时满足：\n· steps.length ∈ [4,7]（必须至少 4 步，不是 1-2 步糊弄）\n· 每个 step 的 title 是具体的动作短句（如"从 2 节点最简情形出发""分析基函数 Lᵢ(x) 的次数"），禁用"步骤1/第一步/Step 1/分析问题/考虑简单情况"这类占位词\n· 每个 step 必须有 narrative（1-2 句说清"做什么 + 为什么"），禁用"让我们/接下来/首先/考虑简单情况/一步步来"作为句子主体\n· 至少一半 step 包含 math: { latex, explanation }，latex 里反斜杠双写\n· 每个 step 都要有 insight 字段（≥10 字的关键洞察，不是"这很重要"）\n· data 顶层请给 title / conclusion；最后一步要呼应 conclusion\n· 第 1 步从简单/特殊情形入手，最后 1 步给出结论\n\n如果这道题/这个知识点本来就不需要 4 步以上的推演（比如就是一个定义回忆），请不要画 process 图，改用纯文字 + $LaTeX$ 说清楚——硬凑 1 个"步骤1：考虑简单情况"比不画还糟。`;
+    } else if (isQualityIssue) {
+      retryInstruction = `你刚才那个 [VIZ:...] 虽然 JSON 语法对了，但内容质量不合格：${reason}\n\n重新生成一次，这次必须满足：\n· 如果是 concept 结构：节点 ≥ 8（理想 10-12）个，边 ≥ 节点数 - 1；每条 edge 都要带 label 说明关系；节点至少分 level 0（1 个中心）/ level 1（3-6 个主分支）/ level 2（若干细节）两到三层；覆盖 definition/formula/construction/property/error/application/related 里至少 4 个 dimension。\n· 不要重复同样的浅薄结构。用精确的数学术语做节点名（如"基函数 Lᵢ(x)""Runge 现象""Chebyshev 节点""唯一性定理"），禁用模糊词（"公式/方法/性质/应用"）。\n· 如果真的这个知识点没那么多可画的东西，那就不画图，改用文字 + $LaTeX$ 讲清楚，不要硬凑两个节点。`;
+    } else {
+      retryInstruction = `你刚才那个 [VIZ:...] 没解析成功。错误：${reason}\n失败片段前 300 字：\n${failedSnippet}\n\n请重做这条回复——文字部分可以保留或微调，但 [VIZ:...] 必须换用最简单的结构（从 hierarchy / process / comparison 中选一种），避免深嵌套和 LaTeX 反斜杠错误。如果这个知识点本来就不需要画图，就完全不画图，只用文字 + $LaTeX$ 讲清楚。再试一次。`;
+    }
     const retryHistory = [
       ...(priorHistory || []),
       { role: "user", content: originalUserText },
@@ -7400,6 +7407,44 @@ function splitQuizChatBlocks(text) {
           qualityIssue = `concept 图内容太稀薄：只有 ${nodes.length} 个节点（应 ≥ 8），缺少知识图谱应有的丰度`;
         } else if (edges.length < Math.max(nodes.length - 1, 4)) {
           qualityIssue = `concept 图连接太少：${edges.length} 条边串起 ${nodes.length} 个节点（应 ≥ ${nodes.length - 1}），关系网络不成立`;
+        }
+      }
+      // ── process 结构的深度守门：1 步、占位标题、黑名单空话都放行即等于白画 ──
+      // 这里的判据和后端 prompt 里的硬指标 + 黑名单严格对齐
+      if (intent && !parseError && intent.structure === "process") {
+        const steps = Array.isArray(intent.data?.steps) ? intent.data.steps : [];
+        const TITLE_BL = [/^\s*步骤\s*\d+\s*$/i, /^\s*第[一二三四五六七八九十\d]{1,3}步\s*$/, /^\s*step\s*\d+\s*$/i, /^\s*\d+\s*[、.．]\s*$/];
+        const NARRATIVE_BL = ["考虑简单情况", "分析问题", "进行推导", "一步步来", "让我们", "接下来", "首先我们", "然后我们"];
+        const hasBadTitle = (t) => {
+          if (!t || typeof t !== "string") return true;
+          const s = t.trim();
+          if (s.length < 3) return true;
+          return TITLE_BL.some((r) => r.test(s));
+        };
+        const hasBadNarrative = (n) => {
+          if (!n || typeof n !== "string") return false; // 空 narrative 由下面的"内容稀薄"统一兜
+          const s = n.trim();
+          return NARRATIVE_BL.some((w) => s === w || s === w + "。" || s.startsWith(w + "。") || s.startsWith(w + "，"));
+        };
+        const stepHasBody = (s) => {
+          if (!s || typeof s !== "object") return false;
+          const narr = s.narrative || s.desc || "";
+          const math = s.math?.latex || s.formula || "";
+          return String(narr).trim().length >= 12 || String(math).trim().length >= 3;
+        };
+        if (steps.length < 3) {
+          qualityIssue = `process 推演只有 ${steps.length} 步（应 4-7 步），远达不到推演密度`;
+        } else {
+          const badTitles = steps.filter((s) => hasBadTitle(s?.title)).length;
+          const badNarrs = steps.filter((s) => hasBadNarrative(s?.narrative || s?.desc)).length;
+          const emptySteps = steps.filter((s) => !stepHasBody(s)).length;
+          if (badTitles >= Math.ceil(steps.length / 2)) {
+            qualityIssue = `process 推演的步骤标题全是"步骤 N/第 N 步"这种占位词（${badTitles}/${steps.length}），没有信息量`;
+          } else if (badNarrs >= 2) {
+            qualityIssue = `process 推演里有 ${badNarrs} 步的叙述是"考虑简单情况/让我们/接下来"这种空话`;
+          } else if (emptySteps >= Math.ceil(steps.length / 2)) {
+            qualityIssue = `process 推演里 ${emptySteps}/${steps.length} 步没有实质内容（既没 narrative 又没公式）`;
+          }
         }
       }
       out.push({ type: "viz", content: raw, intent, parseError, qualityIssue });
