@@ -5972,15 +5972,15 @@ function MaterialChatPage({ setPage, profile }) {
           />
         </motion.div>
         {chatting && (
-          <div style={{ display: "flex", gap: 14, marginBottom: 28, paddingLeft: 0 }}>
-            <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 10, background: "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(99,102,241,0.18)", marginTop: 2 }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>
+          <div style={{ display: "flex", gap: 12, marginBottom: 24, paddingLeft: 0 }}>
+            <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 6px rgba(99,102,241,0.2)", marginTop: 2 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, paddingTop: 7 }}>
               {[0, 1, 2].map(i => (
-                <motion.span key={i} style={{ width: 7, height: 7, borderRadius: 999, background: "#A5B4FC" }} animate={{ y: [0, -3, 0], opacity: [0.4, 1, 0.4] }} transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }} />
+                <motion.span key={i} style={{ width: 6, height: 6, borderRadius: 999, background: "#A5B4FC" }} animate={{ y: [0, -3, 0], opacity: [0.4, 1, 0.4] }} transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }} />
               ))}
-              <span style={{ marginLeft: 4, color: "#6B7280", fontSize: 13 }}>正在思考…</span>
+              <span style={{ marginLeft: 4, color: "#6B7280", fontSize: 12.5 }}>正在思考…</span>
             </div>
           </div>
         )}
@@ -5998,7 +5998,7 @@ function MaterialChatPage({ setPage, profile }) {
             onBlur={(e) => { e.target.style.borderColor = "#E5E7EB"; e.target.style.boxShadow = "0 4px 20px rgba(0,0,0,0.04)"; }}
             placeholder="输入数学问题，或让 AI 生成复习提纲…"
             rows={1}
-            style={{ width: "100%", background: "#FAFAFC", border: "1px solid #E5E7EB", borderRadius: 20, padding: "16px 60px 16px 22px", fontFamily: "inherit", fontSize: 14.5, lineHeight: 1.6, color: "#111827", outline: "none", resize: "none", minHeight: 56, maxHeight: 140, boxSizing: "border-box", boxShadow: "0 4px 20px rgba(0,0,0,0.04)", transition: "border-color 0.2s, box-shadow 0.2s" }}
+            style={{ width: "100%", background: "#FAFAFC", border: "1px solid #E5E7EB", borderRadius: 18, padding: "14px 56px 14px 20px", fontFamily: "inherit", fontSize: 13.5, lineHeight: 1.55, color: "#111827", outline: "none", resize: "none", minHeight: 52, maxHeight: 132, boxSizing: "border-box", boxShadow: "0 4px 20px rgba(0,0,0,0.04)", transition: "border-color 0.2s, box-shadow 0.2s" }}
           />
           <motion.button
             type="button"

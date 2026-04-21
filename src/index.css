@@ -51,3 +51,12 @@ body {
 *::-webkit-scrollbar-thumb:hover {
   background: rgba(107, 114, 128, 0.6);
 }
+
+/* SmartVizPreviewCard hover */
+.mc-viz-preview-card:hover .mc-viz-preview-hover {
+  background: rgba(67, 56, 202, 0.04);
+}
+.mc-viz-preview-card:hover .mc-viz-preview-chip {
+  opacity: 1 !important;
+  transform: translateY(0) !important;
+}
