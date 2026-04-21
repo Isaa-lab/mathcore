@@ -4841,13 +4841,23 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     const isQualityIssue = !failedBlock.parseError && !!failedBlock.qualityIssue;
     const reason = String(failedBlock.parseError || failedBlock.qualityIssue || "VIZ 生成未达标").slice(0, 200);
     const failedStructure = failedBlock?.intent?.structure || "";
+    // 具体 issues 列表（process 质量门会填，其他结构目前为 null）——
+    // 把这些逐条喂回给 AI，它能精确知道"第 2 步标题是占位词""数学密度 1/5"等具体问题，
+    // 而不是收到"质量不合格"这种模糊反馈后原地打转。
+    const issuesList = Array.isArray(failedBlock?.qualityIssues) ? failedBlock.qualityIssues : [];
+    const issuesBlock = issuesList.length > 0
+      ? `\n\n校验器抓到的具体问题（按照这些问题逐条修正）：\n${issuesList.slice(0, 10).map((x, i) => `  ${i + 1}. ${x}`).join("\n")}`
+      : "";
+    const scoreNote = typeof failedBlock?.qualityScore === "number"
+      ? `\n（上次质量分：${failedBlock.qualityScore}/100，目标 ≥ 70）`
+      : "";
     // 丰度问题 vs 语法问题，要给 AI 完全不同的修正指令，否则它只会原地转圈。
     // 质量问题里 concept / process 又要走不同的详细指令——前者是"网太稀"，后者是"推演太薄"。
     let retryInstruction;
     if (isQualityIssue && failedStructure === "process") {
-      retryInstruction = `你刚才那个 [VIZ:{structure:"process",...}] JSON 语法没问题，但推演质量不合格：${reason}\n\n重新生成这个 process 图，必须同时满足：\n· steps.length ∈ [4,7]（必须至少 4 步，不是 1-2 步糊弄）\n· 每个 step 的 title 是具体的动作短句（如"从 2 节点最简情形出发""分析基函数 Lᵢ(x) 的次数"），禁用"步骤1/第一步/Step 1/分析问题/考虑简单情况"这类占位词\n· 每个 step 必须有 narrative（1-2 句说清"做什么 + 为什么"），禁用"让我们/接下来/首先/考虑简单情况/一步步来"作为句子主体\n· 至少一半 step 包含 math: { latex, explanation }，latex 里反斜杠双写\n· 每个 step 都要有 insight 字段（≥10 字的关键洞察，不是"这很重要"）\n· data 顶层请给 title / conclusion；最后一步要呼应 conclusion\n· 第 1 步从简单/特殊情形入手，最后 1 步给出结论\n\n如果这道题/这个知识点本来就不需要 4 步以上的推演（比如就是一个定义回忆），请不要画 process 图，改用纯文字 + $LaTeX$ 说清楚——硬凑 1 个"步骤1：考虑简单情况"比不画还糟。`;
+      retryInstruction = `你刚才那个 [VIZ:{structure:"process",...}] JSON 语法没问题，但推演质量不合格：${reason}${scoreNote}${issuesBlock}\n\n重新生成这个 process 图，必须同时满足：\n· steps.length ∈ [4,7]（必须至少 4 步，不是 1-2 步糊弄）\n· 每个 step 的 title 是具体的动作短句（如"从 2 节点最简情形出发""分析基函数 Lᵢ(x) 的次数"），禁用"步骤1/第一步/Step 1/分析问题/考虑简单情况"这类占位词\n· 每个 step 必须有 narrative（1-2 句说清"做什么 + 为什么"，≥15 字），禁用"让我们/接下来/首先/考虑简单情况/一步步来"作为句子开头\n· 至少一半 step 包含 math: { latex, explanation }，latex 里反斜杠双写\n· 每个 step 都要有 insight 字段（≥10 字的关键洞察，不是"这很重要"/"这是关键"这种空话）\n· data 顶层请给 title / conclusion（≥10 字）；最后一步要呼应 conclusion\n· 第 1 步从简单/特殊情形入手，最后 1 步给出结论\n\n请特别针对上面列出的具体问题逐条修正，不要只修第一条。如果这道题/这个知识点本来就不需要 4 步以上的推演（比如就是一个定义回忆），请不要画 process 图，改用纯文字 + $LaTeX$ 说清楚——硬凑 1 个"步骤1：考虑简单情况"比不画还糟。`;
     } else if (isQualityIssue) {
-      retryInstruction = `你刚才那个 [VIZ:...] 虽然 JSON 语法对了，但内容质量不合格：${reason}\n\n重新生成一次，这次必须满足：\n· 如果是 concept 结构：节点 ≥ 8（理想 10-12）个，边 ≥ 节点数 - 1；每条 edge 都要带 label 说明关系；节点至少分 level 0（1 个中心）/ level 1（3-6 个主分支）/ level 2（若干细节）两到三层；覆盖 definition/formula/construction/property/error/application/related 里至少 4 个 dimension。\n· 不要重复同样的浅薄结构。用精确的数学术语做节点名（如"基函数 Lᵢ(x)""Runge 现象""Chebyshev 节点""唯一性定理"），禁用模糊词（"公式/方法/性质/应用"）。\n· 如果真的这个知识点没那么多可画的东西，那就不画图，改用文字 + $LaTeX$ 讲清楚，不要硬凑两个节点。`;
+      retryInstruction = `你刚才那个 [VIZ:...] 虽然 JSON 语法对了，但内容质量不合格：${reason}${issuesBlock}\n\n重新生成一次，这次必须满足：\n· 如果是 concept 结构：节点 ≥ 8（理想 10-12）个，边 ≥ 节点数 - 1；每条 edge 都要带 label 说明关系；节点至少分 level 0（1 个中心）/ level 1（3-6 个主分支）/ level 2（若干细节）两到三层；覆盖 definition/formula/construction/property/error/application/related 里至少 4 个 dimension。\n· 不要重复同样的浅薄结构。用精确的数学术语做节点名（如"基函数 Lᵢ(x)""Runge 现象""Chebyshev 节点""唯一性定理"），禁用模糊词（"公式/方法/性质/应用"）。\n· 如果真的这个知识点没那么多可画的东西，那就不画图，改用文字 + $LaTeX$ 讲清楚，不要硬凑两个节点。`;
     } else {
       retryInstruction = `你刚才那个 [VIZ:...] 没解析成功。错误：${reason}\n失败片段前 300 字：\n${failedSnippet}\n\n请重做这条回复——文字部分可以保留或微调，但 [VIZ:...] 必须换用最简单的结构（从 hierarchy / process / comparison 中选一种），避免深嵌套和 LaTeX 反斜杠错误。如果这个知识点本来就不需要画图，就完全不画图，只用文字 + $LaTeX$ 讲清楚。再试一次。`;
     }
@@ -5947,6 +5957,23 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                                       ? "AI 这个模型在当前知识点上的结构化输出不稳定。建议换一个 AI 引擎（右上角头像→切换 AI）试试，或者让 AI 改用文字讲解。"
                                       : (b.qualityIssue || userFriendlyVizError(b.parseError))}
                                   </div>
+                                  {/* 具体诊断列表 —— 把"为什么判定稀薄"透明化给用户，避免黑箱体验。
+                                      只在 process 结构且有具体 issues 时显示；默认折叠不喧宾夺主 */}
+                                  {Array.isArray(b.qualityIssues) && b.qualityIssues.length > 0 && (
+                                    <details style={{ marginTop: 8, fontSize: 11.5, color: "#92400E" }}>
+                                      <summary style={{ cursor: "pointer", userSelect: "none", fontWeight: 600 }}>
+                                        📋 诊断详情（质量分 {typeof b.qualityScore === "number" ? b.qualityScore : "?"}/100，共 {b.qualityIssues.length} 条问题）
+                                      </summary>
+                                      <ul style={{ margin: "6px 0 0", paddingLeft: 20, fontSize: 11, color: "#78350F", lineHeight: 1.7 }}>
+                                        {b.qualityIssues.slice(0, 10).map((iss, ii) => (
+                                          <li key={ii}>{iss}</li>
+                                        ))}
+                                        {b.qualityIssues.length > 10 && (
+                                          <li style={{ color: "#A16207" }}>…还有 {b.qualityIssues.length - 10} 条</li>
+                                        )}
+                                      </ul>
+                                    </details>
+                                  )}
                                 </div>
                               </div>
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
@@ -7409,45 +7436,78 @@ function splitQuizChatBlocks(text) {
           qualityIssue = `concept 图连接太少：${edges.length} 条边串起 ${nodes.length} 个节点（应 ≥ ${nodes.length - 1}），关系网络不成立`;
         }
       }
-      // ── process 结构的深度守门：1 步、占位标题、黑名单空话都放行即等于白画 ──
-      // 这里的判据和后端 prompt 里的硬指标 + 黑名单严格对齐
+
+      // ── process 结构的深度守门 (score 0-100 + issues 列表) ──
+      // 判据对齐后端 VIZ_FRAMEWORK.process 的硬指标 + 黑名单。
+      // 升级的动机：单字符串 issue 无法让 AI 知道"每条具体问题"，重试常原地打转；
+      // 这里把扣分细项全量记录，retry prompt 直接喂回给 AI，它就能针对性修正。
+      let qualityIssues = null; // 详细 issue 列表（所有 structure 共用，目前 process 写入）
+      let qualityScore = 100;   // 0-100
       if (intent && !parseError && intent.structure === "process") {
         const steps = Array.isArray(intent.data?.steps) ? intent.data.steps : [];
-        const TITLE_BL = [/^\s*步骤\s*\d+\s*$/i, /^\s*第[一二三四五六七八九十\d]{1,3}步\s*$/, /^\s*step\s*\d+\s*$/i, /^\s*\d+\s*[、.．]\s*$/];
-        const NARRATIVE_BL = ["考虑简单情况", "分析问题", "进行推导", "一步步来", "让我们", "接下来", "首先我们", "然后我们"];
-        const hasBadTitle = (t) => {
-          if (!t || typeof t !== "string") return true;
-          const s = t.trim();
-          if (s.length < 3) return true;
-          return TITLE_BL.some((r) => r.test(s));
-        };
-        const hasBadNarrative = (n) => {
-          if (!n || typeof n !== "string") return false; // 空 narrative 由下面的"内容稀薄"统一兜
-          const s = n.trim();
-          return NARRATIVE_BL.some((w) => s === w || s === w + "。" || s.startsWith(w + "。") || s.startsWith(w + "，"));
-        };
-        const stepHasBody = (s) => {
-          if (!s || typeof s !== "object") return false;
-          const narr = s.narrative || s.desc || "";
-          const math = s.math?.latex || s.formula || "";
-          return String(narr).trim().length >= 12 || String(math).trim().length >= 3;
-        };
-        if (steps.length < 3) {
-          qualityIssue = `process 推演只有 ${steps.length} 步（应 4-7 步），远达不到推演密度`;
+        const TITLE_BL = [
+          /^\s*步骤\s*\d+\s*$/i,
+          /^\s*第[一二三四五六七八九十\d]{1,3}步\s*$/,
+          /^\s*step\s*\d+\s*$/i,
+          /^\s*\d+\s*[、.．]\s*$/,
+        ];
+        const NARRATIVE_BL = [
+          "考虑简单情况", "分析问题", "进行推导", "一步步来",
+          "让我们", "接下来", "接下来我", "首先我们", "首先我", "然后我们", "然后我",
+        ];
+        const issues = [];
+        let score = 100;
+
+        if (steps.length === 0) {
+          issues.push("steps 字段缺失或为空");
+          score -= 60;
         } else {
-          const badTitles = steps.filter((s) => hasBadTitle(s?.title)).length;
-          const badNarrs = steps.filter((s) => hasBadNarrative(s?.narrative || s?.desc)).length;
-          const emptySteps = steps.filter((s) => !stepHasBody(s)).length;
-          if (badTitles >= Math.ceil(steps.length / 2)) {
-            qualityIssue = `process 推演的步骤标题全是"步骤 N/第 N 步"这种占位词（${badTitles}/${steps.length}），没有信息量`;
-          } else if (badNarrs >= 2) {
-            qualityIssue = `process 推演里有 ${badNarrs} 步的叙述是"考虑简单情况/让我们/接下来"这种空话`;
-          } else if (emptySteps >= Math.ceil(steps.length / 2)) {
-            qualityIssue = `process 推演里 ${emptySteps}/${steps.length} 步没有实质内容（既没 narrative 又没公式）`;
+          if (steps.length < 4) { issues.push(`步骤数不足：只有 ${steps.length} 步（应 4-7）`); score -= 50; }
+          else if (steps.length > 8) { issues.push(`步骤过多：${steps.length} 步（建议 ≤ 7）`); score -= 10; }
+
+          let stepsWithMath = 0;
+          steps.forEach((s, i) => {
+            const n = i + 1;
+            const t = typeof s?.title === "string" ? s.title.trim() : "";
+            if (!t) { issues.push(`step ${n}：缺少 title`); score -= 15; }
+            else if (TITLE_BL.some((r) => r.test(t))) { issues.push(`step ${n}：标题"${t}"是占位词（禁用"步骤N/第N步/Step N"）`); score -= 15; }
+            else if (t.length < 5) { issues.push(`step ${n}：标题"${t}"太短（${t.length} 字）`); score -= 10; }
+
+            const narr = (typeof s?.narrative === "string" ? s.narrative : (typeof s?.desc === "string" ? s.desc : "")).trim();
+            if (!narr || narr.length < 15) { issues.push(`step ${n}：narrative 太短或缺失（${narr.length} 字）`); score -= 10; }
+            else if (NARRATIVE_BL.some((w) => narr === w || narr === w + "。" || narr.startsWith(w + "。") || narr.startsWith(w + "，") || narr.startsWith(w + " "))) {
+              issues.push(`step ${n}：narrative 以黑名单空话开头（"${narr.slice(0, 12)}…"）`);
+              score -= 12;
+            }
+
+            const hasMath = !!(s?.math?.latex || s?.formula);
+            if (hasMath) stepsWithMath += 1;
+
+            const insight = typeof s?.insight === "string" ? s.insight.trim() : "";
+            if (!insight || insight.length < 10) { issues.push(`step ${n}：缺少有意义的 insight（≥10 字）`); score -= 8; }
+          });
+
+          // 数学密度：少于一半步骤含公式视为偷懒
+          if (steps.length > 0 && stepsWithMath / steps.length < 0.5) {
+            issues.push(`数学密度不足：只有 ${stepsWithMath}/${steps.length} 步含 math.latex`);
+            score -= 15;
           }
+
+          // 顶层结论
+          const conclusion = typeof intent.data?.conclusion === "string" ? intent.data.conclusion.trim() : "";
+          if (!conclusion || conclusion.length < 10) { issues.push("顶层 data.conclusion 缺失或过短（应是 1 句总结性结论）"); score -= 10; }
+        }
+
+        qualityScore = Math.max(0, score);
+        qualityIssues = issues;
+        // score < 65 → 触发静默重试（shouldRetry 的判据放宽到 score < 50 是用户 validator 的定义，
+        // 但实际我们容忍度稍紧——65 分以下就不让它过，让 AI 再试一次拿到更好的结构）
+        if (score < 65) {
+          qualityIssue = issues[0] || `process 质量分 ${qualityScore}/100 不足`;
         }
       }
-      out.push({ type: "viz", content: raw, intent, parseError, qualityIssue });
+
+      out.push({ type: "viz", content: raw, intent, parseError, qualityIssue, qualityIssues, qualityScore });
       i = j;
       continue;
     }
