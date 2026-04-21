@@ -1,13 +1,36 @@
+// ── 顶层 try/catch 守卫 ────────────────────────────────────────────────────
+// 关键：任何同步/异步异常都必须返回合法 JSON，绝不能让 Vercel 返回 HTML
+// ("FUNCTION_INVOCATION_FAILED") —— 那会让前端完全丢失定位信息。
 export default async function handler(req, res) {
+  try {
+    return await runHandler(req, res);
+  } catch (err) {
+    const msg = err && err.message ? String(err.message) : "unknown";
+    const stack = err && err.stack ? String(err.stack).slice(0, 400) : "";
+    console.error("[api/generate] FATAL:", msg, stack);
+    try {
+      return res.status(500).json({
+        error: `后端崩溃: ${msg}`,
+        diag: `handler_crash`,
+        stack: stack,
+      });
+    } catch {
+      return; // headers already sent
+    }
+  }
+}
+
+async function runHandler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
+  const body = req.body || {};
   const {
     chapter, type, count,
     mode, question: chatQuestion, materialTitle, materialContext,
     conversationHistory,
     questionContext, // { stem, options, correctAnswer, userSelection, isCorrect, misconception, knowledgePoints }
     userProvider, userKey, userCustomUrl,
-  } = req.body;
+  } = body;
 
   const GEMINI_KEY = process.env.GEMINI_KEY;
   const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY;

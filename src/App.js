@@ -482,7 +482,7 @@ const AI_PROVIDER_META = {
   kimi:      { id: "kimi",      name: "Kimi",      logo: "K",  desc: "月之暗面·国内可访问", placeholder: "sk-...",     link: "https://platform.moonshot.cn/console/api-keys",   color: "#6F5BD9" },
   anthropic: { id: "anthropic", name: "Claude",    logo: "A",  desc: "Anthropic",          placeholder: "sk-ant-...", link: "https://console.anthropic.com/",                  color: "#D97757" },
   custom:    { id: "custom",    name: "自定义",    logo: "⚙",  desc: "任意 OpenAI 兼容接口", placeholder: "sk-...",    link: null,                                              color: "#6B7280" },
-  server:    { id: "server",    name: "平台内置",  logo: "🎓", desc: "无需配置·平台承担",  placeholder: null,         link: null,                                              color: "#10B981" },
+  server:    { id: "server",    name: "平台内置",  logo: "🎓", desc: "点一下就能用 · 无需 Key · 平台承担成本",  placeholder: null,         link: null,                                              color: "#10B981", free: true, recommended: true },
 };
 const AI_PROVIDER_ORDER = ["server", "groq", "gemini", "deepseek", "kimi", "anthropic", "custom"];
 
@@ -688,9 +688,10 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched }) {
             >
               <ProviderAvatar providerId={pid} size={28} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   {meta.name}
-                  {meta.free && <span style={{ fontSize: 9, fontWeight: 700, background: "#D1FAE5", color: "#065F46", padding: "1px 6px", borderRadius: 4 }}>免费</span>}
+                  {meta.recommended && <span style={{ fontSize: 9, fontWeight: 700, background: "#10B981", color: "#FFFFFF", padding: "1px 6px", borderRadius: 4 }}>推荐</span>}
+                  {meta.free && !meta.recommended && <span style={{ fontSize: 9, fontWeight: 700, background: "#D1FAE5", color: "#065F46", padding: "1px 6px", borderRadius: 4 }}>免费</span>}
                 </div>
                 <div style={{ fontSize: 11, color: "#6B7280", marginTop: 1 }}>{meta.desc}</div>
               </div>
@@ -5699,7 +5700,15 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                       <>
                         <MathText text={m.content} />
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
-                          {m.errorCategory === "no_key" ? (
+                          {m.errorCategory === "backend_crash" ? (
+                            <>
+                              <Btn size="sm" variant="primary" disabled={aiIsBusy} onClick={() => { if (lastAskInput && !aiIsBusy) sendChatMessage(lastAskInput); }}>🔄 再试一次</Btn>
+                              <Btn size="sm" onClick={() => {
+                                const detail = m.errorDetail || "";
+                                try { navigator.clipboard.writeText(detail); } catch {}
+                              }}>📋 复制诊断</Btn>
+                            </>
+                          ) : m.errorCategory === "no_key" ? (
                             <>
                               <Btn size="sm" variant="primary" onClick={() => useMathStore.getState().openAISettings()}>⚙️ 去 AI 设置</Btn>
                               <Btn size="sm" disabled={aiIsBusy} onClick={() => { if (lastAskInput && !aiIsBusy) sendChatMessage(lastAskInput); }}>先试一下</Btn>
@@ -7189,11 +7198,18 @@ function splitQuizChatBlocks(text) {
 function classifyChatError(rawErr, httpStatus) {
   const err = String(rawErr || "").toLowerCase();
   const status = Number(httpStatus) || 0;
+  // 0) Vercel lambda 崩溃（handler 抛了未捕获异常，或函数超时返回 HTML）
+  if (/function_invocation_failed|a server error has occurred|handler_crash/i.test(rawErr)) {
+    return {
+      category: "backend_crash",
+      message: "后端崩溃了（不是 AI 的锅，是我们的代码出问题）。已经抓到现场，请把下面「诊断详情」里的内容发给我。",
+    };
+  }
   // 1) 无 Key / Key 失效
-  if (/暂无可用|no.*(api.*key|ai.*service)|api.*key.*required|unauthorized|invalid.*key|incorrect.*api/i.test(rawErr) || status === 401) {
+  if (/暂无可用|no.*(api.*key|ai.*service)|api.*key.*required|unauthorized|invalid.*key|incorrect.*api|上游都不可用|no_provider_attempted/i.test(rawErr) || status === 401) {
     return {
       category: "no_key",
-      message: "AI 服务还没配置好 —— 去「AI 设置」加一个 API Key 就能开聊（推荐 Groq，免费）。",
+      message: "平台的 AI 密钥没跑通。如果你是平台管理员，请在 Vercel 项目的 Environment Variables 里配 GROQ_KEY（免费获取），或者直接在「AI 设置」里填你自己的 Key。",
     };
   }
   // 2) 配额 / 限流
