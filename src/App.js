@@ -3775,7 +3775,12 @@ function HomePage({ setPage, profile }) {
   );
 }
 
-function KnowledgePage({ setPage, setChapterFilter }) {
+function KnowledgePage({ setPage, setChapterFilter, switchStudyTab }) {
+  // 在学习工作台中，"题库练习"页并不会被渲染；此时应切 StudyWorkspace 的"小测"tab
+  const routeSetPage = (p) => {
+    if (p === "题库练习" && typeof switchStudyTab === "function") switchStudyTab("小测");
+    else if (typeof setPage === "function") setPage(p);
+  };
   const [materials, setMaterials] = useState([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState(null);
   const [aiTopics, setAiTopics] = useState([]);
@@ -3874,7 +3879,7 @@ function KnowledgePage({ setPage, setChapterFilter }) {
         <TopicModal
           topic={selectedTopic}
           onClose={() => { setSelectedTopic(null); setSelectedTopicMeta(null); }}
-          setPage={setPage}
+          setPage={routeSetPage}
           setChapterFilter={setChapterFilter}
           chapterNum={selectedTopicMeta?.chapterNum}
           course={selectedTopicMeta?.course}
@@ -3989,7 +3994,7 @@ function KnowledgePage({ setPage, setChapterFilter }) {
                               style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: chColor, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>
                               📖 查看内容
                             </button>
-                            <button onClick={() => { setChapterFilter(chapterStr); setPage("题库练习"); }}
+                            <button onClick={() => { setChapterFilter(chapterStr); routeSetPage("题库练习"); }}
                               style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 600, background: "#f0f9ff", color: G.blue, border: `1.5px solid ${G.blue}33`, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>
                               ✏️ 练习题目
                             </button>
@@ -7077,7 +7082,7 @@ function computeRecommendations(progress) {
 
 const MS_DAY = 86400000;
 
-function SkillTreePage({ setPage, setChapterFilter }) {
+function SkillTreePage({ setPage, setChapterFilter, switchStudyTab }) {
   // 新数据模型：{ [id]: { status, updatedAt, masteredAt } }
   // 向后兼容旧的 mc_skill_mastery (number 0/1/2)
   const [progress, setProgress] = useState(() => {
@@ -7109,10 +7114,20 @@ function SkillTreePage({ setPage, setChapterFilter }) {
     setModalTopic({ name: topicName, chapterNum, course: nodeCourse });
   };
 
+  // 根据当前所在的容器（StudyWorkspace 内部 vs. 全局"技能树"页）选择正确的跳法
+  const goToQuiz = () => {
+    if (typeof switchStudyTab === "function") switchStudyTab("小测");
+    else if (typeof setPage === "function") setPage("题库练习");
+  };
   const openQuizForNode = (node) => {
     if (!node) return;
     if (typeof setChapterFilter === "function") setChapterFilter(node.chapter || null);
-    if (typeof setPage === "function") setPage("题库练习");
+    goToQuiz();
+  };
+  // TopicModal 内的"开始练习"按钮同样会调 setPage("题库练习") —— 用包装版本把它路由到 小测 tab
+  const modalSetPage = (p) => {
+    if (p === "题库练习") goToQuiz();
+    else if (typeof setPage === "function") setPage(p);
   };
 
   const courses = useMemo(() => ["全部", ...Array.from(new Set(SKILL_TREE.map(s => s.course)))], []);
@@ -7210,7 +7225,7 @@ function SkillTreePage({ setPage, setChapterFilter }) {
         <TopicModal
           topic={modalTopic.name}
           onClose={() => setModalTopic(null)}
-          setPage={setPage}
+          setPage={modalSetPage}
           setChapterFilter={setChapterFilter}
           chapterNum={modalTopic.chapterNum}
           course={modalTopic.course}
@@ -7848,6 +7863,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [retryQuestion, setRetryQuestion] = useState(null);
   const [chapterFilter, setChapterFilter] = useState(null);
+  const [studyTab, setStudyTab] = useState("资料库");
+  // 在学习工作台（StudyWorkspace）内部切换到"小测"tab —— 供 SkillTreePage / TopicModal 的"去做题"按钮使用
+  const switchStudyTab = (tab) => setStudyTab(tab);
   const [sessionAnswers, setSessionAnswers] = useState({});
   const [emailJustConfirmed, setEmailJustConfirmed] = useState(false);
   const [surface, setSurface] = useState("gateway");
@@ -7959,8 +7977,8 @@ export default function App() {
   const renderStudyTab = (tab) => {
     if (tab === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
     if (tab === "AI对话") return <MaterialChatPage setPage={handleSetPage} profile={profile} />;
-    if (tab === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
-    if (tab === "知识树") return <SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
+    if (tab === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} switchStudyTab={switchStudyTab} />;
+    if (tab === "知识树") return <SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} switchStudyTab={switchStudyTab} />;
     if (tab === "小测") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
     return null;
   };
@@ -8018,7 +8036,7 @@ export default function App() {
             <AnimatePresence mode="wait">
               {workspaceMode === "study" ? (
                 <motion.div key="study" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.25 }}>
-                  <StudyWorkspace renderTab={renderStudyTab} />
+                  <StudyWorkspace renderTab={renderStudyTab} activeTab={studyTab} setActiveTab={setStudyTab} />
                 </motion.div>
               ) : (
                 <motion.div key="sprint" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25 }}>

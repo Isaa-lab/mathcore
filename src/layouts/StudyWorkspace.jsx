@@ -5,8 +5,10 @@ import InteractiveLab from "./InteractiveLab";
 const TABS = ["资料库", "AI对话", "知识点", "知识树", "小测"];
 const TAB_ICONS = { "资料库": "📚", "AI对话": "🤖", "知识点": "📖", "知识树": "🌌", "小测": "🧩" };
 
-export default function StudyWorkspace({ renderTab }) {
-  const [activeTab, setActiveTab] = useState("资料库");
+export default function StudyWorkspace({ renderTab, activeTab: controlledTab, setActiveTab: setControlledTab }) {
+  const [uncontrolledTab, setUncontrolledTab] = useState("资料库");
+  const activeTab = controlledTab !== undefined ? controlledTab : uncontrolledTab;
+  const setActiveTab = setControlledTab || setUncontrolledTab;
 
   return (
     <div style={{ display: "flex", flex: 1, padding: 24, gap: 24, overflow: "hidden", boxSizing: "border-box" }}>
