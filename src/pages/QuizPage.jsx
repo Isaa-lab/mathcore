@@ -26,6 +26,9 @@ export default function QuizPage({
   showScaffold,
   wrongShake,
   mathRenderer,
+  hideFooter = false,
+  correctIndex = -1,
+  revealed = false,
 }) {
   const scaffoldSteps = renderScaffoldSteps(explanation);
 
@@ -58,21 +61,28 @@ export default function QuizPage({
               whileTap={{ scale: 0.98 }}
               animate={submitted && !isCorrect && selectedIndex === idx && wrongShake ? { x: [0, -8, 8, -8, 8, 0] } : { x: 0 }}
               transition={submitted && !isCorrect && selectedIndex === idx && wrongShake ? { duration: 0.4 } : springTransition}
-              style={{
-                padding: "14px 16px",
-                borderRadius: 16,
-                border:
-                  selectedIndex === idx
-                    ? "2px solid #111827"
-                    : "1px solid rgba(0,0,0,0.08)",
-                background:
-                  submitted && selectedIndex === idx
-                    ? isCorrect
-                      ? "var(--accent-mint)"
-                      : "var(--accent-coral)"
-                    : "#FFFFFF",
-                cursor: "pointer",
-              }}
+              style={(() => {
+                const isSel = selectedIndex === idx;
+                const isCorrectOpt = correctIndex === idx;
+                let border = "1px solid rgba(0,0,0,0.08)";
+                let background = "#FFFFFF";
+                if (!submitted && isSel) border = "2px solid #111827";
+                if (submitted && isSel && isCorrect) { background = "var(--accent-mint)"; border = "2px solid #10b981"; }
+                if (submitted && isSel && !isCorrect) { background = "var(--accent-coral)"; border = "2px solid #ef4444"; }
+                // 揭示正确答案时高亮正确项（仅用户已答错且主动要求看答案时）
+                if (submitted && revealed && isCorrectOpt && !isSel) {
+                  background = "var(--accent-mint)";
+                  border = "2px dashed #10b981";
+                }
+                return {
+                  padding: "14px 16px",
+                  borderRadius: 16,
+                  border,
+                  background,
+                  cursor: submitted ? "default" : "pointer",
+                  pointerEvents: submitted ? "none" : "auto",
+                };
+              })()}
             >
               {mathRenderer ? mathRenderer(opt) : opt}
             </motion.div>
@@ -115,44 +125,46 @@ export default function QuizPage({
           )}
         </AnimatePresence>
 
-        <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          {!submitted ? (
-            <motion.button
-              type="button"
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={onSubmit}
-              disabled={selectedIndex == null}
-              style={{
-                border: "none",
-                borderRadius: 12,
-                padding: "10px 16px",
-                background: "#111827",
-                color: "#fff",
-                cursor: selectedIndex == null ? "not-allowed" : "pointer",
-              }}
-            >
-              提交答案
-            </motion.button>
-          ) : (
-            <motion.button
-              type="button"
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={onNext}
-              style={{
-                border: "none",
-                borderRadius: 12,
-                padding: "10px 16px",
-                background: "#111827",
-                color: "#fff",
-                cursor: "pointer",
-              }}
-            >
-              下一题
-            </motion.button>
-          )}
-        </div>
+        {!hideFooter && (
+          <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+            {!submitted ? (
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={onSubmit}
+                disabled={selectedIndex == null}
+                style={{
+                  border: "none",
+                  borderRadius: 12,
+                  padding: "10px 16px",
+                  background: "#111827",
+                  color: "#fff",
+                  cursor: selectedIndex == null ? "not-allowed" : "pointer",
+                }}
+              >
+                提交答案
+              </motion.button>
+            ) : (
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={onNext}
+                style={{
+                  border: "none",
+                  borderRadius: 12,
+                  padding: "10px 16px",
+                  background: "#111827",
+                  color: "#fff",
+                  cursor: "pointer",
+                }}
+              >
+                下一题
+              </motion.button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

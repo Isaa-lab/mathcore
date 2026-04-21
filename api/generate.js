@@ -196,16 +196,62 @@ ${VIZ_FRAMEWORK}`;
     messages = [sysMsg, ...histMsgs, userMsg];
   }
 
-  const prompt = isChatMode ? null : `你是数学课程出题专家。请为"${chapter}"这个数学章节生成${count}道${type}，所有题目和选项必须用中文。
+  const prompt = isChatMode ? null : `你是数学课程出题专家。请为"${chapter}"这个数学章节生成${count}道${type}，所有题目与选项必须使用中文。
 
-要求：
-- 题目紧贴数值分析或最优化理论内容，考察具体概念和计算
-- 单选题提供4个选项（A/B/C/D），干扰项合理，不要出现"与原文相反"或"教材未提及"等无意义选项
-- 判断题 options 设为 null，answer 为"正确"或"错误"
-- 每题附简短解析（40字以内）
+==================================================
+【LAYER 1 · 内容约束（题干必须是"数学命题"）】
+==================================================
+· 题干只能是关于数学概念、公式、方法、计算、定理、证明的陈述
+· 绝对禁止出现：资料/书本的【标题】【作者姓名】【课程编号】【章节编号】【出版信息】
+· 反例（禁止）：
+  ❌ "以下说法是否正确：《MATH 2023: Ordinary Differential Equations Xiaoyi Chen, Yu》"
+  ❌ "下列哪位是《高等数学》这本书的作者"
+  ❌ "Ch.2 讲的是行列式吗"
+  ❌ "这门课的主要内容是"
+· 正例：
+  ✓ "一阶线性方程 $\\frac{dy}{dx}+P(x)y=Q(x)$ 的积分因子为 $e^{\\int P(x)dx}$。"（判断题）
+  ✓ "Newton 法在单根附近的收敛阶为："（单选题）
 
-严格按以下 JSON 数组格式返回，不要有其他文字：
-[{"question":"题目内容","options":["A.选项1","B.选项2","C.选项3","D.选项4"],"answer":"A","explanation":"解析内容","type":"单选题"}]`;
+==================================================
+【LAYER 2 · 题型约束】
+==================================================
+· 选择题（单选/多选）必须提供 4 个选项，每个错误选项都必须对应一个"具体的学生误解"（misconception），不允许空占位。
+  示例"干扰项"设计：
+    正确："1/2" ← 二分法把区间对半
+    干扰 A："1/3" ← 混淆三分法
+    干扰 B："1/4" ← 误以为砍掉 3/4
+    干扰 C："1/2ⁿ" ← 混淆单次与 n 次迭代
+· 绝对禁止 escape options（逃避选项），以下文本一律不得作为选项出现：
+  ❌ "不确定"、"不知道"、"无法判断"、"以上都对"、"以上都不是"、"以上都错"、"都有可能"
+  ❌ "教材未提及"、"与原文相反"、"视情况而定"
+· 绝对禁止"元学习题"（不是考学科知识，而是考"该怎么学"）：
+  ❌ "关于《线性代数》，下列说法最合理的是：A. 应同时关注定义..."
+  ❌ "学习微积分应该采用什么方法"
+· 绝对禁止题干暗示答案（题目里直接出现正确选项的关键句）
+· 判断题：options 设为 null，answer 只能是"正确"或"错误"，题干必须是明确可判真伪的数学命题（不能是"应该重视定义"这种主观陈述）
+· 数学公式务必用 LaTeX 包裹（行内 $...$，块级 $$...$$）
+
+==================================================
+【LAYER 3 · 质量约束】
+==================================================
+· 每题附带 40-80 字的解析（不是简单复述答案，而是说清"为什么这是对的/错的"）
+· 选择题需额外提供 optionRationales 数组：长度等于选项数，逐一解释每个选项（正确/错误的理由）
+· 答案必须唯一且可验证
+
+==================================================
+【输出前自检 — 每道题必须全部通过】
+==================================================
+Q1. 题干里有没有出现书名 / 作者名 / "MATH \\d+" 这种课程号 / 章节号？→ 有就重写
+Q2. 选项里有没有"不确定 / 以上都对 / 以上都不是"等逃避选项？→ 有就重写
+Q3. 这道题考的是数学命题还是"怎么学习"？→ 是后者就整道删掉重出
+Q4. 题干里有没有直接说出正确选项的关键短语？→ 有就重写
+Q5. 解析能不能解释"为什么"，不是只复述答案？→ 不能就重写
+
+==================================================
+【输出格式 — 严格 JSON 数组，不要任何其它文字】
+==================================================
+[{"question":"题目内容（含 LaTeX）","options":["A.选项","B.选项","C.选项","D.选项"],"answer":"A","explanation":"40-80 字解析","optionRationales":["A 为何对/错","B 为何对/错","C 为何对/错","D 为何对/错"],"type":"单选题","misconceptions":{"A":"对应误解","B":"对应误解","C":"对应误解","D":"对应误解"}}]
+判断题时 options / optionRationales / misconceptions 可省略，只需保留 question / answer / explanation / type。`;
 
   // ── OpenAI-compatible helper（支持 messages 数组） ───────────────────────────
   const callOpenAICompat = async (baseUrl, key, model) => {
@@ -359,6 +405,28 @@ ${VIZ_FRAMEWORK}`;
     else return res.status(500).json({ error: "返回格式不是数组" });
   }
 
+  // ── 服务端题目门卫（兜底 Layer 1/2 约束） ───────────────────────────────
+  // 即使 LLM 没完全守约，这一层也能把脏题拦下
+  const ESCAPE_OPTION_RE = /^(?:[A-Da-d][.、．]\s*)?(?:不确定|不知道|无法判断|以上都对|以上都不对|以上都不是|以上都错|都有可能|视情况而定|教材未提及|与原文相反|都不(?:对|是)|都是对的)\s*$/;
+  const META_LEARNING_RE = /(关于[《【][^》】]*[》】].{0,8}(说法|态度|方法)|学习(方法|态度|策略)|应(同时|该)关注定义|应(该)?同时掌握|应.*机械套用|通过例题验证理解)/;
+  const METADATA_RE = /(MATH\s?\d{3,}|PHY\s?\d{3,}|CS\s?\d{3,}|Ch\.\s?\d+[^\d]|Chapter\s?\d+|第\s?[一二三四五六七八九十百]{1,3}\s?章(?:节)?(?:的(?:主要)?(?:内容|主题))|《[^《》]{2,40}》\s*(?:的(?:作者|内容|主题|主旨)|是一本)|[A-Z][a-z]+,?\s[A-Z][a-z]+(?:[,\s]+and[,\s]+[A-Z][a-z]+)?)/;
+  const TOPIC_HINTS_RE = /(函数|方程|积分|导数|微分|矩阵|向量|极限|连续|概率|分布|期望|方差|收敛|级数|插值|逼近|误差|迭代|特征|秩|线性|范数|内积|空间|变换|样本|估计|检验|假设|信息|算法|多项式|复数|实数|正数|负数|坐标|几何|拓扑|最优|最大|最小|求解|近似|精度|梯度|散度|旋度|行列式|根|解|$|\\frac|\\int|\\sum|\\partial)/;
+  const isValidQuestion = (q) => {
+    const stem = String(q.question || "");
+    if (!stem || stem.length < 10) return false;
+    if (METADATA_RE.test(stem)) return false;          // 元数据题
+    if (META_LEARNING_RE.test(stem)) return false;      // 元学习题
+    if (!TOPIC_HINTS_RE.test(stem) && !/[\$=\+\-\*/\^_]/.test(stem)) return false; // 既无学科词汇又无数学符号
+    if (Array.isArray(q.options)) {
+      if (q.options.length < 2) return false;
+      if (q.options.some(o => ESCAPE_OPTION_RE.test(String(o || "").trim()))) return false; // 逃避选项
+      // 选项中不能直接出现题干的关键结论短语
+      const stemKey = stem.replace(/[A-D][.、．]/g, "").slice(0, 40);
+      if (q.options.some(o => String(o).includes(stemKey) && stemKey.length > 15)) return false;
+    }
+    return true;
+  };
+
   const cleaned = questions
     .filter(q => q && (q.question || q.text || q.content))
     .map(q => {
@@ -369,9 +437,16 @@ ${VIZ_FRAMEWORK}`;
         options: opts,
         answer: String(q.answer || q.correct_answer || (opts ? "A" : "正确")),
         explanation: String(q.explanation || q.rationale || ""),
+        optionRationales: Array.isArray(q.optionRationales) ? q.optionRationales.map(String) : null,
+        misconceptions: q.misconceptions && typeof q.misconceptions === "object" ? q.misconceptions : null,
         type: String(q.type || (opts ? "单选题" : "判断题")),
       };
-    });
+    })
+    .filter(isValidQuestion);
+
+  if (cleaned.length === 0) {
+    return res.status(500).json({ error: "本批生成的题目未通过质量门卫（元数据题 / 逃避选项 / 元学习题）。请重试。" });
+  }
 
   res.status(200).json({ questions: cleaned });
 }

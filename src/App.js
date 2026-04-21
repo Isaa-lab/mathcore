@@ -973,8 +973,20 @@ const isLowQualityQuestion = (q) => {
     if (hasGarbageOpt) return true;
     const chapterTitleCount = opts.filter(o => /^[A-D]\.\s*\d+\.\d+\s+[A-Z]/.test(String(o))).length;
     if (chapterTitleCount >= 2) return true;
+    // 逃避选项 —— 从根本上破坏学习评估
+    const escapeRe = /^(?:[A-Da-d][.、．]\s*)?(?:不确定|不知道|无法判断|以上都对|以上都不对|以上都不是|以上都错|都有可能|视情况而定|都不(?:对|是)|都是对的)\s*$/;
+    if (opts.some(o => escapeRe.test(String(o || "").trim()))) return true;
   }
   if (/^关于[「『][\d.]+ [A-Z]/.test(text) && text.length < 30) return true;
+
+  // 元数据题：题干问的是资料标题/作者/课程编号而不是数学命题
+  if (/MATH\s?\d{3,}|PHY\s?\d{3,}|CS\s?\d{3,}/.test(text)) return true;
+  if (/《[^《》]{2,40}》[^A-Za-z\u4e00-\u9fff]{0,3}(?:是一本|的作者|的内容|的主题|的主旨|(?:[A-Z][a-z]+\s)+[A-Z][a-z]+)/.test(text)) return true;
+  if (/[A-Z][a-z]+\s[A-Z][a-z]+(?:,\s?[A-Z][a-z]+){0,3}/.test(text) && /以下说法是否正确|是否正确[？?]|下列.*正确/.test(text)) return true;
+
+  // 元学习题：考的是"该怎么学"而不是学科知识
+  if (/关于[《【「『][^》】」』]{1,30}[》】」』][^。]{0,6}(?:说法|态度|方法).{0,6}(?:最合理|最恰当|正确的是)/.test(text)) return true;
+  if (/(应同时关注定义|应同时掌握定义|机械套用|通过例题验证理解|学习(方法|态度|策略))/.test(text) && Array.isArray(opts)) return true;
 
   return false;
 };
@@ -4096,6 +4108,12 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [timer, setTimer] = useState(0);
   const [correctStreak, setCorrectStreak] = useState(0);
   const [showWin, setShowWin] = useState(false);
+  // 逐题状态快照：{ [qIdx]: { selectedIdx, correct, revealed } }
+  // 用于可跳转进度条 + "看正确答案" 的就地揭示
+  const [answerRecords, setAnswerRecords] = useState({});
+  const [revealedAnswer, setRevealedAnswer] = useState(false);
+  // 错题/延伸场景下的上下文感知 AI 引导
+  const [aiContextPrompt, setAIContextPrompt] = useState("");
   const sessionStartRef = useRef(Date.now());
   const [materialFilterFallback, setMaterialFilterFallback] = useState(false);
   const [materialGenerating, setMaterialGenerating] = useState(false);
@@ -4249,6 +4267,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     setQuizMode("active");
     setCurrent(0); setSelected(null); setAnswered(false);
     setScore(0); setWrongList([]); setFinished(false); setTimer(0);
+    setAnswerRecords({}); setRevealedAnswer(false); setAIContextPrompt("");
     sessionStartRef.current = Date.now();
   };
 
@@ -4297,27 +4316,33 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     if (!q) return;
     if (!isTextQuestion(q) && selected === null) return;
     if (isTextQuestion(q) && !answerText.trim()) return;
+    // 已作答过的题（通过进度条跳回）不再重复计分
+    const alreadyAnswered = !!answerRecords[current];
     setAnswered(true);
+    setRevealedAnswer(false);
     const correct = isTextQuestion(q)
       ? checkTextAnswer(answerText, q.answer)
       : (opts
           ? letters[selected] === q.answer
           : (selected === 0 && q.answer === "正确") || (selected === 1 && q.answer === "错误"));
-    if (correct) {
-      setScore(s => s + 1);
-      setCorrectStreak(s => {
-        const next = s + 1;
-        if (next === 3 || next === 5 || next % 5 === 0) {
-          setShowWin(true);
-          setTimeout(() => setShowWin(false), 2200);
-        }
-        return next;
-      });
-    } else {
-      setCorrectStreak(0);
-      setWrongList(w => [...w, q]);
+    if (!alreadyAnswered) {
+      setAnswerRecords(prev => ({ ...prev, [current]: { selectedIdx: selected, correct, revealed: false } }));
+      if (correct) {
+        setScore(s => s + 1);
+        setCorrectStreak(s => {
+          const next = s + 1;
+          if (next === 3 || next === 5 || next % 5 === 0) {
+            setShowWin(true);
+            setTimeout(() => setShowWin(false), 2200);
+          }
+          return next;
+        });
+      } else {
+        setCorrectStreak(0);
+        setWrongList(w => [...w, q]);
+      }
+      if (onAnswer && q) onAnswer(q.id || q.question, correct, q.chapter || "Unknown", q);
     }
-    if (onAnswer && q) onAnswer(q.id || q.question, correct, q.chapter || "Unknown", q);
   };
 
   const handleNext = () => {
@@ -4336,12 +4361,34 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       } catch {}
       return;
     }
-    setCurrent(c => c + 1); setSelected(null); setAnswerText(""); setAnswered(false); setShowHint(false); setShowAIHelp(false); setAIHelpReply(""); setAIHelpInput("");
+    jumpTo(current + 1);
+  };
+  // 跳转到指定题号：若该题已作答，恢复其答题快照，以只读方式展示
+  const jumpTo = (targetIdx) => {
+    if (targetIdx < 0 || targetIdx >= displayQ.length) return;
+    setCurrent(targetIdx);
+    const rec = answerRecords[targetIdx];
+    if (rec) {
+      setSelected(rec.selectedIdx);
+      setAnswered(true);
+      setRevealedAnswer(!!rec.revealed);
+    } else {
+      setSelected(null);
+      setAnswered(false);
+      setRevealedAnswer(false);
+    }
+    setAnswerText("");
+    setShowHint(false);
+    setShowAIHelp(false);
+    setAIHelpReply("");
+    setAIHelpInput("");
+    setAIContextPrompt("");
   };
   // Reset streak on quiz restart
   const handleRestartQuiz = () => {
     setCorrectStreak(0); setShowWin(false); setFinished(false);
     setCurrent(0); setSelected(null); setAnswerText(""); setAnswered(false); setScore(0); setWrongList([]);
+    setAnswerRecords({}); setRevealedAnswer(false); setAIContextPrompt("");
   };
 
   // Keyboard shortcuts
@@ -4852,12 +4899,99 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     if (opts) return letters[idx] === q.answer;
     return item === q.answer;
   });
+  const correctOptionText = correctIndex >= 0 ? normalizedOptions[correctIndex] : q.answer;
+  const userChoiceText = selectedOptionIndex != null ? normalizedOptions[selectedOptionIndex] : "";
+  // 针对用户选错的选项，尝试查找后端给出的"误解诊断"
+  const misconceptionForChoice = (() => {
+    if (!isWrongAnswered) return "";
+    const letter = opts ? letters[selectedOptionIndex] : null;
+    if (q.misconceptions && letter && q.misconceptions[letter]) return String(q.misconceptions[letter]);
+    if (Array.isArray(q.optionRationales) && selectedOptionIndex != null && q.optionRationales[selectedOptionIndex]) return String(q.optionRationales[selectedOptionIndex]);
+    return "";
+  })();
+  // 上下文感知 AI 引导：构造 prompt 并打开 AI 面板
+  const askAIInContext = (kind) => {
+    const stem = String(q.question || "");
+    const optLine = opts ? `\n【选项】\n${normalizedOptions.map((o,i) => `  ${letters[i]}. ${o}`).join("\n")}` : "";
+    let userMsg = "";
+    if (kind === "explore" || !isWrongAnswered) {
+      userMsg = `我刚答对了这道题，想深入理解一下这个知识点。\n\n【题目】${stem}${optLine}\n【正确答案】${q.answer}\n\n请确认我的思路，并补一个延伸的例子或应用场景，用轻松口吻。`;
+    } else if (kind === "reveal" || revealedAnswer) {
+      userMsg = `我已经看过正确答案了，但想弄清为什么我选错。\n\n【题目】${stem}${optLine}\n【我的选择】${userChoiceText || letters[selectedOptionIndex]}\n【正确答案】${q.answer}${misconceptionForChoice ? `\n【可能误解】${misconceptionForChoice}` : ""}\n\n请用 3 步拆解我思路里的漏洞，给一个更稳的思考框架。`;
+    } else {
+      userMsg = `我这道题选错了，先别告诉我正确答案。请用苏格拉底式提问，帮我重新梳理一下思路。\n\n【题目】${stem}${optLine}\n【我的选择】${userChoiceText || letters[selectedOptionIndex]}${misconceptionForChoice ? `\n【背景线索】${misconceptionForChoice}` : ""}\n\n只问 1 个关键问题，等我回答了你再继续。`;
+    }
+    setAIContextPrompt(userMsg);
+    setShowAIHelp(true);
+    setAIHelpReply("");
+    askQuestionAI(userMsg);
+  };
+  // 题目来源 / 知识点徽章
+  const metaKnowledge = Array.isArray(q.knowledgePoints) && q.knowledgePoints.length
+    ? q.knowledgePoints.join(" · ")
+    : (q.topic || "");
+  const metaDifficulty = q.difficulty || q.level || "";
+
   return (
     <div className="quiz-stage">
-      <div className="premium-card" style={{ marginBottom: 14, padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>第 {current + 1} / {displayQ.length} 题 · {q.chapter}</span>
-        {timerOn && <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>⏱ {String(Math.floor(timer/60)).padStart(2,"0")}:{String(timer%60).padStart(2,"0")}</span>}
+      {/* 顶部：可交互进度条 · 章节/知识点/难度 · 计时器 */}
+      <div className="premium-card" style={{ marginBottom: 14, padding: "14px 18px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
+              第 {current + 1} / {displayQ.length} 题
+            </span>
+            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>· {q.chapter || "未分类"}</span>
+            {metaKnowledge && <span style={{ fontSize: 12, color: "#6366F1", background: "#EEF2FF", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>🎯 {metaKnowledge}</span>}
+            {metaDifficulty && <span style={{ fontSize: 12, color: "#B45309", background: "#FEF3C7", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>⭐ {metaDifficulty}</span>}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+              ✓ {Object.values(answerRecords).filter(r => r.correct).length}
+              <span style={{ margin: "0 4px", opacity: 0.4 }}>/</span>
+              ✗ {Object.values(answerRecords).filter(r => !r.correct).length}
+            </span>
+            {timerOn && <span style={{ fontSize: 13, color: "var(--text-secondary)", fontVariantNumeric: "tabular-nums" }}>⏱ {String(Math.floor(timer/60)).padStart(2,"0")}:{String(timer%60).padStart(2,"0")}</span>}
+          </div>
+        </div>
+        {/* 可跳转进度点 */}
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {displayQ.map((_, i) => {
+            const rec = answerRecords[i];
+            const isCur = i === current;
+            let bg = "#E5E7EB", fg = "#6B7280", ring = "transparent", glyph = String(i + 1);
+            if (rec?.correct) { bg = "#10b981"; fg = "#fff"; glyph = "✓"; }
+            else if (rec && !rec.correct) { bg = "#ef4444"; fg = "#fff"; glyph = "✗"; }
+            if (isCur) ring = "#111827";
+            return (
+              <button
+                key={i}
+                onClick={() => jumpTo(i)}
+                title={rec ? (rec.correct ? `第 ${i+1} 题 · 答对` : `第 ${i+1} 题 · 答错`) : `第 ${i+1} 题`}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  height: 28,
+                  borderRadius: 8,
+                  border: `2px solid ${ring}`,
+                  background: bg,
+                  color: fg,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  transition: "transform .12s ease",
+                  fontFamily: "inherit",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.06)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+              >
+                {glyph}
+              </button>
+            );
+          })}
+        </div>
       </div>
+
       <QuizPageView
         question={q.question}
         options={normalizedOptions}
@@ -4867,15 +5001,166 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         isCorrect={!answered ? false : selectedOptionIndex === correctIndex}
         onSubmit={handleSubmit}
         onNext={handleNext}
-        explanation={q.explanation || aiHelpReply}
-        showScaffold={(answered && isWrongAnswered) || showAIHelp}
+        explanation=""
+        showScaffold={false}
         wrongShake={answered && isWrongAnswered}
         mathRenderer={(txt) => <MathText text={String(txt || "")} />}
+        hideFooter={true}
+        correctIndex={correctIndex}
+        revealed={revealedAnswer}
       />
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-        <Btn onClick={() => { if (current > 0) { setCurrent(c => c-1); setSelected(null); setAnswered(false); setShowHint(false); } }}>← 上一题</Btn>
-        <div style={{ display: "flex", gap: 10 }}>
-          <Btn size="sm" onClick={() => setShowAIHelp(v => !v)}>问 AI 解析</Btn>
+
+      {/* 未提交：提交按钮独占一行（不再与"下一题"混在一起） */}
+      {!answered && (
+        <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+          <Btn onClick={() => { if (current > 0) jumpTo(current - 1); }} disabled={current === 0}>← 上一题</Btn>
+          <Btn variant="primary" onClick={handleSubmit} disabled={(!isTextQuestion(q) && selected === null) || (isTextQuestion(q) && !answerText.trim())}>
+            提交答案
+          </Btn>
+        </div>
+      )}
+
+      {/* 已提交：反馈卡片（答对/答错两套 UX，必须看完才能下一题） */}
+      {answered && !isWrongAnswered && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 240, damping: 22 }}
+          className="premium-card"
+          style={{ marginTop: 14, padding: 20, borderLeft: "4px solid #10b981", background: "linear-gradient(180deg,#F0FDF4 0%,#FFFFFF 60%)" }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#10b981", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 900 }}>✓</div>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#065F46" }}>答对了！</div>
+              <div style={{ fontSize: 12, color: "#059669" }}>
+                {correctStreak >= 3 ? `🔥 已连对 ${correctStreak} 题` : "稳住这个节奏"}
+              </div>
+            </div>
+          </div>
+          {q.explanation && (
+            <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", marginBottom: 12 }}>
+              <MathText text={String(q.explanation)} />
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+            <Btn size="sm" onClick={() => askAIInContext("explore")}>💬 问 AI 深入讨论</Btn>
+            <Btn variant="primary" onClick={handleNext}>
+              {current >= displayQ.length - 1 ? "完成小测 →" : "下一题 →"}
+            </Btn>
+          </div>
+        </motion.div>
+      )}
+
+      {answered && isWrongAnswered && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ type: "spring", stiffness: 240, damping: 22 }}
+          className="premium-card"
+          style={{ marginTop: 14, padding: 20, borderLeft: "4px solid #F59E0B", background: "linear-gradient(180deg,#FFFBEB 0%,#FFFFFF 60%)" }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#F59E0B", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 900 }}>?</div>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#92400E" }}>再想想？</div>
+              <div style={{ fontSize: 12, color: "#B45309" }}>你选了「{userChoiceText || letters[selectedOptionIndex]}」</div>
+            </div>
+          </div>
+
+          {!revealedAnswer && (
+            <>
+              <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", marginBottom: 12, padding: "10px 14px", background: "#FEF3C7", borderRadius: 12 }}>
+                {misconceptionForChoice
+                  ? <><b>可能的思维陷阱：</b>{misconceptionForChoice}</>
+                  : "别急着看答案——先和 AI 一起重新梳理一下思路，学习发生在这一刻，不在"看到答案"那一刻。"}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Btn variant="primary" onClick={() => askAIInContext("guide")}>💬 让 AI 引导我拆解</Btn>
+                  <Btn size="sm" onClick={() => {
+                    setRevealedAnswer(true);
+                    setAnswerRecords(prev => ({ ...prev, [current]: { ...(prev[current] || { selectedIdx: selected, correct: false }), revealed: true } }));
+                  }}>👁 看正确答案</Btn>
+                </div>
+                <Btn size="sm" onClick={handleNext} style={{ opacity: 0.6 }}>
+                  先跳过 →
+                </Btn>
+              </div>
+            </>
+          )}
+
+          {revealedAnswer && (
+            <>
+              <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)", marginBottom: 10 }}>
+                <div style={{ fontWeight: 700, color: "#065F46", marginBottom: 6 }}>✓ 正确答案：{q.answer}{correctOptionText && correctOptionText !== q.answer ? `（${correctOptionText}）` : ""}</div>
+                {q.explanation && <MathText text={String(q.explanation)} />}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+                <Btn size="sm" onClick={() => askAIInContext("reveal")}>💬 继续和 AI 讨论</Btn>
+                <Btn variant="primary" onClick={handleNext}>
+                  {current >= displayQ.length - 1 ? "完成小测 →" : "下一题 →"}
+                </Btn>
+              </div>
+            </>
+          )}
+        </motion.div>
+      )}
+
+      {/* 内联 AI 引导面板（上下文感知） */}
+      {showAIHelp && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0 }}
+          className="premium-card"
+          style={{ marginTop: 12, padding: 18, borderLeft: "4px solid #6366F1", overflow: "hidden" }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "#4338CA" }}>💬 AI 引导</div>
+            <button onClick={() => { setShowAIHelp(false); setAIHelpReply(""); }} style={{ border: "none", background: "transparent", color: "#6B7280", cursor: "pointer", fontSize: 13 }}>收起 ×</button>
+          </div>
+          {aiContextPrompt && (
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 8, padding: "8px 10px", background: "#F3F4F6", borderRadius: 10, whiteSpace: "pre-wrap", maxHeight: 72, overflow: "hidden", position: "relative" }}>
+              <b style={{ color: "#4338CA" }}>发给 AI 的上下文：</b>
+              <div style={{ marginTop: 4 }}>{aiContextPrompt.length > 180 ? aiContextPrompt.slice(0, 180) + "..." : aiContextPrompt}</div>
+            </div>
+          )}
+          {aiHelpLoading && <div style={{ fontSize: 13, color: "#6366F1" }}>AI 正在思考中…</div>}
+          {!aiHelpLoading && aiHelpReply && (
+            <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)" }}>
+              <MathText text={aiHelpReply} />
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <input
+              type="text"
+              value={aiHelpInput}
+              onChange={(e) => setAIHelpInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && aiHelpInput.trim()) { askQuestionAI(aiHelpInput); setAIHelpInput(""); } }}
+              placeholder="继续追问，比如：那如果条件改成…"
+              style={{ flex: 1, padding: "10px 14px", borderRadius: 12, border: "1px solid rgba(0,0,0,0.12)", fontSize: 14, fontFamily: "inherit", outline: "none" }}
+            />
+            <Btn size="sm" onClick={() => { if (aiHelpInput.trim()) { askQuestionAI(aiHelpInput); setAIHelpInput(""); } }}>发送</Btn>
+          </div>
+        </motion.div>
+      )}
+
+      {/* 底部辅助工具栏（次要操作） */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14, padding: "0 4px" }}>
+        <Btn size="sm" onClick={() => { if (current > 0) jumpTo(current - 1); }} disabled={current === 0}>← 上一题</Btn>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn size="sm" onClick={() => {
+            try {
+              const bookmarks = JSON.parse(localStorage.getItem("mc_quiz_bookmarks") || "[]");
+              const key = q.id || q.question;
+              if (bookmarks.includes(key)) {
+                localStorage.setItem("mc_quiz_bookmarks", JSON.stringify(bookmarks.filter(b => b !== key)));
+              } else {
+                localStorage.setItem("mc_quiz_bookmarks", JSON.stringify([...bookmarks, key]));
+              }
+            } catch {}
+          }}>★ 标记</Btn>
         </div>
       </div>
     </div>
