@@ -988,6 +988,44 @@ const isLowQualityQuestion = (q) => {
   if (/关于[《【「『][^》】」』]{1,30}[》】」』][^。]{0,6}(?:说法|态度|方法).{0,6}(?:最合理|最恰当|正确的是)/.test(text)) return true;
   if (/(应同时关注定义|应同时掌握定义|机械套用|通过例题验证理解|学习(方法|态度|策略))/.test(text) && Array.isArray(opts)) return true;
 
+  // ——— 人名 / 时间戳 / 元指代 三连兜底 ———
+  // 白名单：常见数学家/算法名字，允许出现
+  const MATH_PERSON_WHITELIST = new Set([
+    "Newton","Euler","Gauss","Laplace","Fourier","Taylor","Maclaurin","Cauchy","Riemann",
+    "Lagrange","Hamilton","Lebesgue","Hilbert","Banach","Schwarz","Minkowski","Jordan",
+    "Lipschitz","Hermite","Jacobi","Runge","Kutta","Galerkin","Chebyshev","Bernoulli",
+    "Gram","Legendre","Wronski","Wronskian","Gauss-Jordan","Gauss-Seidel","Gram-Schmidt",
+    "ODE","PDE","BVP","IVP","CFL","LU","QR","SVD","LP","KKT","SGD","BFGS","Adam","LBFGS",
+    "January","February","March","April","May","June","July","August","September","October",
+    "November","December","Janu",
+  ]);
+  const stripMath = text.replace(/\$[^$]*\$/g, " ").replace(/\$\$[^$]*\$\$/g, " ");
+  const properNouns = stripMath.match(/\b[A-Z][a-z]{2,15}\b/g) || [];
+  const suspiciousNames = properNouns.filter(n => !MATH_PERSON_WHITELIST.has(n));
+  // 3 个及以上非白名单英文专有名词 → 八成是笔记/讲义的元数据混进来
+  if (suspiciousNames.length >= 3) return true;
+  // 题干以"关于 XX"开头、XX 是非数学词 → 极可能是人名/元数据题（如"关于 Leon"）
+  if (/^\s*关于\s*[「『]?([A-Z][a-z]+)[」』]?\s*[，,、]/.test(text)) {
+    const m = text.match(/^\s*关于\s*[「『]?([A-Z][a-z]+)[」』]?/);
+    if (m && !MATH_PERSON_WHITELIST.has(m[1])) return true;
+  }
+
+  // 时间戳 / 日期
+  if (/\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}:\d{2}\s?(AM|PM|am|pm)|\d{4}-\d{2}-\d{2}/.test(text)) return true;
+  if (/\d{4}\s*年\s*\d{1,2}\s*月/.test(text)) return true;
+
+  // 元指代（问的是"这份资料本身"）
+  if (/(这份资料|本资料|这本书|本书中|原文(里|中|未提及)|本(章|节|课)(里|中).{0,6}(讲|提到|说|描述))/.test(text)) return true;
+
+  // 选项里如果出现作者姓名 + 时间戳 组合，基本 100% 是元数据污染
+  if (Array.isArray(opts)) {
+    const optText = opts.join(" ");
+    if (/\d{1,2}\/\d{1,2}\/\d{2,4}.{0,10}\d{1,2}:\d{2}/.test(optText)) return true;
+    const optNouns = (optText.replace(/\$[^$]*\$/g, " ").match(/\b[A-Z][a-z]{2,15}\b/g) || [])
+      .filter(n => !MATH_PERSON_WHITELIST.has(n));
+    if (optNouns.length >= 2) return true;
+  }
+
   return false;
 };
 
@@ -4894,6 +4932,14 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   // ── Quiz screen (modular view) ──
   const normalizedOptions = opts || (q.type === "判断题" ? ["正确", "错误"] : []);
+  // 双语辅助文本（中主英辅）：若题目带英文版则并排展示
+  const optsEn = q?.options_en
+    ? (typeof q.options_en === "string" ? (() => { try { return JSON.parse(q.options_en); } catch { return null; } })() : q.options_en)
+    : null;
+  const normalizedOptionsSecondary = Array.isArray(optsEn) && optsEn.length === normalizedOptions.length
+    ? optsEn
+    : [];
+  const questionSecondary = q?.question_en || q?.stem_en || "";
   const selectedOptionIndex = selected;
   const correctIndex = normalizedOptions.findIndex((item, idx) => {
     if (opts) return letters[idx] === q.answer;
@@ -4994,7 +5040,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
       <QuizPageView
         question={q.question}
+        questionSecondary={questionSecondary}
         options={normalizedOptions}
+        optionsSecondary={normalizedOptionsSecondary}
         selectedIndex={selectedOptionIndex}
         onSelectOption={(idx) => { if (!answered) setSelected(idx); }}
         submitted={answered}
@@ -6427,10 +6475,65 @@ function SimpleChart({ config }) {
   );
 }
 
+// ── 小测/解析场景下的"裸公式抢救器" ────────────────────────────────
+// AI 偶尔会把数学内容吐成纯文本（如 "d²θ/dt² + sinθ = 0"、"u(x) = e^∫p(x)dx"）。
+// 这里用保守的模式匹配补上 $...$ 包裹，避免前端展平成 "d t 2"。
+function rescueQuizMath(input) {
+  if (!input) return "";
+  const parts = String(input).split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g);
+  const GREEK_MAP = { α:"alpha",β:"beta",γ:"gamma",δ:"delta",ε:"epsilon",ζ:"zeta",η:"eta",θ:"theta",ι:"iota",κ:"kappa",λ:"lambda",μ:"mu",ν:"nu",ξ:"xi",π:"pi",ρ:"rho",σ:"sigma",τ:"tau",υ:"upsilon",φ:"phi",χ:"chi",ψ:"psi",ω:"omega",Γ:"Gamma",Δ:"Delta",Θ:"Theta",Λ:"Lambda",Ξ:"Xi",Π:"Pi",Σ:"Sigma",Υ:"Upsilon",Φ:"Phi",Ψ:"Psi",Ω:"Omega" };
+  const GREEK_RE = /[αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ]/;
+  const g2tex = (ch) => (GREEK_MAP[ch] ? "\\" + GREEK_MAP[ch] : ch);
+  const varToTex = (v) => (GREEK_RE.test(v) ? g2tex(v) : v);
+
+  return parts.map((chunk) => {
+    if (!chunk || chunk.startsWith("$")) return chunk;
+    let out = chunk;
+
+    // 1) 高阶导数 (Unicode 上标形式): d²θ/dt², d³y/dx³
+    out = out.replace(
+      /\bd([²³])\s?([A-Za-zαβγδεζηθικλμνξοπρστυφχψω])\s?\/\s?d\s?([A-Za-zαβγδεζηθικλμνξοπρστυφχψω])\s?([²³])/gu,
+      (_m, s1, num, den, s2) => {
+        const order = s1 === "²" ? "2" : "3";
+        return `$\\frac{d^{${order}}${varToTex(num)}}{d${varToTex(den)}^{${order}}}$`;
+      }
+    );
+    // 2) 高阶导数 (ASCII 上标形式): d^2y/dx^2
+    out = out.replace(
+      /\bd\^(\d+)\s?([A-Za-zαβγδεζηθικλμνξοπρστυφχψω])\s?\/\s?d\s?([A-Za-zαβγδεζηθικλμνξοπρστυφχψω])\s?\^?\1/gu,
+      (_m, n, num, den) => `$\\frac{d^{${n}}${varToTex(num)}}{d${varToTex(den)}^{${n}}}$`
+    );
+    // 3) 一阶导数: dy/dx, dθ/dt（注意需用负向后视排除已写过的 \frac 内部场景）
+    out = out.replace(
+      /\bd([A-Za-zαβγδεζηθικλμνξοπρστυφχψω])\s?\/\s?d([A-Za-zαβγδεζηθικλμνξοπρστυφχψω])\b/gu,
+      (_m, n, d) => `$\\frac{d${varToTex(n)}}{d${varToTex(d)}}$`
+    );
+    // 4) 偏导数 ∂y/∂x
+    out = out.replace(/∂([A-Za-z])\s?\/\s?∂([A-Za-z])/g, "$\\frac{\\partial $1}{\\partial $2}$");
+    // 5) 指数包裹积分: e^∫p(x)dx → $e^{\int p(x)\,dx}$
+    out = out.replace(/\be\^\s?∫\s?([^\n$]{1,60}?)\s?d([A-Za-z])\b/g, "$e^{\\int $1\\,d$2}$");
+    // 6) 积分带 dx
+    out = out.replace(/∫\s?([^.\n$]{1,80}?)\s?d([A-Za-z])\b/g, "$\\int $1\\,d$2$");
+    // 7) e^{...}, e^(...)
+    out = out.replace(/\be\^\{([^{}\n]{1,60})\}/g, "$e^{$1}$");
+    out = out.replace(/\be\^\(([^()\n]{1,60})\)/g, "$e^{$1}$");
+    // 8) 三角/对数 + 裸希腊字母: sin θ, cos x, ln x
+    out = out.replace(
+      /\b(sin|cos|tan|ln|log|exp)\s?([A-Za-zαβγδεζηθικλμνξοπρστυφχψω])\b/gu,
+      (_m, fn, v) => `$\\${fn} ${varToTex(v)}$`
+    );
+    // 9) 一撇/二撇导数 y', f''
+    out = out.replace(/\b([yfguv])('{1,3})(?=[\s+\-=()]|$)/g, "$$1$2$");
+    return out;
+  }).join("");
+}
+
 function MathText({ text }) {
   if (!text) return <span />;
   const interactiveParams = useMathStore((s) => s.interactiveParams);
   const setInteractiveParam = useMathStore((s) => s.setInteractiveParam);
+  // 前置抢救：先把裸公式补成 $...$ 再走常规渲染
+  text = rescueQuizMath(text);
   // Extract [CHART:{...}] blocks tracking bracket depth to handle nested arrays
   const chartBlocks = [];
   const varBlocks = [];

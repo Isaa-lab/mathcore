@@ -15,7 +15,9 @@ function renderScaffoldSteps(text) {
 
 export default function QuizPage({
   question,
+  questionSecondary = "",
   options = [],
+  optionsSecondary = [],
   selectedIndex,
   onSelectOption,
   submitted,
@@ -31,6 +33,7 @@ export default function QuizPage({
   revealed = false,
 }) {
   const scaffoldSteps = renderScaffoldSteps(explanation);
+  const render = (txt) => (mathRenderer ? mathRenderer(txt) : txt);
 
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "12px 10px 20px" }}>
@@ -40,12 +43,29 @@ export default function QuizPage({
             fontSize: "1.125rem",
             lineHeight: 1.7,
             color: "var(--text-primary)",
-            marginBottom: 18,
+            marginBottom: questionSecondary ? 6 : 18,
             fontWeight: 600,
           }}
         >
-          {mathRenderer ? mathRenderer(question) : question}
+          {render(question)}
         </div>
+        {questionSecondary && (
+          <div
+            style={{
+              fontSize: "0.85rem",
+              lineHeight: 1.55,
+              color: "var(--text-secondary)",
+              marginBottom: 18,
+              fontStyle: "italic",
+              opacity: 0.82,
+              paddingLeft: 2,
+              borderLeft: "2px solid rgba(99,102,241,0.2)",
+              paddingInlineStart: 10,
+            }}
+          >
+            {render(questionSecondary)}
+          </div>
+        )}
 
         <div style={{ display: "grid", gap: 10 }}>
           {options.map((opt, idx) => (
@@ -84,7 +104,21 @@ export default function QuizPage({
                 };
               })()}
             >
-              {mathRenderer ? mathRenderer(opt) : opt}
+              <div>{render(opt)}</div>
+              {optionsSecondary && optionsSecondary[idx] && (
+                <div
+                  style={{
+                    fontSize: "0.78rem",
+                    color: "var(--text-secondary)",
+                    fontStyle: "italic",
+                    opacity: 0.72,
+                    marginTop: 4,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {render(optionsSecondary[idx])}
+                </div>
+              )}
             </motion.div>
           ))}
         </div>
