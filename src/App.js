@@ -4725,8 +4725,13 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       if (!res.ok || data.error) {
         // 后端给的 error 文本本身就是用户可读的（"暂无可用 AI 服务..." 这类），
         // 直接透出来，别再被"抱歉卡住了"一层吞掉。根据关键词推断具体错因 + 给出口。
+        // ⚠️ 注意：当 Vercel 返回 HTML 崩溃页时，data.error 为空、rawBodySnippet 里才有
+        // "FUNCTION_INVOCATION_FAILED" 这样的关键词 —— 分类器要两者都看一眼。
         const rawErr = String(data.error || data.message || `HTTP ${res.status}`).trim();
-        const hint = classifyChatError(rawErr, res.status);
+        const classifierInput = data.error || data.message
+          ? rawErr
+          : `${rawErr} ${rawBodySnippet || ""}`;
+        const hint = classifyChatError(classifierInput, res.status);
         // 诊断详情在所有环境都保留（折叠展示），这样线上也能排查
         const diagLine = data.diag ? `\n诊断: ${data.diag}` : "";
         const elapsedLine = data.elapsed ? `\n耗时: ${data.elapsed}ms` : "";
