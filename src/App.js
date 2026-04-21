@@ -7001,188 +7001,548 @@ function TeacherPage({ setPage, profile }) {
 // ── Root App ──────────────────────────────────────────────────────────────────
 
 // ── Skill Tree Page ───────────────────────────────────────────────────────────
+// DAG 数据模型（真实先修关系，而非对称树）
+//   - deps[*].kind: "strong"(必备) | "weak"(建议) | "peer"(并列)
+//   - sym: 数学符号身份（禁用 emoji，保证视觉一致）
+//   - estMin: 预计学习时长（分钟）
+//   - bullet: 一句话要点（hover/选中面板展示）
 const SKILL_TREE = [
-  // 数值分析链
-  { id: "误差分析",      label: "误差分析",    emoji: "📏", deps: [],                      course: "数值分析", x: 80,  y: 60 },
-  { id: "浮点数系统",    label: "浮点数系统",  emoji: "💾", deps: ["误差分析"],             course: "数值分析", x: 80,  y: 170 },
-  { id: "方程求解",      label: "方程求解",    emoji: "🔍", deps: ["浮点数系统"],           course: "数值分析", x: 80,  y: 280 },
-  { id: "插值方法",      label: "插值法",      emoji: "📈", deps: ["方程求解"],             course: "数值分析", x: 80,  y: 390 },
-  { id: "数值积分",      label: "数值积分",    emoji: "∫",  deps: ["插值方法"],             course: "数值分析", x: 80,  y: 500 },
-  { id: "数值微分",      label: "数值微分",    emoji: "Δ",deps: ["插值方法"],            course: "数值分析", x: 240, y: 500 },
-  // 线性代数链
-  { id: "矩阵运算",      label: "矩阵运算",    emoji: "🔢", deps: [],                      course: "线性代数", x: 440, y: 60 },
-  { id: "线性方程组",    label: "线性方程组",  emoji: "📐", deps: ["矩阵运算"],             course: "线性代数", x: 440, y: 170 },
-  { id: "行列式",        label: "行列式",      emoji: "▣", deps: ["矩阵运算"],            course: "线性代数", x: 580, y: 170 },
-  { id: "向量空间",      label: "向量空间",    emoji: "↗",  deps: ["线性方程组","行列式"],  course: "线性代数", x: 510, y: 280 },
-  { id: "特征值",        label: "特征值", emoji: "λ", deps: ["向量空间"],         course: "线性代数", x: 510, y: 390 },
-  // 微分方程链
-  { id: "一阶ODE",       label: "一阶ODE",    emoji: "🔄", deps: [],                  course: "ODE",      x: 780, y: 60 },
-  { id: "分离变量法",    label: "分离变量法",  emoji: "⊕", deps: ["一阶ODE"],              course: "ODE",      x: 680, y: 170 },
-  { id: "积分因子",      label: "积分因子法",  emoji: "μ", deps: ["一阶ODE"],              course: "ODE",      x: 870, y: 170 },
-  { id: "二阶ODE",       label: "二阶ODE", emoji: "y''", deps: ["分离变量法","积分因子"], course: "ODE", x: 780, y: 280 },
-  { id: "拉普拉斯变换",  label: "Laplace变换", emoji: "ʟ", deps: ["二阶ODE"],             course: "ODE",      x: 780, y: 390 },
-  // 概率统计链
-  { id: "概率基础",      label: "概率基础",    emoji: "🎲", deps: [],                      course: "概率论",   x: 1060, y: 60 },
-  { id: "随机变量",      label: "随机变量",    emoji: "X",  deps: ["概率基础"],            course: "概率论",   x: 1060, y: 170 },
-  { id: "期望与方差",    label: "期望方差",  emoji: "𝔼", deps: ["随机变量"],           course: "概率论",   x: 1060, y: 280 },
-  { id: "大数定律",      label: "大数定律", emoji: "∞", deps: ["期望与方差"],          course: "概率论",   x: 1060, y: 390 },
+  // ── 数值分析 ──────────────────────────────────────────────
+  { id: "err",    label: "误差分析",   sym: "ε",     course: "数值分析", x: 80,   y: 70,  estMin: 25, bullet: "相对误差 / 绝对误差 / 截断误差", deps: [] },
+  { id: "float",  label: "浮点数系统", sym: "2⁻⁵²", course: "数值分析", x: 80,   y: 200, estMin: 30, bullet: "IEEE 754 · 机器精度 · 舍入",       deps: [{ id: "err", kind: "strong" }] },
+  { id: "root",   label: "方程求解",   sym: "f⁻¹",  course: "数值分析", x: 80,   y: 340, estMin: 40, bullet: "二分 / Newton / 不动点迭代",        deps: [{ id: "float", kind: "strong" }] },
+  { id: "interp", label: "插值法",     sym: "P(x)", course: "数值分析", x: 240,  y: 340, estMin: 45, bullet: "Lagrange · Newton · 样条",           deps: [{ id: "err", kind: "weak" }] },
+  { id: "quad",   label: "数值积分",   sym: "∫",    course: "数值分析", x: 80,   y: 480, estMin: 40, bullet: "梯形 / Simpson / Gauss 求积",        deps: [{ id: "interp", kind: "strong" }] },
+  { id: "diff",   label: "数值微分",   sym: "Δ",    course: "数值分析", x: 240,  y: 480, estMin: 30, bullet: "前向 / 中心差分 · 截断分析",          deps: [{ id: "interp", kind: "strong" }] },
+
+  // ── 线性代数（单列垂直链）──────────────────────────────────
+  { id: "mat",    label: "矩阵运算",   sym: "A·B",  course: "线性代数", x: 520,  y: 70,  estMin: 30, bullet: "加减乘 · 转置 · 逆",                 deps: [] },
+  { id: "det",    label: "行列式",     sym: "|A|",  course: "线性代数", x: 520,  y: 200, estMin: 25, bullet: "展开式 · 性质 · Cramer",             deps: [{ id: "mat", kind: "strong" }] },
+  { id: "linsys", label: "线性方程组", sym: "Ax=b", course: "线性代数", x: 520,  y: 340, estMin: 45, bullet: "高斯消元 · 可解性判定",              deps: [{ id: "det", kind: "strong" }, { id: "mat", kind: "strong" }] },
+  { id: "vspace", label: "向量空间",   sym: "V",    course: "线性代数", x: 520,  y: 480, estMin: 50, bullet: "基 · 维数 · 线性变换",                deps: [{ id: "linsys", kind: "strong" }] },
+  { id: "eigen",  label: "特征值",     sym: "λv",   course: "线性代数", x: 520,  y: 620, estMin: 55, bullet: "特征多项式 · 对角化",                 deps: [{ id: "vspace", kind: "strong" }, { id: "det", kind: "weak" }] },
+
+  // ── ODE ──────────────────────────────────────────────────
+  { id: "ode1",   label: "一阶 ODE",     sym: "y'",   course: "ODE",      x: 780,  y: 70,  estMin: 30, bullet: "IVP · 存在唯一性",                  deps: [] },
+  { id: "sep",    label: "分离变量法",   sym: "∫dy", course: "ODE",      x: 720,  y: 200, estMin: 30, bullet: "dy/g(y)=f(x)dx 型",                 deps: [{ id: "ode1", kind: "strong" }] },
+  { id: "intfact",label: "积分因子法",   sym: "μ",   course: "ODE",      x: 880,  y: 200, estMin: 35, bullet: "y'+Py=Q 线性型",                    deps: [{ id: "ode1", kind: "strong" }, { id: "sep", kind: "peer" }] },
+  { id: "ode2",   label: "二阶 ODE",     sym: "y''", course: "ODE",      x: 780,  y: 620, estMin: 50, bullet: "常系数 · 待定系数 / 常数变易",      deps: [{ id: "intfact", kind: "strong" }, { id: "eigen", kind: "strong" }] },
+  { id: "lap",    label: "Laplace 变换", sym: "𝓛",  course: "ODE",      x: 780,  y: 760, estMin: 55, bullet: "s 域 · IVP 求解 · 卷积",             deps: [{ id: "ode2", kind: "strong" }] },
+
+  // ── 概率论 ────────────────────────────────────────────────
+  { id: "prob",   label: "概率基础",   sym: "P(A)", course: "概率论",   x: 1060, y: 70,  estMin: 25, bullet: "样本空间 · 条件概率 · 独立",         deps: [] },
+  { id: "rv",     label: "随机变量",   sym: "X",    course: "概率论",   x: 1060, y: 200, estMin: 35, bullet: "分布律 · 密度 · 联合分布",           deps: [{ id: "prob", kind: "strong" }] },
+  { id: "ev",     label: "期望方差",   sym: "𝔼",   course: "概率论",   x: 1060, y: 340, estMin: 40, bullet: "线性性 · 独立性 · 协方差",            deps: [{ id: "rv", kind: "strong" }] },
+  { id: "lln",    label: "大数定律",   sym: "n→∞", course: "概率论",   x: 1060, y: 480, estMin: 45, bullet: "弱/强 LLN · CLT",                    deps: [{ id: "ev", kind: "strong" }] },
 ];
 
+const NODE_INDEX = Object.fromEntries(SKILL_TREE.map(n => [n.id, n]));
+
 const COURSE_COLORS_TREE = {
-  "数值分析": { bg: "#dbeafe", border: "#3b82f6", text: "#1d4ed8" },
-  "线性代数": { bg: "#dcfce7", border: "#22c55e", text: "#15803d" },
-  "ODE":      { bg: "#fce7f3", border: "#ec4899", text: "#be185d" },
-  "概率论":   { bg: "#fef3c7", border: "#f59e0b", text: "#b45309" },
+  "数值分析": { solid: "#3B82F6", soft: "#EFF6FF", ring: "#BFDBFE", ink: "#1D4ED8" },
+  "线性代数": { solid: "#10B981", soft: "#ECFDF5", ring: "#A7F3D0", ink: "#047857" },
+  "ODE":      { solid: "#8B5CF6", soft: "#F5F3FF", ring: "#DDD6FE", ink: "#5B21B6" },
+  "概率论":   { solid: "#F59E0B", soft: "#FFFBEB", ring: "#FDE68A", ink: "#B45309" },
 };
 
-function SkillTreePage({ setPage }) {
-  const [mastery, setMastery] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("mc_skill_mastery") || "{}"); } catch { return {}; }
+// 状态派生：locked / unlocked / learning / mastered
+function deriveStatus(node, progress) {
+  const st = progress?.[node.id]?.status;
+  if (st === "mastered") return "mastered";
+  if (st === "learning") return "learning";
+  const strong = (node.deps || []).filter(d => d.kind === "strong");
+  const allMet = strong.every(d => progress?.[d.id]?.status === "mastered");
+  return allMet ? "unlocked" : "locked";
+}
+
+// 推荐下一步：已解锁 / 学习中 里，按（学习中优先 → 可解锁的下游节点数降序 → 时长升序）
+function computeRecommendations(progress) {
+  const candidates = [];
+  for (const n of SKILL_TREE) {
+    const s = deriveStatus(n, progress);
+    if (s === "unlocked" || s === "learning") {
+      const downstream = SKILL_TREE.filter(m => (m.deps || []).some(d => d.id === n.id && d.kind === "strong")).length;
+      candidates.push({ node: n, status: s, downstream });
+    }
+  }
+  candidates.sort((a, b) => {
+    if (a.status !== b.status) return a.status === "learning" ? -1 : 1;
+    if (a.downstream !== b.downstream) return b.downstream - a.downstream;
+    return a.node.estMin - b.node.estMin;
   });
-  const [tooltip, setTooltip] = useState(null);
+  return candidates.slice(0, 3);
+}
+
+const MS_DAY = 86400000;
+
+function SkillTreePage({ setPage }) {
+  // 新数据模型：{ [id]: { status, updatedAt, masteredAt } }
+  // 向后兼容旧的 mc_skill_mastery (number 0/1/2)
+  const [progress, setProgress] = useState(() => {
+    try {
+      const v2 = JSON.parse(localStorage.getItem("mc_skill_progress_v2") || "null");
+      if (v2 && typeof v2 === "object") return v2;
+      const legacy = JSON.parse(localStorage.getItem("mc_skill_mastery") || "{}");
+      const now = Date.now();
+      const migrated = {};
+      for (const [id, v] of Object.entries(legacy || {})) {
+        if (v === 2) migrated[id] = { status: "mastered", updatedAt: now, masteredAt: now };
+        else if (v === 1) migrated[id] = { status: "learning", updatedAt: now };
+      }
+      return migrated;
+    } catch { return {}; }
+  });
+
+  const persist = useCallback((next) => {
+    try { localStorage.setItem("mc_skill_progress_v2", JSON.stringify(next)); } catch {}
+  }, []);
+
+  const [selectedId, setSelectedId] = useState(null);
   const [selectedCourse, setSelectedCourse] = useState("全部");
 
-  const courses = ["全部", ...new Set(SKILL_TREE.map(s => s.course))];
+  const courses = useMemo(() => ["全部", ...Array.from(new Set(SKILL_TREE.map(s => s.course)))], []);
+  const visibleNodes = useMemo(() => (
+    selectedCourse === "全部" ? SKILL_TREE : SKILL_TREE.filter(n => n.course === selectedCourse)
+  ), [selectedCourse]);
+  const visibleIds = useMemo(() => new Set(visibleNodes.map(n => n.id)), [visibleNodes]);
 
-  const getNodeStatus = (node) => {
-    if (mastery[node.id] === 2) return "mastered";
-    if (mastery[node.id] === 1) return "learning";
-    const allDepsOk = node.deps.every(d => mastery[d] >= 1);
-    return allDepsOk ? "unlocked" : "locked";
-  };
+  const statusCounts = useMemo(() => {
+    const c = { mastered: 0, learning: 0, unlocked: 0, locked: 0 };
+    SKILL_TREE.forEach(n => { c[deriveStatus(n, progress)]++; });
+    return c;
+  }, [progress]);
 
-  const handleNodeClick = (node) => {
-    const status = getNodeStatus(node);
-    if (status === "locked") return;
-    setMastery(prev => {
-      const cur = prev[node.id] || 0;
-      const next = { ...prev, [node.id]: (cur + 1) % 3 };
-      localStorage.setItem("mc_skill_mastery", JSON.stringify(next));
+  const recommendations = useMemo(() => computeRecommendations(progress), [progress]);
+  const recommendedSet = useMemo(() => new Set(recommendations.map(r => r.node.id)), [recommendations]);
+
+  // 复习提醒：已掌握 >= 7 天的
+  const reviewDue = useMemo(() => {
+    const now = Date.now();
+    return SKILL_TREE
+      .map(n => ({ node: n, p: progress[n.id] }))
+      .filter(({ p }) => p && p.status === "mastered" && p.masteredAt && (now - p.masteredAt) >= 7 * MS_DAY)
+      .sort((a, b) => a.p.masteredAt - b.p.masteredAt)
+      .slice(0, 3);
+  }, [progress]);
+
+  const mutate = (id, patch) => {
+    setProgress(prev => {
+      const now = Date.now();
+      const existing = prev[id];
+      const nextEntry = patch === null ? undefined : { ...(existing || {}), ...patch, updatedAt: now };
+      const next = { ...prev };
+      if (nextEntry === undefined) delete next[id];
+      else next[id] = nextEntry;
+      persist(next);
       return next;
     });
   };
 
-  const filteredNodes = selectedCourse === "全部" ? SKILL_TREE : SKILL_TREE.filter(n => n.course === selectedCourse);
+  const actStart   = (id) => mutate(id, { status: "learning" });
+  const actMaster  = (id) => mutate(id, { status: "mastered", masteredAt: Date.now() });
+  const actReview  = (id) => mutate(id, { status: "mastered", masteredAt: Date.now() });
+  const actPause   = (id) => mutate(id, { status: "learning", masteredAt: undefined });
+  const actReset   = (id) => mutate(id, null);
 
-  const nodeStatusStyle = (status) => {
-    if (status === "mastered") return { bg: "rgba(6,182,212,0.22)", border: "#06b6d4", text: "#cffafe", shadow: "0 0 20px rgba(6, 182, 212, 0.6)" };
-    if (status === "learning") return { bg: "rgba(139,92,246,0.24)", border: "#8b5cf6", text: "#ede9fe", shadow: "0 0 14px rgba(139,92,246,0.45)" };
-    if (status === "unlocked") return { bg: "rgba(255,255,255,0.06)", border: "rgba(255,255,255,0.5)", text: "#cbd5e1", shadow: "0 0 10px rgba(148,163,184,0.3)" };
-    return { bg: "rgba(148,163,184,0.14)", border: "rgba(148,163,184,0.5)", text: "#94a3b8", shadow: "none" };
+  const selected = selectedId ? NODE_INDEX[selectedId] : null;
+  const selectedStatus = selected ? deriveStatus(selected, progress) : null;
+
+  // 画布尺寸
+  const maxX = Math.max(...visibleNodes.map(n => n.x), 800) + 160;
+  const maxY = Math.max(...visibleNodes.map(n => n.y), 300) + 100;
+
+  const NODE_W = 136;
+  const NODE_H = 68;
+
+  // 边渲染：只保留双端都在当前视图内的边；cross-module 边用浅指示灰
+  const edges = useMemo(() => {
+    const list = [];
+    for (const n of SKILL_TREE) {
+      for (const d of (n.deps || [])) {
+        const src = NODE_INDEX[d.id];
+        if (!src) continue;
+        if (!visibleIds.has(n.id) || !visibleIds.has(src.id)) continue;
+        list.push({ from: src, to: n, kind: d.kind });
+      }
+    }
+    return list;
+  }, [visibleIds]);
+
+  const edgeColor = (kind, crossCourse, targetStatus) => {
+    if (targetStatus === "locked") return "#E5E7EB";
+    if (crossCourse) return "#818CF8"; // 跨模块一律紫靛
+    if (kind === "peer") return "#CBD5E1";
+    if (kind === "weak") return "#94A3B8";
+    return "#64748B"; // strong
   };
 
-  const masteredCount = SKILL_TREE.filter(n => mastery[n.id] === 2).length;
-  const learningCount = SKILL_TREE.filter(n => mastery[n.id] === 1).length;
+  const nodeVisual = (status, course) => {
+    const c = COURSE_COLORS_TREE[course] || COURSE_COLORS_TREE["数值分析"];
+    if (status === "mastered") return { fill: c.solid,  stroke: c.ink,    strokeW: 2.5, labelColor: "#fff",  symColor: "#fff",     symOpacity: 0.95, dash: "0",   opacity: 1,    shadow: "0 6px 18px " + c.solid + "55" };
+    if (status === "learning") return { fill: c.soft,   stroke: c.solid,  strokeW: 2,   labelColor: c.ink,   symColor: c.solid,    symOpacity: 1,    dash: "0",   opacity: 1,    shadow: "0 4px 12px rgba(15,23,42,0.06)" };
+    if (status === "unlocked") return { fill: "#FFFFFF",stroke: c.solid,  strokeW: 1.75,labelColor: c.ink,   symColor: c.solid,    symOpacity: 0.9,  dash: "0",   opacity: 1,    shadow: "0 2px 8px rgba(15,23,42,0.05)" };
+    // locked
+    return { fill: "#F8FAFC", stroke: "#CBD5E1", strokeW: 1.25, labelColor: "#94A3B8", symColor: "#CBD5E1", symOpacity: 1, dash: "4 4", opacity: 0.85, shadow: "none" };
+  };
 
-  // Calculate SVG viewport
-  const maxX = Math.max(...filteredNodes.map(n => n.x)) + 160;
-  const maxY = Math.max(...filteredNodes.map(n => n.y)) + 100;
+  const backTarget = (typeof setPage === "function") ? (() => setPage("首页")) : null;
 
   return (
-    <div style={{ padding: "0 0 18px", maxWidth: 1240, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
-        <Btn size="sm" onClick={() => setPage("首页")}>← 返回</Btn>
-        <div style={{ fontSize: 22, fontWeight: 700 }}>🌳 知识技能树</div>
-        <div style={{ display: "flex", gap: 10, marginLeft: 12 }}>
-          <span style={{ fontSize: 13, background: G.tealLight, color: G.teal, padding: "4px 12px", borderRadius: 20, fontWeight: 600 }}>✅ 已掌握 {masteredCount}</span>
-          <span style={{ fontSize: 13, background: G.amberLight, color: G.amber, padding: "4px 12px", borderRadius: 20, fontWeight: 600 }}>📖 学习中 {learningCount}</span>
-          <span style={{ fontSize: 13, background: "#f1f5f9", color: "#64748b", padding: "4px 12px", borderRadius: 20, fontWeight: 600 }}>🔒 未解锁 {SKILL_TREE.length - masteredCount - learningCount}</span>
+    <div style={{ padding: "0 0 20px", maxWidth: 1280, margin: "0 auto" }}>
+      {/* ══ Header ══ */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
+        {backTarget && <Btn size="sm" onClick={backTarget}>← 返回</Btn>}
+        <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em", color: "#0F172A" }}>知识 DAG · 学习驾驶舱</div>
+        <div style={{ display: "flex", gap: 8, marginLeft: "auto", flexWrap: "wrap" }}>
+          <StatusPill dotFill="#10B981" dotBorder="#10B981" label="已掌握" count={statusCounts.mastered} />
+          <StatusPill dotFill="#A5B4FC" dotBorder="#6366F1" label="学习中" count={statusCounts.learning} />
+          <StatusPill dotFill="#FFFFFF" dotBorder="#3B82F6" label="可学习" count={statusCounts.unlocked} />
+          <StatusPill dotFill="#F1F5F9" dotBorder="#CBD5E1" dashed label="未解锁" count={statusCounts.locked} />
         </div>
       </div>
 
-      {/* Course filter */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-        {courses.map(c => (
-          <button key={c} onClick={() => setSelectedCourse(c)} style={{ padding: "7px 16px", borderRadius: 20, border: "1.5px solid " + (selectedCourse === c ? G.teal : "#ddd"), background: selectedCourse === c ? G.teal : "#fff", color: selectedCourse === c ? "#fff" : "#555", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{c}</button>
-        ))}
+      {/* ══ Course chips ══ */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {courses.map(c => {
+          const cc = c === "全部" ? null : COURSE_COLORS_TREE[c];
+          const active = selectedCourse === c;
+          return (
+            <button key={c} onClick={() => setSelectedCourse(c)} style={{
+              padding: "6px 14px", borderRadius: 999,
+              border: "1.5px solid " + (active ? (cc?.solid || "#0F172A") : "#E2E8F0"),
+              background: active ? (cc?.solid || "#0F172A") : "#fff",
+              color: active ? "#fff" : (cc?.ink || "#475569"),
+              fontSize: 12.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+              letterSpacing: "0.01em", transition: "all .15s",
+            }}>{c}</button>
+          );
+        })}
+        <div style={{ marginLeft: "auto", fontSize: 12, color: "#94A3B8", display: "flex", alignItems: "center", gap: 14 }}>
+          <LegendItem kind="strong" text="强依赖" />
+          <LegendItem kind="weak"   text="弱依赖（建议）" />
+          <LegendItem kind="peer"   text="并列关系" />
+          <LegendItem kind="cross"  text="跨模块依赖" />
+        </div>
       </div>
 
-      {/* Legend */}
-      <div style={{ display: "flex", gap: 16, marginBottom: 16, fontSize: 12, color: "#666" }}>
-        {[["✅", G.teal, "已掌握（点击重置）"], ["📖", G.amber, "学习中（点击升级）"], ["🔓", G.blue, "可解锁（点击开始）"], ["🔒", "#999", "前置未完成"]].map(([ico, col, label]) => (
-          <span key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <span style={{ color: col, fontWeight: 700 }}>{ico}</span>{label}
-          </span>
-        ))}
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "#aaa" }}>点击节点切换状态 · 完成前置节点后解锁后续</span>
-      </div>
+      {/* ══ Canvas ══ */}
+      <div style={{ background: "#FFFFFF", borderRadius: 18, border: "1px solid #EEF2F7", padding: 0, overflow: "auto", maxHeight: 640, position: "relative" }}>
+        <svg width={Math.max(maxX, 1200)} height={Math.max(maxY, 320)} style={{ minWidth: "100%", display: "block", background: "linear-gradient(180deg,#FAFBFD 0%,#FFFFFF 120px)" }}>
+          <defs>
+            <marker id="mc-arrow-strong" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 Z" fill="#64748B" />
+            </marker>
+            <marker id="mc-arrow-weak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 Z" fill="#94A3B8" />
+            </marker>
+            <marker id="mc-arrow-cross" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 Z" fill="#818CF8" />
+            </marker>
+            <marker id="mc-arrow-locked" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 Z" fill="#E5E7EB" />
+            </marker>
+          </defs>
 
-      {/* SVG Tree */}
-      <div style={{ ...s.card, padding: 0, overflowX: "auto", overflowY: "auto", maxHeight: 620 }}>
-        <svg width={Math.max(maxX, 400)} height={Math.max(maxY, 300)} style={{ minWidth: "100%", display: "block" }}>
-          {/* Draw dependency edges */}
-          {filteredNodes.map(node =>
-            node.deps.filter(d => filteredNodes.find(n => n.id === d)).map(depId => {
-              const dep = filteredNodes.find(n => n.id === depId);
-              if (!dep) return null;
-              const status = getNodeStatus(node);
-              const depStatus = getNodeStatus({ ...dep, deps: [] });
-              const lineColor = (status === "locked") ? "#e2e8f0" : G.teal + "88";
-              return (
-                <line key={depId + "->" + node.id}
-                  x1={dep.x + 60} y1={dep.y + 36}
-                  x2={node.x + 60} y2={node.y}
-                  stroke={lineColor} strokeWidth="2" strokeDasharray={status === "locked" ? "5,5" : "0"}
-                />
-              );
-            })
-          )}
-          {/* Draw nodes */}
-          {filteredNodes.map(node => {
-            const status = getNodeStatus(node);
-            const st = nodeStatusStyle(status);
-            const courseColor = COURSE_COLORS_TREE[node.course] || {};
+          {/* Edges first so nodes overlay */}
+          {edges.map(({ from, to, kind }, i) => {
+            const crossCourse = from.course !== to.course;
+            const targetStatus = deriveStatus(to, progress);
+            const color = edgeColor(kind, crossCourse, targetStatus);
+
+            const sx = from.x + NODE_W / 2;
+            const sy = from.y + NODE_H / 2;
+            const tx = to.x + NODE_W / 2;
+            const ty = to.y + NODE_H / 2;
+
+            // 收缩两端 (~NODE_H/2) 以免钻进节点
+            const dx = tx - sx, dy = ty - sy;
+            const len = Math.max(1, Math.hypot(dx, dy));
+            const ux = dx / len, uy = dy / len;
+            const pad = NODE_H / 2 + 4;
+            const x1 = sx + ux * pad;
+            const y1 = sy + uy * pad;
+            const x2 = tx - ux * pad;
+            const y2 = ty - uy * pad;
+
+            let dash = "0";
+            if (targetStatus === "locked") dash = "4 4";
+            else if (kind === "weak") dash = "6 4";
+            else if (kind === "peer") dash = "2 5";
+
+            const markerEnd = kind === "peer"
+              ? null
+              : targetStatus === "locked" ? "url(#mc-arrow-locked)"
+              : crossCourse ? "url(#mc-arrow-cross)"
+              : kind === "weak" ? "url(#mc-arrow-weak)" : "url(#mc-arrow-strong)";
+
             return (
-              <g key={node.id} transform={"translate(" + node.x + "," + node.y + ")"}
-                onClick={() => handleNodeClick(node)}
-                onMouseEnter={() => setTooltip(node.id)}
-                onMouseLeave={() => setTooltip(null)}
-                style={{ cursor: status === "locked" ? "not-allowed" : "pointer" }}>
-                <circle
-                  cx="56"
-                  cy="56"
-                  r="40"
-                  fill={st.bg}
-                  stroke={st.border}
-                  strokeWidth="2"
-                  style={{ filter: `drop-shadow(${st.shadow})`, opacity: status === "locked" ? 0.3 : 1, animation: status === "learning" ? "mcPulse 2.2s ease-in-out infinite" : "none" }}
-                />
-                <text x="56" y="46" fontSize="18" textAnchor="middle" dominantBaseline="middle">{node.emoji}</text>
-                <text x="56" y="62" fontSize="10" fontWeight="700" fill={st.text} textAnchor="middle" dominantBaseline="middle" fontFamily="system-ui,sans-serif">{node.label}</text>
-                <text x="56" y="76" fontSize="9" fill={st.text} textAnchor="middle" dominantBaseline="middle" fontFamily="system-ui,sans-serif" opacity="0.85">
-                  {status === "mastered" ? "已掌握" : status === "learning" ? "学习中" : status === "unlocked" ? "可学习" : "未解锁"}
-                </text>
-                {/* Tooltip */}
-                {tooltip === node.id && (
-                  <g>
-                    <rect x="10" y="-50" width="120" height="38" rx="8" fill="#1e293b" />
-                    <text x="70" y="-37" fontSize="11" fill="#fff" textAnchor="middle" fontFamily="system-ui,sans-serif">{node.course}</text>
-                    <text x="70" y="-22" fontSize="10" fill="#94a3b8" textAnchor="middle" fontFamily="system-ui,sans-serif">{node.deps.length === 0 ? "无前置要求" : "前置：" + node.deps.join("、")}</text>
-                  </g>
+              <line
+                key={i}
+                x1={x1} y1={y1} x2={x2} y2={y2}
+                stroke={color} strokeWidth={kind === "strong" ? 1.75 : 1.25}
+                strokeDasharray={dash}
+                markerEnd={markerEnd || undefined}
+                opacity={targetStatus === "locked" ? 0.7 : 0.9}
+              />
+            );
+          })}
+
+          {/* Nodes */}
+          {visibleNodes.map(node => {
+            const status = deriveStatus(node, progress);
+            const v = nodeVisual(status, node.course);
+            const isRecommended = recommendedSet.has(node.id) && status !== "mastered";
+            const isSelected = selectedId === node.id;
+
+            return (
+              <g key={node.id}
+                 transform={"translate(" + node.x + "," + node.y + ")"}
+                 onClick={() => setSelectedId(node.id)}
+                 style={{ cursor: status === "locked" ? "help" : "pointer", opacity: v.opacity }}>
+                {/* Recommendation halo */}
+                {isRecommended && (
+                  <rect x={-6} y={-6} width={NODE_W + 12} height={NODE_H + 12} rx={16}
+                        fill="none" stroke="#F59E0B" strokeWidth="2"
+                        style={{ filter: "drop-shadow(0 0 10px rgba(245,158,11,0.45))", animation: "mcPulse 2.4s ease-in-out infinite" }} />
                 )}
+                {/* Selection ring */}
+                {isSelected && (
+                  <rect x={-3} y={-3} width={NODE_W + 6} height={NODE_H + 6} rx={14}
+                        fill="none" stroke="#0F172A" strokeWidth="1.5" strokeDasharray="3 3" opacity="0.5" />
+                )}
+                {/* Card */}
+                <rect x={0} y={0} width={NODE_W} height={NODE_H} rx={12}
+                      fill={v.fill} stroke={v.stroke} strokeWidth={v.strokeW}
+                      strokeDasharray={v.dash}
+                      style={{ filter: v.shadow !== "none" ? `drop-shadow(${v.shadow})` : undefined }} />
+
+                {/* Symbol badge */}
+                <g>
+                  <rect x={10} y={10} width={44} height={NODE_H - 20} rx={10}
+                        fill={status === "mastered" ? "rgba(255,255,255,0.18)" : (COURSE_COLORS_TREE[node.course]?.soft || "#F5F3FF")}
+                        stroke="none" />
+                  <text x={32} y={NODE_H / 2 + 1} fontSize={18} fontWeight={700}
+                        fill={v.symColor} fillOpacity={v.symOpacity}
+                        textAnchor="middle" dominantBaseline="middle"
+                        fontFamily="'Georgia','Times New Roman',ui-serif,serif"
+                        style={{ fontStyle: "italic" }}>{node.sym}</text>
+                </g>
+
+                {/* Label + meta */}
+                <text x={64} y={26} fontSize={12.5} fontWeight={700}
+                      fill={v.labelColor} textAnchor="start"
+                      fontFamily="ui-sans-serif,system-ui,sans-serif">{node.label}</text>
+                <text x={64} y={45} fontSize={10} fontWeight={500}
+                      fill={status === "mastered" ? "rgba(255,255,255,0.8)" : "#94A3B8"}
+                      textAnchor="start" fontFamily="ui-sans-serif,system-ui,sans-serif">
+                  ⏱ {node.estMin} 分钟
+                </text>
+
+                {/* Status micro-marker */}
+                <g transform={`translate(${NODE_W - 18}, ${NODE_H - 18})`}>
+                  {status === "mastered" && (
+                    <g><circle cx={4} cy={4} r={6} fill="rgba(255,255,255,0.25)" /><text x={4} y={5} fontSize={9} textAnchor="middle" dominantBaseline="middle" fill="#fff" fontWeight={900}>✓</text></g>
+                  )}
+                  {status === "learning" && (
+                    <circle cx={4} cy={4} r={5} fill="#6366F1" stroke="#fff" strokeWidth="1.5" style={{ filter: "drop-shadow(0 0 6px rgba(99,102,241,0.6))" }} />
+                  )}
+                  {status === "unlocked" && (
+                    <circle cx={4} cy={4} r={5} fill="#fff" stroke={COURSE_COLORS_TREE[node.course]?.solid || "#3B82F6"} strokeWidth="1.75" />
+                  )}
+                  {status === "locked" && (
+                    <g>
+                      <rect x={-1} y={1} width={10} height={8} rx={1.5} fill="none" stroke="#CBD5E1" strokeWidth={1.25} />
+                      <path d="M 1 1 A 3 3 0 0 1 7 1 L 7 2" fill="none" stroke="#CBD5E1" strokeWidth={1.25} />
+                    </g>
+                  )}
+                </g>
               </g>
             );
           })}
         </svg>
       </div>
 
-      {/* Progress summary */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12, marginTop: 16 }}>
-        {[...new Set(SKILL_TREE.map(n => n.course))].map(course => {
-          const courseNodes = SKILL_TREE.filter(n => n.course === course);
-          const courseMastered = courseNodes.filter(n => mastery[n.id] === 2).length;
-          const col = COURSE_COLORS_TREE[course];
-          return (
-            <div key={course} style={{ background: col?.bg || "#f8fafc", borderRadius: 12, padding: "14px 16px", border: "1.5px solid " + (col?.border || "#ddd") + "66" }}>
-              <div style={{ fontWeight: 700, color: col?.text || "#333", fontSize: 14, marginBottom: 6 }}>{course}</div>
-              <ProgressBar value={courseMastered} max={courseNodes.length} color={col?.border || G.teal} height={6} />
-              <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>{courseMastered}/{courseNodes.length} 个知识点已掌握</div>
+      {/* ══ Inspector (only when a node is selected) ══ */}
+      {selected && (
+        <div style={{ marginTop: 16, padding: "18px 20px", background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, display: "grid", gridTemplateColumns: "1fr auto", gap: 18, alignItems: "start", boxShadow: "0 4px 16px rgba(15,23,42,0.04)" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.14em", color: COURSE_COLORS_TREE[selected.course]?.ink || "#334155", textTransform: "uppercase" }}>{selected.course}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+                background: selectedStatus === "mastered" ? "#D1FAE5" : selectedStatus === "learning" ? "#E0E7FF" : selectedStatus === "unlocked" ? "#DBEAFE" : "#F1F5F9",
+                color: selectedStatus === "mastered" ? "#065F46" : selectedStatus === "learning" ? "#3730A3" : selectedStatus === "unlocked" ? "#1E40AF" : "#475569" }}>
+                {selectedStatus === "mastered" ? "已掌握" : selectedStatus === "learning" ? "学习中" : selectedStatus === "unlocked" ? "可学习" : "未解锁"}
+              </span>
+              {recommendedSet.has(selected.id) && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "#FEF3C7", color: "#92400E" }}>推荐路径 ★</span>}
             </div>
-          );
-        })}
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.01em", marginBottom: 6 }}>
+              <span style={{ fontFamily: "'Georgia',ui-serif,serif", fontStyle: "italic", color: COURSE_COLORS_TREE[selected.course]?.solid, marginRight: 10 }}>{selected.sym}</span>
+              {selected.label}
+            </div>
+            <div style={{ fontSize: 13.5, color: "#475569", marginBottom: 12 }}>{selected.bullet}</div>
+            <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600, letterSpacing: "0.05em" }}>前置知识</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {(selected.deps || []).length === 0 && <span style={{ fontSize: 12, color: "#94A3B8" }}>无前置（入门节点）</span>}
+              {(selected.deps || []).map(d => {
+                const depNode = NODE_INDEX[d.id];
+                if (!depNode) return null;
+                const depSt = deriveStatus(depNode, progress);
+                return (
+                  <button key={d.id} onClick={() => setSelectedId(d.id)} style={{
+                    fontSize: 11.5, padding: "4px 10px", borderRadius: 999,
+                    border: "1px solid " + (depSt === "mastered" ? "#10B981" : "#E2E8F0"),
+                    background: depSt === "mastered" ? "#ECFDF5" : d.kind === "weak" ? "#FFFBEB" : d.kind === "peer" ? "#F1F5F9" : "#fff",
+                    color: depSt === "mastered" ? "#047857" : "#475569",
+                    fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                  }}>
+                    {depSt === "mastered" ? "✓ " : depSt === "learning" ? "· " : ""}{depNode.label}
+                    <span style={{ opacity: 0.55, marginLeft: 6, fontWeight: 500 }}>
+                      {d.kind === "weak" ? "建议" : d.kind === "peer" ? "并列" : ""}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 180 }}>
+            {selectedStatus === "locked" && (
+              <div style={{ fontSize: 12, color: "#94A3B8", padding: "10px 12px", background: "#F8FAFC", borderRadius: 10, border: "1px dashed #CBD5E1" }}>
+                完成全部<strong style={{ color: "#475569" }}>强依赖</strong>后自动解锁
+              </div>
+            )}
+            {selectedStatus === "unlocked" && (
+              <Btn variant="primary" onClick={() => actStart(selected.id)}>🚀 开始学习</Btn>
+            )}
+            {selectedStatus === "learning" && (
+              <>
+                <Btn variant="primary" onClick={() => actMaster(selected.id)}>✓ 标记已掌握</Btn>
+                <Btn onClick={() => actReset(selected.id)}>⏸ 暂停 / 撤销</Btn>
+                <div style={{ fontSize: 11, color: "#94A3B8", lineHeight: 1.45 }}>
+                  建议通过小测确认：打开「AI 对话 · 讲解」或练习题后再点确认
+                </div>
+              </>
+            )}
+            {selectedStatus === "mastered" && (
+              <>
+                <Btn variant="primary" onClick={() => actReview(selected.id)}>🔁 刚复习过一次</Btn>
+                <Btn onClick={() => actPause(selected.id)}>重置为学习中</Btn>
+                <Btn variant="danger" onClick={() => actReset(selected.id)}>清除此节点进度</Btn>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ Learning Cockpit ══ */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginTop: 16 }}>
+        {/* Panel A : 今日推荐 */}
+        <div style={{ background: "#FFFFFF", border: "1px solid #EEF2F7", borderRadius: 16, padding: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#0F172A" }}>🎯 今日推荐</div>
+            <span style={{ fontSize: 11, color: "#94A3B8" }}>基于 DAG 拓扑</span>
+          </div>
+          {recommendations.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: "#94A3B8", padding: "14px 0" }}>全部节点已掌握 🎉</div>
+          ) : recommendations.map(({ node, status }) => {
+            const c = COURSE_COLORS_TREE[node.course];
+            return (
+              <button key={node.id} onClick={() => setSelectedId(node.id)} style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 10,
+                padding: "9px 12px", marginBottom: 6,
+                borderRadius: 10, border: "1px solid #EEF2F7", background: "#FAFBFD",
+                cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+              }}
+                onMouseEnter={e => (e.currentTarget.style.background = c.soft)}
+                onMouseLeave={e => (e.currentTarget.style.background = "#FAFBFD")}>
+                <span style={{ fontFamily: "'Georgia',ui-serif,serif", fontStyle: "italic", fontSize: 18, color: c.solid, width: 24, textAlign: "center" }}>{node.sym}</span>
+                <span style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{node.label}</div>
+                  <div style={{ fontSize: 11, color: "#64748B" }}>{node.course} · ⏱ {node.estMin} 分钟 · {status === "learning" ? "继续" : "开始"}</div>
+                </span>
+                <span style={{ fontSize: 16, color: c.solid }}>→</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Panel B : 学习进度 */}
+        <div style={{ background: "#FFFFFF", border: "1px solid #EEF2F7", borderRadius: 16, padding: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#0F172A", marginBottom: 12 }}>📊 学习进度</div>
+          {Array.from(new Set(SKILL_TREE.map(n => n.course))).map(course => {
+            const courseNodes = SKILL_TREE.filter(n => n.course === course);
+            const masteredN = courseNodes.filter(n => progress[n.id]?.status === "mastered").length;
+            const learningN = courseNodes.filter(n => progress[n.id]?.status === "learning").length;
+            const total = courseNodes.length;
+            const c = COURSE_COLORS_TREE[course];
+            const pct = Math.round((masteredN / total) * 100);
+            return (
+              <div key={course} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: c.ink }}>{course}</span>
+                  <span style={{ fontSize: 11, color: "#64748B" }}>{masteredN}/{total}{learningN > 0 ? ` · +${learningN} 进行中` : ""}</span>
+                </div>
+                <div style={{ height: 6, background: "#F1F5F9", borderRadius: 3, overflow: "hidden", position: "relative" }}>
+                  <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: (masteredN / total * 100) + "%", background: c.solid, borderRadius: 3, transition: "width .4s" }} />
+                  <div style={{ position: "absolute", left: (masteredN / total * 100) + "%", top: 0, bottom: 0, width: (learningN / total * 100) + "%", background: c.ring, borderRadius: 3, transition: "width .4s" }} />
+                </div>
+                <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 2 }}>{pct}% 已达到精通</div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Panel C : 复习提醒 */}
+        <div style={{ background: "#FFFFFF", border: "1px solid #EEF2F7", borderRadius: 16, padding: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#0F172A" }}>⏰ 复习提醒</div>
+            <span style={{ fontSize: 11, color: "#94A3B8" }}>艾宾浩斯曲线</span>
+          </div>
+          {reviewDue.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: "#94A3B8", padding: "14px 0" }}>暂无需要复习的节点</div>
+          ) : reviewDue.map(({ node, p }) => {
+            const days = Math.floor((Date.now() - p.masteredAt) / MS_DAY);
+            const c = COURSE_COLORS_TREE[node.course];
+            return (
+              <button key={node.id} onClick={() => setSelectedId(node.id)} style={{
+                width: "100%", display: "flex", alignItems: "center", gap: 10,
+                padding: "9px 12px", marginBottom: 6,
+                borderRadius: 10, border: "1px solid " + c.ring,
+                background: c.soft, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+              }}>
+                <span style={{ fontFamily: "'Georgia',ui-serif,serif", fontStyle: "italic", fontSize: 18, color: c.solid, width: 24, textAlign: "center" }}>{node.sym}</span>
+                <span style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: c.ink }}>{node.label}</div>
+                  <div style={{ fontSize: 11, color: "#64748B" }}>{days} 天前掌握 · 建议复盘</div>
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
+}
+
+function StatusPill({ dotFill, dotBorder, label, count, dashed }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: "#F8FAFC", border: "1px solid #E2E8F0", fontSize: 12, fontWeight: 600, color: "#334155" }}>
+      <span style={{ width: 10, height: 10, borderRadius: "50%", background: dotFill, border: "1.5px " + (dashed ? "dashed" : "solid") + " " + dotBorder, display: "inline-block" }} />
+      {label}
+      <span style={{ color: "#94A3B8", fontWeight: 500 }}>{count}</span>
+    </span>
+  );
+}
+
+function LegendItem({ kind, text }) {
+  const common = { display: "inline-flex", alignItems: "center", gap: 5, color: "#94A3B8", fontSize: 12 };
+  const line = (stroke, dash, width = 22) => (
+    <svg width={width} height="8"><line x1="0" y1="4" x2={width} y2="4" stroke={stroke} strokeWidth="1.75" strokeDasharray={dash} /></svg>
+  );
+  if (kind === "strong") return <span style={common}>{line("#64748B", "0")}{text}</span>;
+  if (kind === "weak")   return <span style={common}>{line("#94A3B8", "6 4")}{text}</span>;
+  if (kind === "peer")   return <span style={common}>{line("#CBD5E1", "2 5")}{text}</span>;
+  if (kind === "cross")  return <span style={common}>{line("#818CF8", "0")}{text}</span>;
+  return null;
 }
 
 function GatewayPage({ profile, onMaterial, onExam }) {
