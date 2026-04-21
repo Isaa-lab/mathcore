@@ -24,6 +24,55 @@ export default async function handler(req, res) {
 
   const isChatMode = (mode === "chat" || mode === "tutor") && chatQuestion;
 
+  // ── 可视化决策心法（四层决策树 + VIZ 协议） ─────────────────────────────
+  // AI 必须先完成四层判断，再决定是否下发可视化指令，避免"不管什么都画流程图"
+  const VIZ_FRAMEWORK = `
+【可视化决策心法 — 必读】
+可视化不是"画图"，是"翻译认知结构"。
+在输出 [VIZ:...] 指令之前，你 MUST 按顺序完成四层判断（心里想，不要写出来）：
+
+第一层 · 识别知识点的认知结构（structure）:
+  - "process"     : 流程 / 时序类（有先后顺序的步骤，如推导链、算法步骤）
+  - "hierarchy"   : 层级 / 包含类（父子关系，如章节知识树、方程家族分类）
+  - "comparison"  : 对比 / 并列类（多个同级选项的特征对比，如 LU vs QR）
+  - "parametric"  : 数值 / 参数可调类（概念与参数有关，调了才懂）
+
+第二层 · 识别用户画像与目的:
+  - 初学者建立直觉 / 开发者精确理解 / 面试者清单速查 / 深度学习者
+  决定"隐喻强度"与"信息密度"。
+
+第三层 · 选择交互层级（interactionLevel，"能用低级别就不用高级别"）:
+  - "L0" : 静态图（流程清晰、一次看懂）
+  - "L1" : 渐进披露（节点可展开）
+  - "L2" : 参数可调（需要滑块才能建立直觉）
+  - "L3" : 完整模拟器（多状态交互）
+
+第四层 · 视觉符号编码:
+  - 流程用带方向箭头的节点；层级用缩进树；对比用并列卡；参数用函数曲线
+  - 颜色语义：灰=未激活、蓝=进行中、绿=完成、红=警告
+
+【输出协议】
+当且仅当可视化能显著降低认知负荷时，输出一个 [VIZ:{...}] 标记
+（一条回答内最多 1-2 个），严格遵循以下 JSON schema（必须是一行、合法 JSON）：
+
+[VIZ:{"structure":"parametric","interactionLevel":"L2","title":"简短标题","description":"一句话说明","data":{...}}]
+
+按 structure 下发对应的 data：
+  · structure="parametric" → data: {"k":2,"steady":1.5,"cMin":-3,"cMax":3,"cInit":1,"equation":"dy/dx + 2y = 3"}
+    渲染为 y = C·e^(-k·x) + steady 的参数曲线族
+  · structure="hierarchy"  → data: {"root":{"name":"根节点","children":[{"name":"一级","children":[{"name":"二级"}]}]}}
+    渲染为缩进树 / 知识图谱
+  · structure="process"    → data: {"steps":[{"title":"第1步","desc":"操作说明"},{"title":"第2步","desc":"..."}]}
+    渲染为竖向时间线
+  · structure="comparison" → data: {"columns":[{"title":"方法A","points":["特征1","特征2"]},{"title":"方法B","points":["特征1","特征2"]}]}
+    渲染为左右并列对比卡
+
+兼容格式（旧版，仍可用）：
+[CHART:{"title":"...","k":2,"steady":1.5,"cMin":-3,"cMax":3,"cInit":1}]  // 自动归为 parametric L2
+
+禁止 hallucinate data 字段，data 内容必须真实有教学价值。
+禁止对所有内容默认使用同一种 structure。`;
+
   // ── 系统 Prompt ─────────────────────────────────────────────────────────────
   let systemPrompt;
   if (mode === "tutor") {
@@ -40,7 +89,7 @@ ${materialContext ? `\n【课程知识点参考】\n${materialContext}\n` : ""}
 8. 答对了夸，答错了分析原因（计算失误/公式误用/概念盲区）
 9. 用中文，500字以内，生动有趣
 10. 禁止使用 \\begin{tikzpicture} 等LaTeX图形环境
-11. 如需展示函数图像，使用：[CHART: {"functions": [{"expr": "Math.sin(x)", "label": "$\\sin x$", "color": "#2563eb"}], "xRange": [-6.28, 6.28], "title": "图示"}]`;
+${VIZ_FRAMEWORK}`;
   } else if (isChatMode) {
     systemPrompt = `你是一位亲切、有趣的数学私教，正在陪学生学习《${materialTitle || "数学教材"}》。风格：温暖鼓励、循循善诱、像朋友交流。
 ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
@@ -52,9 +101,7 @@ ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
 5. 400字以内，中文，生动自然
 6. 禁止使用 \\begin{tikzpicture}、\\begin{figure} 等 LaTeX 图形环境，网页无法渲染
 7. 需要展示图形时，用简单文字坐标描述，如"当x增大，y呈指数增长"，或用简单ASCII示意，不要tikz代码
-8. 如需展示函数图像，使用以下格式（JSON必须合法，expr用JavaScript写法）：[CHART: {"functions": [{"expr": "Math.exp(2*x)", "label": "$e^{2x}$", "color": "#2563eb"}, {"expr": "Math.exp(-2*x)", "label": "$Ce^{-2x}$", "color": "#dc2626"}], "xRange": [-2, 3], "title": "图示标题"}]
-6. 禁止使用 \\begin{tikzpicture}、\\begin{figure} 等 LaTeX 图形环境，网页无法渲染
-7. 需要展示图形时，用简单文字坐标描述，如"当x增大，y呈指数增长"，或用简单ASCII示意，不要tikz代码`;
+${VIZ_FRAMEWORK}`;
   }
 
   // ── 构建 messages 数组（含历史） ────────────────────────────────────────────

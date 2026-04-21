@@ -15,14 +15,37 @@ const IconSparkles = ({ size = 14, color = "#fff" }) => (
     <path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>
   </svg>
 );
-const IconBarChart = ({ size = 14, color = "#4F46E5" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 3v18h18" /><rect x="7" y="12" width="3" height="6" rx="0.5" /><rect x="12" y="8" width="3" height="10" rx="0.5" /><rect x="17" y="4" width="3" height="14" rx="0.5" />
-  </svg>
-);
 const IconMaximize = ({ size = 12, color = "#4F46E5" }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+  </svg>
+);
+const IconSettings = ({ size = 14, color = "#9CA3AF" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 1v6m0 10v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m10 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24" opacity="0.55" />
+  </svg>
+);
+
+// ── Structure-aware icon set (4 cognitive structures) ──────────────────────
+const IconProcess = ({ size = 16, color }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" /><polygon points="10 8 16 12 10 16 10 8" fill={color} stroke="none" />
+  </svg>
+);
+const IconHierarchy = ({ size = 16, color }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="18" cy="18" r="3" /><circle cx="6" cy="18" r="3" /><path d="M6 15a9 9 0 0 0 9 3" />
+  </svg>
+);
+const IconParametric = ({ size = 16, color }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+  </svg>
+);
+const IconComparison = ({ size = 16, color }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="16 3 20 7 16 11" /><polyline points="8 21 4 17 8 13" /><line x1="20" y1="7" x2="4" y2="7" /><line x1="4" y1="17" x2="20" y2="17" />
   </svg>
 );
 
@@ -59,11 +82,122 @@ function InlineVarSlider({ name, min, max }) {
   );
 }
 
-// ── SmartVizPreviewCard: lightweight in-bubble SVG preview + hover-to-fullscreen
-// Architectural compromise: renders a *static/lightly-animated* SVG inside the bubble
-// to satisfy the "AI appears to visualize" expectation without paying the cost of
-// the full interactive engine. Clicking it opens the full-screen KnowledgePointPage.
-function SmartVizPreviewCard({ title, onOpen }) {
+// ── Viz Dictionary: the metadata-driven engine ─────────────────────────────
+// Maps cognitive structure → visual language (color tokens, icon, preview SVG)
+const VIZ_DICTIONARY = {
+  process: {
+    label: "流程 · 时序推演",
+    fg: "#047857", bg: "#ECFDF5", border: "rgba(167,243,208,0.7)", accent: "#10B981",
+    Icon: IconProcess,
+    preview: (stroke) => (
+      <svg width="100%" height="100%" viewBox="0 0 100 40" preserveAspectRatio="none" style={{ color: stroke, opacity: 0.7 }}>
+        <g stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none">
+          <motion.path initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.6, ease: "easeOut" }} d="M8 30 L28 30 L34 14 L48 30 L56 18 L72 30 L92 10" />
+        </g>
+        {[8, 28, 48, 72, 92].map((x, i) => (
+          <motion.circle key={i} cx={x} cy={[30, 30, 30, 30, 10][i]} r="2.2" fill={stroke} initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2 + i * 0.18, type: "spring" }} />
+        ))}
+      </svg>
+    ),
+  },
+  hierarchy: {
+    label: "层级 · 树状拓扑",
+    fg: "#1D4ED8", bg: "#EFF6FF", border: "rgba(191,219,254,0.7)", accent: "#3B82F6",
+    Icon: IconHierarchy,
+    preview: (stroke) => (
+      <svg width="100%" height="100%" viewBox="0 0 100 40" preserveAspectRatio="none" style={{ color: stroke, opacity: 0.7 }}>
+        <motion.g stroke="currentColor" strokeWidth="1.3" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.6 }}>
+          <line x1="50" y1="10" x2="25" y2="24" />
+          <line x1="50" y1="10" x2="75" y2="24" />
+          <line x1="25" y1="24" x2="15" y2="34" />
+          <line x1="25" y1="24" x2="35" y2="34" />
+          <line x1="75" y1="24" x2="65" y2="34" />
+          <line x1="75" y1="24" x2="85" y2="34" />
+        </motion.g>
+        {[[50, 10], [25, 24], [75, 24], [15, 34], [35, 34], [65, 34], [85, 34]].map(([x, y], i) => (
+          <motion.circle key={i} cx={x} cy={y} r="2.6" fill={stroke} initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.1 + i * 0.06, type: "spring", stiffness: 260 }} />
+        ))}
+      </svg>
+    ),
+  },
+  parametric: {
+    label: "参数可调模型",
+    fg: "#4338CA", bg: "#EEF2FF", border: "rgba(199,210,254,0.7)", accent: "#6366F1",
+    Icon: IconParametric,
+    preview: (stroke) => (
+      <svg width="100%" height="100%" viewBox="0 0 100 40" preserveAspectRatio="none" style={{ color: stroke, opacity: 0.75 }}>
+        <g stroke="#E5E7EB" strokeWidth="0.25" opacity="0.7">
+          <line x1="0" y1="10" x2="100" y2="10" /><line x1="0" y1="20" x2="100" y2="20" /><line x1="0" y1="30" x2="100" y2="30" />
+        </g>
+        <motion.path initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.4, ease: "easeOut" }} d="M0 30 Q 25 28, 50 20 T 100 5" fill="transparent" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <motion.path initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.4, delay: 0.2, ease: "easeOut" }} d="M0 35 Q 30 34, 60 25 T 100 10" fill="transparent" stroke="currentColor" strokeWidth="0.8" strokeDasharray="3 2" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  comparison: {
+    label: "对比 · 并列分析",
+    fg: "#B45309", bg: "#FFFBEB", border: "rgba(253,230,138,0.7)", accent: "#F59E0B",
+    Icon: IconComparison,
+    preview: (stroke) => (
+      <svg width="100%" height="100%" viewBox="0 0 100 40" preserveAspectRatio="none" style={{ color: stroke, opacity: 0.75 }}>
+        <motion.rect initial={{ scaleY: 0 }} animate={{ scaleY: 1 }} transition={{ duration: 0.5, ease: "easeOut" }} style={{ originY: "100%" }} x="16" y="12" width="26" height="22" rx="4" fill="currentColor" opacity="0.45" />
+        <motion.rect initial={{ scaleY: 0 }} animate={{ scaleY: 1 }} transition={{ duration: 0.5, delay: 0.12, ease: "easeOut" }} style={{ originY: "100%" }} x="58" y="8" width="26" height="26" rx="4" fill="currentColor" opacity="0.85" />
+        <line x1="50" y1="20" x2="50" y2="20" stroke="currentColor" strokeWidth="0.5" />
+      </svg>
+    ),
+  },
+};
+
+// Normalize any incoming viz config into a canonical `vizIntent` shape
+function normalizeVizIntent(rawOrJson) {
+  if (!rawOrJson) return null;
+  let cfg = rawOrJson;
+  if (typeof rawOrJson === "string") {
+    try { cfg = JSON.parse(rawOrJson); } catch { return null; }
+  }
+  if (!cfg || typeof cfg !== "object") return null;
+
+  // Explicit vizIntent (preferred)
+  if (cfg.structure && VIZ_DICTIONARY[cfg.structure]) {
+    return {
+      structure: cfg.structure,
+      interactionLevel: cfg.interactionLevel || "L1",
+      title: cfg.title || "可视化",
+      description: cfg.description || "",
+      data: cfg.data || {},
+    };
+  }
+  // Legacy [CHART:{k,steady,cMin,...}] → parametric L2
+  if (cfg.k != null || cfg.steady != null || cfg.cMin != null || cfg.cMax != null) {
+    return {
+      structure: "parametric",
+      interactionLevel: "L2",
+      title: cfg.title || cfg.name || "参数曲线族",
+      description: cfg.description || "",
+      data: { k: cfg.k, steady: cfg.steady, cMin: cfg.cMin, cMax: cfg.cMax, cInit: cfg.cInit, equation: cfg.equation },
+    };
+  }
+  // Generic fallback — treat unknown shapes as parametric with defaults
+  return {
+    structure: cfg.structure || "parametric",
+    interactionLevel: cfg.interactionLevel || "L1",
+    title: cfg.title || "可视化",
+    description: cfg.description || "",
+    data: cfg.data || cfg,
+  };
+}
+
+// ── DynamicVizCard — metadata-driven preview chip ──────────────────────────
+function DynamicVizCard({ intent, onOpen }) {
+  const structure = intent?.structure && VIZ_DICTIONARY[intent.structure] ? intent.structure : "parametric";
+  const cfg = VIZ_DICTIONARY[structure];
+  const level = intent?.interactionLevel || "L1";
+  const isHighInteractive = level === "L2" || level === "L3";
+  const title = intent?.title || "可视化";
+  const StructIcon = cfg.Icon;
+
+  const hoverLabel = isHighInteractive ? "进入全屏交互实验室" : "查看完整结构图谱";
+
   return (
     <motion.button
       type="button"
@@ -71,79 +205,37 @@ function SmartVizPreviewCard({ title, onOpen }) {
       whileHover={{ scale: 1.01, y: -2 }}
       whileTap={{ scale: 0.99 }}
       transition={springTransition}
+      aria-label={`${hoverLabel}：${title}`}
       style={{
-        marginTop: 16,
-        marginBottom: 4,
-        width: "100%",
-        maxWidth: 320,
-        borderRadius: 16,
-        background: "#FFFFFF",
-        border: "1px solid rgba(229,231,235,0.8)",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.03)",
-        overflow: "hidden",
-        cursor: "pointer",
-        fontFamily: "inherit",
-        textAlign: "left",
-        padding: 0,
-        display: "block",
-        position: "relative",
+        marginTop: 16, marginBottom: 4, width: "100%", maxWidth: 320,
+        borderRadius: 16, background: "#FFFFFF", border: `1px solid ${cfg.border}`,
+        boxShadow: "0 4px 20px rgba(0,0,0,0.03)", overflow: "hidden", cursor: "pointer",
+        fontFamily: "inherit", textAlign: "left", padding: 0, display: "block", position: "relative",
       }}
       className="mc-viz-preview-card"
-      aria-label={`展开图谱：${title}`}
     >
-      {/* Top preview area: lightweight SVG that traces a decaying wave */}
-      <div style={{ height: 100, width: "100%", background: "#FAFAFC", borderBottom: "1px solid #F3F4F6", position: "relative", overflow: "hidden" }}>
-        <svg width="100%" height="100%" viewBox="0 0 100 40" preserveAspectRatio="none" style={{ color: "#818CF8", opacity: 0.7, display: "block" }}>
-          {/* Subtle grid */}
-          <g stroke="#E5E7EB" strokeWidth="0.25" opacity="0.7">
-            <line x1="0" y1="10" x2="100" y2="10" />
-            <line x1="0" y1="20" x2="100" y2="20" />
-            <line x1="0" y1="30" x2="100" y2="30" />
-            <line x1="25" y1="0" x2="25" y2="40" />
-            <line x1="50" y1="0" x2="50" y2="40" />
-            <line x1="75" y1="0" x2="75" y2="40" />
-          </g>
-          <motion.path
-            initial={{ pathLength: 0, opacity: 0 }}
-            animate={{ pathLength: 1, opacity: 1 }}
-            transition={{ duration: 1.4, ease: "easeOut" }}
-            d="M0 30 Q 25 28, 50 20 T 100 5"
-            fill="transparent"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-          />
-          <motion.path
-            initial={{ pathLength: 0, opacity: 0 }}
-            animate={{ pathLength: 1, opacity: 1 }}
-            transition={{ duration: 1.4, delay: 0.2, ease: "easeOut" }}
-            d="M0 35 Q 30 34, 60 25 T 100 10"
-            fill="transparent"
-            stroke="currentColor"
-            strokeWidth="0.8"
-            strokeDasharray="3 2"
-            strokeLinecap="round"
-          />
-        </svg>
-
-        {/* Hover overlay */}
+      <div style={{ height: 84, width: "100%", background: cfg.bg, borderBottom: `1px solid ${cfg.border}`, position: "relative", overflow: "hidden" }}>
+        {cfg.preview(cfg.accent)}
         <div className="mc-viz-preview-hover" style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", transition: "background 0.25s" }}>
-          <div className="mc-viz-preview-chip" style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 999, background: "rgba(255,255,255,0.92)", backdropFilter: "blur(6px)", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", opacity: 0, transform: "translateY(6px)", transition: "opacity 0.22s, transform 0.22s" }}>
-            <IconMaximize size={12} color="#4F46E5" />
-            <span style={{ fontSize: 11, fontWeight: 700, color: "#4F46E5", letterSpacing: "0.04em" }}>进入全屏交互实验室</span>
+          <div className="mc-viz-preview-chip" style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 999, background: "rgba(255,255,255,0.94)", backdropFilter: "blur(6px)", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", opacity: 0, transform: "translateY(6px)", transition: "opacity 0.22s, transform 0.22s" }}>
+            <IconMaximize size={12} color={cfg.fg} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: cfg.fg, letterSpacing: "0.04em" }}>{hoverLabel}</span>
           </div>
         </div>
       </div>
 
-      {/* Bottom info bar */}
       <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, background: "#FFFFFF" }}>
-        <div style={{ width: 28, height: 28, borderRadius: 8, background: "#EEF2FF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <IconBarChart size={14} color="#4F46E5" />
+        <div style={{ width: 30, height: 30, borderRadius: 8, background: cfg.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <StructIcon size={15} color={cfg.fg} />
         </div>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
-          <span style={{ color: "#111827", fontWeight: 700, fontSize: 12.5, lineHeight: 1.25, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
-          <span style={{ color: "#6B7280", fontSize: 11, marginTop: 2, letterSpacing: "0.01em" }}>动态参数模型</span>
+          <span style={{ color: "#111827", fontWeight: 700, fontSize: 12.5, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
+            <span style={{ fontSize: 9.5, fontWeight: 800, color: cfg.fg, background: cfg.bg, padding: "1px 6px", borderRadius: 4, letterSpacing: "0.05em" }}>{level}</span>
+            <span style={{ color: "#6B7280", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cfg.label}</span>
+          </div>
         </div>
+        {isHighInteractive && <IconSettings size={13} color="#C7CBD4" />}
       </div>
     </motion.button>
   );
@@ -190,44 +282,53 @@ function renderInline(text, keyPrefix = "") {
   });
 }
 
-// ── Block renderer ─────────────────────────────────────────────────────────
-function renderMarkdown(text, context) {
-  if (!text) return null;
-  const cleaned = preprocessLaTeX(text);
-
+// ── Placeholder extraction (accepts both [VIZ:...] and legacy [CHART:...]) ─
+function extractMacros(src) {
   const varBlocks = [];
-  const chartBlocks = [];
-  let prepared = "";
+  const vizBlocks = [];
+  let out = "";
   let i = 0;
-  const src = cleaned;
   while (i < src.length) {
     const v = src.slice(i).match(/^\[VAR:([a-zA-Z_]\w*),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\]/);
     if (v) {
       varBlocks.push({ name: v[1], min: Number(v[2]), max: Number(v[3]) });
-      prepared += `__VAR_${varBlocks.length - 1}__`;
+      out += `__VAR_${varBlocks.length - 1}__`;
       i += v[0].length;
       continue;
     }
-    if (src.slice(i, i + 7) === "[CHART:") {
-      let depth = 1, j = i + 7;
+    // [VIZ:{...}] or [CHART:{...}] — depth-aware bracket match
+    const prefix = src.slice(i, i + 5) === "[VIZ:" ? "[VIZ:" : src.slice(i, i + 7) === "[CHART:" ? "[CHART:" : null;
+    if (prefix) {
+      let depth = 1, j = i + prefix.length;
       while (j < src.length && depth > 0) {
         if (src[j] === "[") depth++;
         else if (src[j] === "]") depth--;
         j++;
       }
-      chartBlocks.push(src.slice(i + 7, j - 1).trim());
-      prepared += `__CHART_${chartBlocks.length - 1}__`;
+      const raw = src.slice(i + prefix.length, j - 1).trim();
+      vizBlocks.push(raw);
+      out += `__VIZ_${vizBlocks.length - 1}__`;
       i = j;
-    } else if (src.slice(i, i + 7) === "[CHART]") {
-      chartBlocks.push(null);
-      prepared += `__CHART_${chartBlocks.length - 1}__`;
-      i += 7;
-    } else {
-      prepared += src[i];
-      i++;
+      continue;
     }
+    if (src.slice(i, i + 7) === "[CHART]") {
+      vizBlocks.push(null);
+      out += `__VIZ_${vizBlocks.length - 1}__`;
+      i += 7;
+      continue;
+    }
+    out += src[i];
+    i++;
   }
-  prepared = prepared
+  return { out, varBlocks, vizBlocks };
+}
+
+// ── Block renderer ─────────────────────────────────────────────────────────
+function renderMarkdown(text, context) {
+  if (!text) return null;
+  const cleaned = preprocessLaTeX(text);
+  const { out: prepared0, varBlocks, vizBlocks } = extractMacros(cleaned);
+  const prepared = prepared0
     .replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, "")
     .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/g, "");
 
@@ -301,21 +402,14 @@ function renderMarkdown(text, context) {
       return;
     }
 
-    const chartOnly = t.match(/^__CHART_(\d+)__$/);
-    if (chartOnly) {
+    const vizOnly = t.match(/^__VIZ_(\d+)__$/);
+    if (vizOnly) {
       flushList();
-      const cidx = Number(chartOnly[1]);
-      const raw = chartBlocks[cidx];
-      let title = "动态图表";
-      if (raw) {
-        try { const cfg = JSON.parse(raw); title = cfg.title || cfg.name || cfg.type || "动态图表"; } catch {}
-      }
+      const raw = vizBlocks[Number(vizOnly[1])];
+      const intent = normalizeVizIntent(raw);
+      if (!intent) return;
       blocks.push(
-        <SmartVizPreviewCard
-          key={`chart-${idx}`}
-          title={title}
-          onOpen={() => context?.onOpenChart?.(raw ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : null)}
-        />
+        <DynamicVizCard key={`viz-${idx}`} intent={intent} onOpen={() => context?.onOpenViz?.(intent)} />
       );
       return;
     }
@@ -354,7 +448,7 @@ function renderMarkdown(text, context) {
   return blocks;
 }
 
-// ── AI Bubble (full-bleed, 13.5px) ─────────────────────────────────────────
+// ── AI Bubble ──────────────────────────────────────────────────────────────
 function AIBubble({ content, context }) {
   return (
     <motion.div variants={bubbleVariants} style={{ display: "flex", gap: 12, width: "100%", margin: "0 0 24px" }}>
@@ -375,7 +469,7 @@ function AIBubble({ content, context }) {
   );
 }
 
-// ── User Bubble (compact, 13.5px) ──────────────────────────────────────────
+// ── User Bubble ────────────────────────────────────────────────────────────
 function UserBubble({ content }) {
   return (
     <motion.div variants={bubbleVariants} style={{ display: "flex", gap: 12, width: "100%", margin: "0 0 24px", paddingLeft: 48, justifyContent: "flex-end" }}>
@@ -409,11 +503,9 @@ export default function MaterialChatPage({
   const openLab = useMathStore((s) => s.openLab);
   const context = {
     renderChart,
-    onOpenChart: (cfg) => {
-      // Always launch the in-canvas full-screen Interactive Lab overlay
-      openLab(cfg);
-      // Allow caller to perform additional side-effects (e.g. analytics)
-      if (onOpenChart) onOpenChart(cfg);
+    onOpenViz: (intent) => {
+      openLab(intent);
+      if (onOpenChart) onOpenChart(intent);
     },
   };
   return (
