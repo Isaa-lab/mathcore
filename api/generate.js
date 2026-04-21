@@ -90,18 +90,19 @@ async function runHandler(req, res) {
     gemini: {
       preferredStructures: ["hierarchy", "process", "comparison", "concept"],
       maxVizPerReply: 1,
-      extraConstraint: "⚠️ Gemini 专属约束：优先用 LaTeX 写公式，只在真的需要『结构图』时画 [VIZ:...]。画图时 structure 必须在 {hierarchy, process, comparison, concept} 四种里选，禁用 annotation 和 parametric（这两种 LaTeX 嵌套多，你画不稳）。",
+      extraConstraint: "⚠️ Gemini 专属约束：优先用 LaTeX 写公式，只在真的需要『结构图』时画 [VIZ:...]。画图时 structure 必须在 {hierarchy, process, comparison, concept} 四种里选，禁用 annotation 和 parametric（这两种 LaTeX 嵌套多，你画不稳）。\n画 concept 图时要求节点 8-12 个、覆盖 ≥4 个 dimension，不要只画两三个节点糊弄。",
     },
     groq: {
-      // Groq 上 llama-3.1-8b 非常不稳，严格只给 3 种最浅的结构
-      preferredStructures: ["hierarchy", "process", "comparison"],
+      // Groq 上 llama-3.1-8b 非常不稳，结构严格限制，但 concept 必须放开——
+      // 知识图谱是它最常见的可视化请求之一，屏蔽掉会退化成平铺文字。
+      preferredStructures: ["hierarchy", "process", "comparison", "concept"],
       maxVizPerReply: 1,
-      extraConstraint: "⚠️ 你是 Llama 模型，结构化 JSON 能力有限。为避免括号/反斜杠错误：\n· 每轮最多一个 [VIZ:...]\n· structure 只允许用 hierarchy / process / comparison 三种（最简、嵌套最浅）\n· 绝对禁用 annotation 和 parametric（LaTeX 多，你会画崩）\n· data 里不要写超过 4 层嵌套\n· 输出前逐字符数一遍花括号、方括号是否配对；不确定就直接用文字讲，不要硬画",
+      extraConstraint: "⚠️ 你是 Llama 模型，结构化 JSON 能力有限。为避免括号/反斜杠错误：\n· 每轮最多一个 [VIZ:...]\n· structure 只允许用 hierarchy / process / comparison / concept 四种（避免 annotation/parametric 这种 LaTeX 深嵌套）\n· data 不要超过 4 层嵌套\n· 画 concept 图时给够 8-10 个节点、10+ 条边，label 用精确术语而不是\"公式/方法\"这种模糊词；level 字段优先给（0 中心 / 1 主分支 / 2 细节）\n· 输出前逐字符数一遍花括号、方括号是否配对；不确定就直接用文字讲，不要硬画",
     },
     kimi: {
       preferredStructures: ["hierarchy", "process", "comparison", "concept"],
       maxVizPerReply: 1,
-      extraConstraint: "⚠️ 你画 [VIZ:...] 时优先用 hierarchy/process/comparison/concept 这四种浅结构，避免深嵌套。",
+      extraConstraint: "⚠️ 你画 [VIZ:...] 时优先用 hierarchy/process/comparison/concept 这四种浅结构，避免深嵌套。画 concept 图至少给 8 个节点并尽量标 level 字段。",
     },
     custom: { preferredStructures: ["hierarchy", "process", "comparison"], maxVizPerReply: 1, extraConstraint: "" },
   };
@@ -224,9 +225,62 @@ async function runHandler(req, res) {
   · comparison → 并列对比：
     data:{"columns":[{"title":"方法A","subtitle":"可选","points":[{"text":"优势","tone":"pro"},{"text":"劣势","tone":"con"},"普通点"]},{"title":"方法B","points":[...]}]}
 
-  · concept → 概念关系网络：
-    data:{"nodes":[{"id":"ode","name":"微分方程","primary":true},{"id":"sep","name":"可分离变量"},{"id":"lin","name":"一阶线性"}],"edges":[{"from":"ode","to":"sep","label":"包含"},{"from":"ode","to":"lin","label":"包含"}]}
-    必须有且只有 1 个 primary=true 的中心节点；节点总数建议 4-8 个。
+  · concept → 概念关系网络（这是"知识图谱级"可视化，不是"两个概念画条线"）：
+    data:{
+      "nodes":[
+        {"id":"n_center","name":"Lagrange 插值多项式","primary":true,"level":0,"dimension":"definition","importance":"core","desc":"通过 n+1 个点的唯一 n 次多项式"},
+        {"id":"n_basis","name":"基函数 Lᵢ(x)","level":1,"dimension":"construction","importance":"main","latex":"L_i(x)=\\\\prod_{j\\\\ne i}\\\\frac{x-x_j}{x_i-x_j}"},
+        {"id":"n_formula","name":"插值公式","level":1,"dimension":"formula","importance":"main","latex":"P(x)=\\\\sum_{i=0}^{n} y_i L_i(x)"},
+        {"id":"n_unique","name":"唯一性定理","level":1,"dimension":"property","importance":"main"},
+        {"id":"n_error","name":"余项 R(x)","level":1,"dimension":"error","importance":"main","latex":"R(x)=\\\\frac{f^{(n+1)}(\\\\xi)}{(n+1)!}\\\\omega(x)"},
+        {"id":"n_runge","name":"Runge 现象","level":2,"dimension":"error","importance":"detail"},
+        {"id":"n_cheby","name":"Chebyshev 节点","level":2,"dimension":"construction","importance":"detail"},
+        {"id":"n_newton","name":"Newton 插值","level":2,"dimension":"related","importance":"detail"},
+        {"id":"n_delta","name":"Kronecker δ 性质","level":2,"dimension":"property","importance":"detail"},
+        {"id":"n_quad","name":"数值积分","level":2,"dimension":"application","importance":"detail"}
+      ],
+      "edges":[
+        {"from":"n_center","to":"n_basis","label":"由其线性组合而成","type":"contains"},
+        {"from":"n_center","to":"n_formula","label":"有显式公式","type":"contains"},
+        {"from":"n_center","to":"n_unique","label":"满足","type":"derives"},
+        {"from":"n_center","to":"n_error","label":"误差受控于","type":"derives"},
+        {"from":"n_basis","to":"n_delta","label":"关键性质","type":"derives"},
+        {"from":"n_basis","to":"n_formula","label":"装配进","type":"contains"},
+        {"from":"n_error","to":"n_runge","label":"高次时表现为","type":"causes"},
+        {"from":"n_runge","to":"n_cheby","label":"对策是改用","type":"related_to"},
+        {"from":"n_newton","to":"n_center","label":"等价表示","type":"related_to"},
+        {"from":"n_center","to":"n_quad","label":"应用于","type":"example_of"}
+      ]
+    }
+
+    【concept 丰度硬指标 — 低于则必须重生成】
+    · nodes 数量：8 ~ 15 个，少于 5 个为不合格（只画 2 个节点等于浪费一次调用）
+    · edges 数量：≥ nodes.length − 1，且至少 2 条跨维度连接
+    · level 必须覆盖 ≥ 2 层：0=中心概念（唯一），1=主分支（3-6 个），2=细节/延伸（2-8 个）
+    · dimension 必须覆盖 6 类中的 ≥ 4 类：
+        definition（定义/直觉）、formula（核心公式）、construction（构造方法）、
+        property（关键性质）、error（误差/限制）、application（应用场景）、related（关联概念）
+    · 每条 edge 必须带 label 说明关系语义（"由...构造" "导致" "与...等价" "是...的特例" 等）
+    · edge.type 取 ["contains","derives","causes","example_of","related_to"] 之一（可选但推荐）
+
+    【concept 节点字段说明】
+    · id (必填)：短英文 ID，形如 "n_basis_fn"
+    · name (必填)：显示标签，用精确术语 —— ❌"性质/公式/方法" ✅"基函数 Lᵢ(x)/唯一性定理/Runge 现象"
+    · primary (必填且唯一)：中心节点设 true，其余不写
+    · level (强烈推荐)：0|1|2，用于径向多环布局
+    · dimension (强烈推荐)：见上 6 类枚举
+    · importance (可选)：core|main|detail，决定节点大小
+    · latex (可选)：节点对应的 LaTeX 公式（反斜杠双写），用户悬停时会渲染
+    · desc (可选)：一句话说明，悬停展示
+
+    【自检 — 输出前逐项打勾】
+    ☐ nodes.length ≥ 8 （画 Lagrange 却只给 2 节点 = 严重偷懒）
+    ☐ 有且只有一个 primary=true
+    ☐ 所有 edge.from/to 都能在 nodes 里找到对应 id
+    ☐ 每条 edge 都有 label
+    ☐ dimension 覆盖 ≥ 4 类
+    ☐ level 至少有 0 和 1 两层（有 2 更好）
+    ☐ 无模糊命名（"公式/方法/性质"这些标签禁用）
 
   · parametric → 参数曲线族（仅在真的需要调参数时用）：
     data:{"k":2,"steady":1.5,"cMin":-3,"cMax":3,"cInit":1,"equation":"dy/dx + 2y = 3"}
@@ -327,14 +381,15 @@ structure 对号入座（本轮可用：${vizProfile.preferredStructures.join(" 
 - "有哪几种/分类" → hierarchy（层级树）
 - "X vs Y/区别/对比" → comparison（并列对比）
 - "怎么推/证明/步骤" → process（分步）
-- "关系/之间" → concept（关系图）
+- "关系/之间/知识图谱" → concept（节点网，≥8 节点 ≥4 维度，必须 level 0/1 分层；2 节点就放行=严重偷懒）
 
 data 骨架（选 structure 对应的那一种即可）：
 · annotation: {"formula":"\\\\frac{dy}{dx}+P(x)y=Q(x)","parts":[{"tex":"\\\\frac{dy}{dx}","label":"导数","tone":"indigo"}, ...]}
 · hierarchy: {"root":{"name":"根","children":[...]}}
 · process: {"steps":[{"title":"第1步","desc":"...","formula":"可选 LaTeX"}]}
 · comparison: {"columns":[{"title":"A","points":[{"text":"优势","tone":"pro"}]}]}
-· concept: {"nodes":[{"id":"x","name":"X","primary":true}],"edges":[{"from":"x","to":"y","label":""}]}
+· concept: {"nodes":[{"id":"c","name":"中心","primary":true,"level":0,"dimension":"definition"}, {"id":"a","name":"基函数 Lᵢ(x)","level":1,"dimension":"construction","latex":"L_i(x)=\\\\prod_{j\\\\ne i}..."}, ...≥8 个...],"edges":[{"from":"c","to":"a","label":"由...构造"},... ≥n-1 条 ...]}
+  · concept 硬约束：nodes 必须 ≥ 5（建议 8-12），每条 edge 必须带 label，level 分 0/1/2 三层，dimension 覆盖 definition/formula/construction/property/error/application/related 中的 ≥4 类。
 
 ⚠️ JSON 逃逸铁律：LaTeX 的 \\ 必须双写（\\\\frac 而非 \\frac）。合法转义只有 \\" \\\\ \\/ \\b \\f \\n \\r \\t \\uXXXX，其它都要双写。不要尾逗号、不要智能引号、不要代码块围栏，必须完整闭合。本轮最多 ${vizProfile.maxVizPerReply} 个 [VIZ:...]。
 ${vizProfile.extraConstraint ? "\n" + vizProfile.extraConstraint + "\n" : ""}

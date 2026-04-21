@@ -4799,11 +4799,12 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           updateMsg({ content: "这次答得有点跑偏，你能换个方式再问一下吗？", isError: true, isStreaming: false });
         } else {
           updateMsg({ content: answer, isStreaming: false });
-          // ── 自动静默重试：若 AI 画的 [VIZ:...] 解析失败，立刻带着错误原因再让它画一次 ──
+          // ── 自动静默重试：若 AI 画的 [VIZ:...] 解析失败或丰度不达标，立刻带着问题描述再让它画一次 ──
           // 核心设计：不 push 新的用户气泡，用户看到的只是原 AI 消息在"重画中"然后替换为新内容。
           // 只重试一次；仍失败才让 FailedVizCard（"这张图没画成功"）浮出来给用户兜底。
+          // 注意：parseError 和 qualityIssue 都走同一条重试路径，前者是语法错，后者是内容稀薄。
           const blocks = splitQuizChatBlocks(answer);
-          const failed = blocks.find(b => b.type === "viz" && b.parseError);
+          const failed = blocks.find(b => b.type === "viz" && (b.parseError || b.qualityIssue));
           if (failed) {
             // 标记"正在重画"，让 UI 把红色失败卡替换成淡淡的"AI 正在重画..."状态
             updateMsg({ content: answer, isStreaming: false, vizRetryInProgress: true });
@@ -4836,15 +4837,17 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     // 构造重画指令：告诉 AI 上次哪里错了 + 这次严格用简单结构
     // 切片防 prompt 爆量（部分失败 VIZ 能上千字）
     const failedSnippet = String(failedBlock.content || "").slice(0, 300);
-    const reason = String(failedBlock.parseError || "JSON 解析失败").slice(0, 120);
+    const isQualityIssue = !failedBlock.parseError && !!failedBlock.qualityIssue;
+    const reason = String(failedBlock.parseError || failedBlock.qualityIssue || "VIZ 生成未达标").slice(0, 200);
+    // 丰度问题 vs 语法问题，要给 AI 完全不同的修正指令，否则它只会原地转圈
+    const retryInstruction = isQualityIssue
+      ? `你刚才那个 [VIZ:...] 虽然 JSON 语法对了，但内容质量不合格：${reason}\n\n重新生成一次，这次必须满足：\n· 如果是 concept 结构：节点 ≥ 8（理想 10-12）个，边 ≥ 节点数 - 1；每条 edge 都要带 label 说明关系；节点至少分 level 0（1 个中心）/ level 1（3-6 个主分支）/ level 2（若干细节）两到三层；覆盖 definition/formula/construction/property/error/application/related 里至少 4 个 dimension。\n· 不要重复同样的浅薄结构。用精确的数学术语做节点名（如"基函数 Lᵢ(x)""Runge 现象""Chebyshev 节点""唯一性定理"），禁用模糊词（"公式/方法/性质/应用"）。\n· 如果真的这个知识点没那么多可画的东西，那就不画图，改用文字 + $LaTeX$ 讲清楚，不要硬凑两个节点。`
+      : `你刚才那个 [VIZ:...] 没解析成功。错误：${reason}\n失败片段前 300 字：\n${failedSnippet}\n\n请重做这条回复——文字部分可以保留或微调，但 [VIZ:...] 必须换用最简单的结构（从 hierarchy / process / comparison 中选一种），避免深嵌套和 LaTeX 反斜杠错误。如果这个知识点本来就不需要画图，就完全不画图，只用文字 + $LaTeX$ 讲清楚。再试一次。`;
     const retryHistory = [
       ...(priorHistory || []),
       { role: "user", content: originalUserText },
       { role: "assistant", content: failedAnswer },
-      {
-        role: "user",
-        content: `你刚才那个 [VIZ:...] 没解析成功。错误：${reason}\n失败片段前 300 字：\n${failedSnippet}\n\n请重做这条回复——文字部分可以保留或微调，但 [VIZ:...] 必须换用最简单的结构（从 hierarchy / process / comparison 中选一种），避免深嵌套和 LaTeX 反斜杠错误。如果这个知识点本来就不需要画图，就完全不画图，只用文字 + $LaTeX$ 讲清楚。再试一次。`,
-      },
+      { role: "user", content: retryInstruction },
     ];
     try {
       const res = await fetch("/api/generate", {
@@ -5866,10 +5869,20 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                         {blocks && blocks.map((b, bi) => (
                           b.type === "text" ? (
                             b.content.trim() ? <MathText key={bi} text={b.content} /> : null
-                          ) : b.intent ? (
-                            // [VIZ:...] 解析成功 → 渲染预览卡（点击进入 InteractiveLab 全屏）
+                          ) : b.intent && !b.qualityIssue ? (
+                            // [VIZ:...] 解析成功且丰度达标 → 渲染预览卡（点击进入 InteractiveLab 全屏）
                             <div key={bi} style={{ margin: "10px 0 6px", display: "flex" }}>
                               <DynamicVizCard intent={b.intent} onOpen={() => openLab(b.intent)} />
+                            </div>
+                          ) : m.vizRetryExhausted && b.intent ? (
+                            // 重画耗尽但至少还有一张能渲染的图 → 放行，不让用户啥都看不到，
+                            // 但加一条 soft 提示说"内容偏少可以换 AI"
+                            <div key={bi} style={{ margin: "10px 0 6px", display: "flex", flexDirection: "column", gap: 6 }}>
+                              <DynamicVizCard intent={b.intent} onOpen={() => openLab(b.intent)} />
+                              <div style={{ fontSize: 11, color: "#A16207", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "6px 10px", display: "flex", alignItems: "center", gap: 6 }}>
+                                <span>💡</span>
+                                <span>这张图内容偏少（{b.qualityIssue || "丰度不足"}）。想要更完整的知识图谱？右上角切一个 AI 引擎再试。</span>
+                              </div>
                             </div>
                           ) : m.vizRetryInProgress ? (
                             // [VIZ:...] 解析失败 + 正在后台自动重画 —— 显示淡色"重画中"占位，不让用户看到红色错误
@@ -5906,12 +5919,14 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                                 <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1 }}>⚠️</span>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>
-                                    {m.vizRetryExhausted ? "自动重画后还是没画成功 🤔" : "这张图没画成功 🤔"}
+                                    {m.vizRetryExhausted
+                                      ? (b.qualityIssue ? "AI 重画后内容还是不够充实 🤔" : "自动重画后还是没画成功 🤔")
+                                      : (b.qualityIssue ? "这张图内容有点稀薄 🤔" : "这张图没画成功 🤔")}
                                   </div>
                                   <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "#78350F" }}>
                                     {m.vizRetryExhausted
-                                      ? "AI 这个模型在当前知识点上的结构化输出不稳定。建议换一个 AI 引擎试试，或者让 AI 改用文字讲解。"
-                                      : userFriendlyVizError(b.parseError)}
+                                      ? "AI 这个模型在当前知识点上的结构化输出不稳定。建议换一个 AI 引擎（右上角头像→切换 AI）试试，或者让 AI 改用文字讲解。"
+                                      : (b.qualityIssue || userFriendlyVizError(b.parseError))}
                                   </div>
                                 </div>
                               </div>
@@ -7331,6 +7346,7 @@ function splitQuizChatBlocks(text) {
       // 尝试解析（normalizeVizIntent 内含 repair 级联）
       let intent = null;
       let parseError = null;
+      let qualityIssue = null;
       try { intent = normalizeVizIntent(raw); }
       catch (e) { parseError = e?.message || "unknown"; }
       if (!intent && !parseError) {
@@ -7339,7 +7355,18 @@ function splitQuizChatBlocks(text) {
         catch (e2) { parseError = e2?.message || "schema_mismatch"; }
         if (!parseError) parseError = "schema_mismatch";
       }
-      out.push({ type: "viz", content: raw, intent, parseError });
+      // ── concept 结构的丰度守门：2 节点就放行的图等于浪费一次调用，触发静默重试 ──
+      // 只在 JSON 解析成功时才检丰度；纯 JSON 错误让 parseError 路径处理
+      if (intent && !parseError && intent.structure === "concept") {
+        const nodes = Array.isArray(intent.data?.nodes) ? intent.data.nodes : [];
+        const edges = Array.isArray(intent.data?.edges) ? intent.data.edges : [];
+        if (nodes.length < 5) {
+          qualityIssue = `concept 图内容太稀薄：只有 ${nodes.length} 个节点（应 ≥ 8），缺少知识图谱应有的丰度`;
+        } else if (edges.length < Math.max(nodes.length - 1, 4)) {
+          qualityIssue = `concept 图连接太少：${edges.length} 条边串起 ${nodes.length} 个节点（应 ≥ ${nodes.length - 1}），关系网络不成立`;
+        }
+      }
+      out.push({ type: "viz", content: raw, intent, parseError, qualityIssue });
       i = j;
       continue;
     }

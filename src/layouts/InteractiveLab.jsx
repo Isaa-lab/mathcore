@@ -588,6 +588,28 @@ function AnnotationStage({ intent, accent }) {
 //                            STAGE 6: CONCEPT
 //   Radial node-link diagram — 1 primary center + satellite concepts
 // ───────────────────────────────────────────────────────────────────────────
+// ── 6 个 dimension 的配色：用户悬停或点击会按此上色，同时侧栏有图例 ──
+// 颜色选择：高对比但不刺眼，满足色弱友好 + 视觉层次
+const DIMENSION_PALETTE = {
+  definition:   { fill: "#E0F2FE", stroke: "#0284C7", fg: "#075985", label: "定义" },
+  formula:      { fill: "#FEF3C7", stroke: "#D97706", fg: "#92400E", label: "公式" },
+  construction: { fill: "#DCFCE7", stroke: "#16A34A", fg: "#166534", label: "构造" },
+  property:     { fill: "#EDE9FE", stroke: "#7C3AED", fg: "#5B21B6", label: "性质" },
+  error:        { fill: "#FEE2E2", stroke: "#DC2626", fg: "#991B1B", label: "误差/限制" },
+  application:  { fill: "#FFE4E6", stroke: "#E11D48", fg: "#9F1239", label: "应用" },
+  related:      { fill: "#E5E7EB", stroke: "#6B7280", fg: "#374151", label: "关联概念" },
+};
+
+// KaTeX 安全渲染：失败时降级为原始文本，不炸整个面板
+function renderKatex(tex, opts = {}) {
+  if (!tex) return "";
+  try {
+    return katex.renderToString(String(tex), { throwOnError: false, output: "html", ...opts });
+  } catch {
+    return String(tex);
+  }
+}
+
 function ConceptStage({ intent, accent }) {
   const data = intent?.data || {};
   const rawNodes = Array.isArray(data.nodes) && data.nodes.length > 0
@@ -595,32 +617,80 @@ function ConceptStage({ intent, accent }) {
     : [{ id: "root", name: intent.title || "核心", primary: true }];
   const edges = Array.isArray(data.edges) ? data.edges : [];
 
-  // Ensure exactly one primary — default to first node
+  // ── 归一化：确保每个节点都有 name/level/dimension（老数据兼容 + 新字段补全） ──
+  // 1 个 primary（优先 primary=true，否则 level=0 的节点，最后兜底第一个）
   let primaryIdx = rawNodes.findIndex((n) => n && n.primary);
+  if (primaryIdx < 0) primaryIdx = rawNodes.findIndex((n) => n && Number(n.level) === 0);
   if (primaryIdx < 0) primaryIdx = 0;
-  const nodes = rawNodes.map((n, i) => ({ ...n, primary: i === primaryIdx }));
-  const primary = nodes[primaryIdx];
-  const satellites = nodes.filter((_, i) => i !== primaryIdx);
 
+  const nodes = rawNodes.map((n, i) => {
+    const isPrimary = i === primaryIdx;
+    const rawLevel = n?.level;
+    // level 不存在时：primary 默认 0，其他默认 1（平铺在内环）
+    const level = rawLevel === 0 || rawLevel === 1 || rawLevel === 2
+      ? Number(rawLevel)
+      : (isPrimary ? 0 : 1);
+    return {
+      ...n,
+      name: n?.name || n?.label || n?.id || "(未命名)",
+      primary: isPrimary,
+      level,
+      dimension: n?.dimension || (isPrimary ? "definition" : "related"),
+      importance: n?.importance || (isPrimary ? "core" : "main"),
+    };
+  });
+  const primary = nodes[primaryIdx];
+
+  // ── 多环径向布局：level 0 → 中心；level 1 → R1；level 2 → R2 ──
+  // 动态收缩半径：当内环节点过多时放大；当只有稀疏层时也要保证最小半径
   const W = 920, H = 560;
   const CX = W / 2, CY = H / 2;
-  const R = Math.min(240, 120 + satellites.length * 10);
+  const level1 = nodes.filter((n) => n.level === 1 && !n.primary);
+  const level2 = nodes.filter((n) => n.level === 2);
+  const R1 = Math.max(150, Math.min(210, 110 + level1.length * 8));
+  const R2 = Math.max(R1 + 110, Math.min(290, R1 + 90 + level2.length * 6));
 
   const positions = useMemo(() => {
     const p = {};
     p[primary.id] = { x: CX, y: CY };
-    satellites.forEach((n, i) => {
-      const angle = (i / Math.max(satellites.length, 1)) * 2 * Math.PI - Math.PI / 2;
-      p[n.id] = { x: CX + R * Math.cos(angle), y: CY + R * Math.sin(angle) };
-    });
+    const place = (group, R, angleOffset = 0) => {
+      const N = Math.max(group.length, 1);
+      group.forEach((n, i) => {
+        const angle = (i / N) * 2 * Math.PI - Math.PI / 2 + angleOffset;
+        p[n.id] = { x: CX + R * Math.cos(angle), y: CY + R * Math.sin(angle) };
+      });
+    };
+    place(level1, R1, 0);
+    // level 2 的角度错开半格，避免和 level 1 放在同一径向线上挡视线
+    place(level2, R2, Math.PI / Math.max(level2.length, 1));
+    // 若有没归类到 level 1/2 的残留节点（例如 AI 吐了 level=3），退化到外环
+    const orphan = nodes.filter(
+      (n) => !n.primary && n.level !== 1 && n.level !== 2,
+    );
+    if (orphan.length) {
+      orphan.forEach((n, i) => {
+        const angle = (i / orphan.length) * 2 * Math.PI + Math.PI / 4;
+        p[n.id] = { x: CX + (R2 + 30) * Math.cos(angle), y: CY + (R2 + 30) * Math.sin(angle) };
+      });
+    }
     return p;
-  }, [primary.id, satellites, R]);
+  }, [primary.id, level1, level2, nodes, R1, R2]);
 
   const [hovered, setHovered] = useState(null);
 
   const nodeSelectedDesc = hovered
     ? nodes.find((n) => n.id === hovered)
     : primary;
+
+  // dimension 分布：侧栏图例用
+  const dimensionCount = useMemo(() => {
+    const acc = {};
+    nodes.forEach((n) => {
+      const d = n.dimension || "related";
+      acc[d] = (acc[d] || 0) + 1;
+    });
+    return acc;
+  }, [nodes]);
 
   return (
     <div style={{ flex: 1, padding: 32, display: "flex", gap: 24, minHeight: 0 }}>
@@ -677,33 +747,49 @@ function ConceptStage({ intent, accent }) {
             if (!pos) return null;
             const isPrimary = n.primary;
             const isHovered = hovered === n.id;
-            const baseR = isPrimary ? 46 : 34;
+            // 按 level + importance 决定节点大小：level 越高、importance 越核心 → 越大
+            const levelR = isPrimary ? 48 : (n.level === 1 ? 36 : 28);
+            const importanceBoost = n.importance === "core" ? 4 : n.importance === "detail" ? -4 : 0;
+            const baseR = levelR + importanceBoost;
             const pulseR = baseR + 8;
             const label = String(n.name || n.id);
-            const maxCharWidth = isPrimary ? 8 : 7;
+            // level 越外圈，文字越能容纳（细节节点允许更长标签，因为它们本来就是精确术语）
+            const maxCharWidth = isPrimary ? 8 : n.level === 1 ? 7 : 9;
             const displayLabel = label.length > maxCharWidth ? label.slice(0, maxCharWidth) + "…" : label;
+            // dimension 配色：非 primary 节点都按 dimension 着色，让维度分布一眼可见
+            const palette = DIMENSION_PALETTE[n.dimension] || DIMENSION_PALETTE.related;
+            const fillColor = isPrimary ? accent.accent : palette.fill;
+            const strokeColor = isPrimary
+              ? accent.fg
+              : (isHovered ? palette.stroke : palette.stroke);
+            const textColor = isPrimary ? "#FFFFFF" : palette.fg;
             return (
               <motion.g
                 key={n.id}
                 initial={{ scale: 0, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                transition={{ type: "spring", stiffness: 240, damping: 22, delay: 0.05 + i * 0.06 }}
+                transition={{ type: "spring", stiffness: 240, damping: 22, delay: 0.05 + i * 0.04 }}
                 onMouseEnter={() => setHovered(n.id)}
                 onMouseLeave={() => setHovered(null)}
                 style={{ cursor: "pointer" }}
               >
-                <circle cx={pos.x} cy={pos.y} r={pulseR} fill={isPrimary ? accent.bg : "#FAFAFC"} opacity={isHovered ? 1 : 0.55} style={{ transition: "opacity 0.18s" }} />
+                <circle
+                  cx={pos.x} cy={pos.y} r={pulseR}
+                  fill={isPrimary ? accent.bg : palette.fill}
+                  opacity={isHovered ? 1 : 0.42}
+                  style={{ transition: "opacity 0.18s" }}
+                />
                 <circle
                   cx={pos.x} cy={pos.y} r={baseR}
-                  fill={isPrimary ? accent.accent : "#FFFFFF"}
-                  stroke={isPrimary ? accent.fg : (isHovered ? accent.accent : "#E5E7EB")}
-                  strokeWidth={isPrimary ? 2.5 : (isHovered ? 2 : 1.6)}
+                  fill={fillColor}
+                  stroke={strokeColor}
+                  strokeWidth={isPrimary ? 2.5 : (isHovered ? 2.4 : 1.6)}
                   style={{ transition: "stroke 0.18s, stroke-width 0.18s" }}
                 />
                 <text
                   x={pos.x} y={pos.y + 4}
-                  fill={isPrimary ? "#FFFFFF" : "#111827"}
-                  fontSize={isPrimary ? 13 : 12}
+                  fill={textColor}
+                  fontSize={isPrimary ? 13 : n.level === 1 ? 12 : 11}
                   fontWeight="800" textAnchor="middle"
                   style={{ userSelect: "none", letterSpacing: "-0.01em", pointerEvents: "none" }}
                 >{displayLabel}</text>
@@ -714,30 +800,92 @@ function ConceptStage({ intent, accent }) {
       </div>
 
       {/* Side info panel */}
-      <div style={{ width: 300, flexShrink: 0, display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ background: "#FFFFFF", borderRadius: 20, padding: 22, border: "1px solid #F3F4F6", boxShadow: "0 8px 24px rgba(0,0,0,0.03)" }}>
-          <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.12em", color: "#9CA3AF", textTransform: "uppercase" }}>{hovered ? "聚焦节点" : "中心概念"}</span>
-          <h3 style={{ margin: "8px 0 10px", fontSize: 18, fontWeight: 800, color: nodeSelectedDesc?.primary ? accent.fg : "#111827", letterSpacing: "-0.015em" }}>
+      <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: 14, minHeight: 0, overflow: "auto" }}>
+        {/* 聚焦节点详情：名称 + 维度 + 层级 + LaTeX 公式（若有） + 描述 */}
+        <div style={{ background: "#FFFFFF", borderRadius: 20, padding: 20, border: "1px solid #F3F4F6", boxShadow: "0 8px 24px rgba(0,0,0,0.03)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.12em", color: "#9CA3AF", textTransform: "uppercase" }}>{hovered ? "聚焦节点" : "中心概念"}</span>
+            {nodeSelectedDesc?.dimension && (
+              <span style={{
+                marginLeft: "auto",
+                fontSize: 10.5,
+                fontWeight: 800,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: (DIMENSION_PALETTE[nodeSelectedDesc.dimension] || DIMENSION_PALETTE.related).fill,
+                color: (DIMENSION_PALETTE[nodeSelectedDesc.dimension] || DIMENSION_PALETTE.related).fg,
+                border: `1px solid ${(DIMENSION_PALETTE[nodeSelectedDesc.dimension] || DIMENSION_PALETTE.related).stroke}33`,
+              }}>{(DIMENSION_PALETTE[nodeSelectedDesc.dimension] || DIMENSION_PALETTE.related).label}</span>
+            )}
+          </div>
+          <h3 style={{ margin: "4px 0 8px", fontSize: 17, fontWeight: 800, color: nodeSelectedDesc?.primary ? accent.fg : "#111827", letterSpacing: "-0.015em", lineHeight: 1.3 }}>
             {nodeSelectedDesc?.name || "—"}
           </h3>
+          {Number.isFinite(nodeSelectedDesc?.level) && (
+            <div style={{ fontSize: 10.5, color: "#9CA3AF", marginBottom: 8 }}>
+              层级 Level {nodeSelectedDesc.level}{nodeSelectedDesc.level === 0 ? "（中心）" : nodeSelectedDesc.level === 1 ? "（主分支）" : "（细节/延伸）"}
+            </div>
+          )}
+          {nodeSelectedDesc?.latex && (
+            <div
+              style={{
+                margin: "8px 0",
+                padding: "10px 12px",
+                background: "#F9FAFB",
+                borderRadius: 10,
+                border: "1px solid #F3F4F6",
+                overflowX: "auto",
+                fontSize: 14,
+              }}
+              dangerouslySetInnerHTML={{ __html: renderKatex(nodeSelectedDesc.latex, { displayMode: true }) }}
+            />
+          )}
           {nodeSelectedDesc?.desc && (
-            <p style={{ margin: 0, fontSize: 13, color: "#374151", lineHeight: 1.65 }}>{nodeSelectedDesc.desc}</p>
+            <p style={{ margin: "6px 0 0", fontSize: 12.5, color: "#374151", lineHeight: 1.6 }}>{nodeSelectedDesc.desc}</p>
           )}
         </div>
-        <div style={{ background: "#FAFAFC", borderRadius: 20, padding: 20, border: "1px solid #F3F4F6" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+
+        {/* 丰度指标：一眼看出这张图画得够不够充实 */}
+        <div style={{ background: "#FAFAFC", borderRadius: 18, padding: 16, border: "1px solid #F3F4F6" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
             <span style={{ width: 6, height: 6, borderRadius: 999, background: accent.accent }} />
-            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", color: "#6B7280", textTransform: "uppercase" }}>节点数</span>
-            <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#111827" }}>{nodes.length}</span>
+            <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.1em", color: "#6B7280", textTransform: "uppercase" }}>节点数</span>
+            <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: nodes.length >= 8 ? "#16A34A" : nodes.length >= 5 ? "#111827" : "#DC2626" }}>{nodes.length}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            <span style={{ width: 6, height: 6, borderRadius: 999, background: "#94A3B8" }} />
+            <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.1em", color: "#6B7280", textTransform: "uppercase" }}>连接数</span>
+            <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: edges.length >= Math.max(nodes.length - 1, 4) ? "#16A34A" : "#111827" }}>{edges.length}</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 6, height: 6, borderRadius: 999, background: "#94A3B8" }} />
-            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", color: "#6B7280", textTransform: "uppercase" }}>连接数</span>
-            <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#111827" }}>{edges.length}</span>
+            <span style={{ width: 6, height: 6, borderRadius: 999, background: "#A78BFA" }} />
+            <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.1em", color: "#6B7280", textTransform: "uppercase" }}>覆盖维度</span>
+            <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: Object.keys(dimensionCount).length >= 4 ? "#16A34A" : "#111827" }}>{Object.keys(dimensionCount).length} / 7</span>
           </div>
         </div>
-        <p style={{ margin: 0, fontSize: 11.5, color: "#9CA3AF", lineHeight: 1.55 }}>
-          悬停任一节点可高亮其关联路径。
+
+        {/* 维度图例：每个 dimension 一色，也展示本图覆盖了哪些维度 */}
+        {Object.keys(dimensionCount).length > 0 && (
+          <div style={{ background: "#FFFFFF", borderRadius: 18, padding: 14, border: "1px solid #F3F4F6" }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.1em", color: "#6B7280", textTransform: "uppercase", marginBottom: 8 }}>维度分布</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {Object.entries(DIMENSION_PALETTE).map(([key, pal]) => {
+                const count = dimensionCount[key] || 0;
+                if (count === 0) return null;
+                return (
+                  <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3, background: pal.fill, border: `1px solid ${pal.stroke}` }} />
+                    <span style={{ color: pal.fg, fontWeight: 700 }}>{pal.label}</span>
+                    <span style={{ marginLeft: "auto", color: "#9CA3AF", fontWeight: 600 }}>{count}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <p style={{ margin: 0, fontSize: 11, color: "#9CA3AF", lineHeight: 1.55 }}>
+          悬停任一节点可高亮其关联路径并展示对应公式。
         </p>
       </div>
     </div>
