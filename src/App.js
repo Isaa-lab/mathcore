@@ -236,6 +236,10 @@ import "katex/dist/katex.min.css";
       0%, 100% { transform: scale(1); opacity: 1; }
       50% { transform: scale(1.06); opacity: 0.8; }
     }
+    @keyframes mcPopFadeIn {
+      from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+      to   { opacity: 1; transform: translateY(0)     scale(1); }
+    }
   `
   document.head.appendChild(style);
 })();
@@ -7905,6 +7909,13 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
 
   const [selectedId, setSelectedId] = useState(null);
   const [selectedCourse, setSelectedCourse] = useState("全部");
+  // 双击节点触发的详情浮层（渐进式信息披露 · L3）—— 单击只做高亮（L2）
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  // 状态徽章作为筛选器（装饰数字 → 功能化数字）
+  const [statusFilter, setStatusFilter] = useState(null); // null | "mastered" | "learning" | "unlocked" | "locked"
+  // 底部全局看板：当前 tab + 是否收起
+  const [cockpitTab, setCockpitTab] = useState("today"); // "today" | "progress" | "review"
+  const [cockpitCollapsed, setCockpitCollapsed] = useState(false);
   // 打开知识点详情弹窗：{ name, chapterNum, course }
   const [modalTopic, setModalTopic] = useState(null);
 
@@ -8040,15 +8051,43 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         />
       )}
     <div style={{ padding: "0 0 20px", maxWidth: 1280, margin: "0 auto" }}>
-      {/* ══ Header ══ */}
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18, flexWrap: "wrap" }}>
+      {/* ══ Header —— 用户心智对齐：产品实体名 = "知识树"，副标题用中性描述 ══ */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 14, marginBottom: 14, flexWrap: "wrap" }}>
         {backTarget && <Btn size="sm" onClick={backTarget}>← 返回</Btn>}
-        <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em", color: "#0F172A" }}>知识 DAG · 学习驾驶舱</div>
-        <div style={{ display: "flex", gap: 8, marginLeft: "auto", flexWrap: "wrap" }}>
-          <StatusPill dotFill="#10B981" dotBorder="#10B981" label="已掌握" count={statusCounts.mastered} />
-          <StatusPill dotFill="#A5B4FC" dotBorder="#6366F1" label="学习中" count={statusCounts.learning} />
-          <StatusPill dotFill="#FFFFFF" dotBorder="#3B82F6" label="可学习" count={statusCounts.unlocked} />
-          <StatusPill dotFill="#F1F5F9" dotBorder="#CBD5E1" dashed label="未解锁" count={statusCounts.locked} />
+        <div>
+          <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em", color: "#0F172A", lineHeight: 1.15 }}>知识树</div>
+          <div style={{ fontSize: 13, color: "#94A3B8", marginTop: 4 }}>{SKILL_TREE.length} 个知识点 · {Array.from(new Set(SKILL_TREE.map(n => n.course))).length} 个学科 · 双击节点查看详情</div>
+        </div>
+        {/* 状态徽章作为筛选器（原理 5：装饰数字 → 功能数字） */}
+        <div style={{ display: "flex", gap: 8, marginLeft: "auto", flexWrap: "wrap", alignItems: "center" }}>
+          {[
+            { key: "mastered", fill: "#10B981", border: "#10B981", label: "已掌握", count: statusCounts.mastered },
+            { key: "learning", fill: "#A5B4FC", border: "#6366F1", label: "学习中", count: statusCounts.learning },
+            { key: "unlocked", fill: "#FFFFFF", border: "#3B82F6", label: "可学习", count: statusCounts.unlocked },
+            { key: "locked",   fill: "#F1F5F9", border: "#CBD5E1", dashed: true, label: "未解锁", count: statusCounts.locked },
+          ].map(p => {
+            const active = statusFilter === p.key;
+            return (
+              <button key={p.key}
+                onClick={() => setStatusFilter(active ? null : p.key)}
+                title={active ? "取消筛选" : `只看 ${p.label}`}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "5px 11px", borderRadius: 999, cursor: "pointer",
+                  border: "1.5px solid " + (active ? p.border : "#E2E8F0"),
+                  background: active ? "#F8FAFC" : "#fff",
+                  boxShadow: active ? `0 0 0 3px ${p.border}22` : "none",
+                  fontFamily: "inherit", transition: "all .15s",
+                }}>
+                <span style={{ width: 10, height: 10, borderRadius: "50%", background: p.fill, border: `1.5px solid ${p.border}`, borderStyle: p.dashed ? "dashed" : "solid" }} />
+                <span style={{ fontSize: 12, color: "#475569", fontWeight: active ? 700 : 500 }}>{p.label}</span>
+                <span style={{ fontSize: 12, color: active ? p.border : "#94A3B8", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{p.count}</span>
+              </button>
+            );
+          })}
+          {statusFilter && (
+            <button onClick={() => setStatusFilter(null)} style={{ fontSize: 11, color: "#94A3B8", background: "transparent", border: "none", cursor: "pointer", padding: "4px 6px" }}>清除筛选 ×</button>
+          )}
         </div>
       </div>
 
@@ -8076,8 +8115,9 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         </div>
       </div>
 
-      {/* ══ Canvas ══ */}
-      <div style={{ background: "#FFFFFF", borderRadius: 18, border: "1px solid #EEF2F7", padding: 0, overflow: "auto", maxHeight: 640, position: "relative" }}>
+      {/* ══ Canvas —— 主角优先：知识树占据最大空间；节点详情以浮层形式收纳到节点交互内 ══ */}
+      <div style={{ background: "#FFFFFF", borderRadius: 18, border: "1px solid #EEF2F7", padding: 0, overflow: "auto", maxHeight: 720, position: "relative" }}
+           onClick={() => { /* 点击空白处（未被节点 stopPropagation 拦下的事件）关闭浮层 */ setPopoverOpen(false); setSelectedId(null); }}>
         <svg width={Math.max(maxX, 1200)} height={Math.max(maxY, 340)} style={{ minWidth: "100%", display: "block", background: "linear-gradient(180deg,#FAFBFD 0%,#FFFFFF 140px)" }}>
           <defs>
             <marker id="mc-arrow-strong" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -8145,12 +8185,16 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
             const v = nodeVisual(status, node.course);
             const isRecommended = recommendedSet.has(node.id) && status !== "mastered";
             const isSelected = selectedId === node.id;
+            // 状态筛选：未命中的节点变暗但仍可交互
+            const dimmedByFilter = statusFilter && statusFilter !== status;
+            const effectiveOpacity = dimmedByFilter ? 0.25 : v.opacity;
 
             return (
               <g key={node.id}
                  transform={"translate(" + node.x + "," + node.y + ")"}
-                 onClick={() => setSelectedId(node.id)}
-                 style={{ cursor: status === "locked" ? "help" : "pointer", opacity: v.opacity }}>
+                 onClick={(e) => { e.stopPropagation(); setSelectedId(node.id); }}
+                 onDoubleClick={(e) => { e.stopPropagation(); setSelectedId(node.id); setPopoverOpen(true); }}
+                 style={{ cursor: status === "locked" ? "help" : "pointer", opacity: effectiveOpacity, transition: "opacity .25s" }}>
                 {/* Recommendation halo */}
                 {isRecommended && (
                   <rect x={-6} y={-6} width={NODE_W + 12} height={NODE_H + 12} rx={16}
@@ -8213,209 +8257,268 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           })}
           </g>
         </svg>
-      </div>
 
-      {/* ══ Inspector (only when a node is selected) ══ */}
-      {selected && (
-        <div style={{ marginTop: 16, padding: "18px 20px", background: "#fff", border: "1px solid #E5E7EB", borderRadius: 16, display: "grid", gridTemplateColumns: "1fr auto", gap: 18, alignItems: "start", boxShadow: "0 4px 16px rgba(15,23,42,0.04)" }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.14em", color: COURSE_COLORS_TREE[selected.course]?.ink || "#334155", textTransform: "uppercase" }}>{selected.course}</span>
-              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
-                background: selectedStatus === "mastered" ? "#D1FAE5" : selectedStatus === "learning" ? "#E0E7FF" : selectedStatus === "unlocked" ? "#DBEAFE" : "#F1F5F9",
-                color: selectedStatus === "mastered" ? "#065F46" : selectedStatus === "learning" ? "#3730A3" : selectedStatus === "unlocked" ? "#1E40AF" : "#475569" }}>
-                {selectedStatus === "mastered" ? "已掌握" : selectedStatus === "learning" ? "学习中" : selectedStatus === "unlocked" ? "可学习" : "未解锁"}
-              </span>
-              {recommendedSet.has(selected.id) && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "#FEF3C7", color: "#92400E" }}>推荐路径 ★</span>}
-            </div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.01em", marginBottom: 6 }}>
-              <span style={{ fontFamily: "'Georgia',ui-serif,serif", fontStyle: "italic", color: COURSE_COLORS_TREE[selected.course]?.solid, marginRight: 10 }}>{selected.sym}</span>
-              {selected.label}
-            </div>
-            <div style={{ fontSize: 13.5, color: "#475569", marginBottom: 12 }}>{selected.bullet}</div>
-            <div style={{ fontSize: 12, color: "#64748B", marginBottom: 4, fontWeight: 600, letterSpacing: "0.05em" }}>前置知识</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {(selected.deps || []).length === 0 && <span style={{ fontSize: 12, color: "#94A3B8" }}>无前置（入门节点）</span>}
-              {(selected.deps || []).map(d => {
-                const depNode = NODE_INDEX[d.id];
-                if (!depNode) return null;
-                const depSt = deriveStatus(depNode, progress);
-                return (
-                  <button key={d.id} onClick={() => setSelectedId(d.id)} style={{
-                    fontSize: 11.5, padding: "4px 10px", borderRadius: 999,
-                    border: "1px solid " + (depSt === "mastered" ? "#10B981" : "#E2E8F0"),
-                    background: depSt === "mastered" ? "#ECFDF5" : d.kind === "weak" ? "#FFFBEB" : d.kind === "peer" ? "#F1F5F9" : "#fff",
-                    color: depSt === "mastered" ? "#047857" : "#475569",
-                    fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-                  }}>
-                    {depSt === "mastered" ? "✓ " : depSt === "learning" ? "· " : ""}{depNode.label}
-                    <span style={{ opacity: 0.55, marginLeft: 6, fontWeight: 500 }}>
-                      {d.kind === "weak" ? "建议" : d.kind === "peer" ? "并列" : ""}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+        {/* ══ 节点详情浮层（L3 · 双击触发；锚定在节点右侧，超出右边界自动翻到左侧） ══ */}
+        {selected && popoverOpen && (() => {
+          const POP_W = 340;
+          const canvasW = Math.max(maxX, 1200);
+          const nodeRightX = selected.x + NODE_W;
+          const fitsRight = nodeRightX + POP_W + 16 <= canvasW;
+          const popLeft = fitsRight ? nodeRightX + 12 : Math.max(8, selected.x - POP_W - 12);
+          const popTop = Math.max(8, selected.y + CANVAS_TOP_PAD - 4);
+          const c = COURSE_COLORS_TREE[selected.course];
+          return (
+            <div onClick={(e) => e.stopPropagation()}
+                 style={{
+                   position: "absolute", left: popLeft, top: popTop, width: POP_W,
+                   background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0",
+                   boxShadow: "0 18px 40px rgba(15,23,42,0.12), 0 2px 8px rgba(15,23,42,0.06)",
+                   padding: 16, zIndex: 20,
+                   animation: "mcPopFadeIn .18s ease-out",
+                 }}>
+              {/* 关闭按钮 */}
+              <button onClick={() => { setPopoverOpen(false); }}
+                style={{ position: "absolute", top: 8, right: 8, background: "transparent", border: "none", color: "#94A3B8", fontSize: 16, cursor: "pointer", lineHeight: 1, padding: 4 }}
+                title="关闭">×</button>
 
-            {/* 相关知识点 —— 点击进入 TopicModal，补全了从 DAG 到知识库内容的链路 */}
-            {(selected.topics || []).length > 0 && (
-              <>
-                <div style={{ fontSize: 12, color: "#64748B", margin: "14px 0 4px", fontWeight: 600, letterSpacing: "0.05em" }}>
-                  相关知识点 <span style={{ color: "#CBD5E1", fontWeight: 500 }}>· 点击打开讲义</span>
+              {/* 头部 */}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+                <div style={{ width: 42, height: 42, borderRadius: 10, background: c?.soft || "#F5F3FF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <span style={{ fontFamily: "'Georgia',ui-serif,serif", fontStyle: "italic", fontSize: 20, color: c?.solid, fontWeight: 700 }}>{selected.sym}</span>
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {(selected.topics || []).map(t => {
-                    const hasDetail = !!KNOWLEDGE_CONTENT[t];
-                    const c = COURSE_COLORS_TREE[selected.course];
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.01em", marginBottom: 4 }}>{selected.label}</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: c?.soft, color: c?.ink }}>{selected.course}</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "#F1F5F9", color: "#475569" }}>{selected.chapter || "—"}</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999,
+                      background: selectedStatus === "mastered" ? "#D1FAE5" : selectedStatus === "learning" ? "#E0E7FF" : selectedStatus === "unlocked" ? "#DBEAFE" : "#F1F5F9",
+                      color: selectedStatus === "mastered" ? "#065F46" : selectedStatus === "learning" ? "#3730A3" : selectedStatus === "unlocked" ? "#1E40AF" : "#475569" }}>
+                      {selectedStatus === "mastered" ? "已掌握" : selectedStatus === "learning" ? "学习中" : selectedStatus === "unlocked" ? "可学习" : "未解锁"}
+                    </span>
+                    {recommendedSet.has(selected.id) && selectedStatus !== "mastered" && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 999, background: "#FEF3C7", color: "#92400E" }}>★ 推荐</span>}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ fontSize: 12.5, color: "#475569", marginBottom: 12, lineHeight: 1.55 }}>{selected.bullet} <span style={{ color: "#94A3B8", marginLeft: 4 }}>· ⏱ {selected.estMin} 分钟</span></div>
+
+              {/* 主 CTA —— 两个核心动作 */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                {(selected.topics || []).length > 0 && (
+                  <button onClick={() => openTopicModal(selected.course, selected.chapter, selected.topics[0])}
+                    style={{ flex: 1, padding: "9px 0", fontSize: 13, fontWeight: 700, background: c?.solid || "#0F172A", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontFamily: "inherit" }}>
+                    📘 看讲义
+                  </button>
+                )}
+                {selected.chapter && (
+                  <button onClick={() => { openQuizForNode(selected); setPopoverOpen(false); }}
+                    style={{ flex: 1, padding: "9px 0", fontSize: 13, fontWeight: 700, background: "#fff", color: c?.ink || "#0F172A", border: `1.5px solid ${c?.ring || "#E2E8F0"}`, borderRadius: 10, cursor: "pointer", fontFamily: "inherit" }}>
+                    ✏️ 做题
+                  </button>
+                )}
+              </div>
+
+              {/* 次级操作 —— 状态专属 */}
+              {selectedStatus === "locked" && (
+                <div style={{ fontSize: 11, color: "#94A3B8", padding: "8px 10px", background: "#F8FAFC", borderRadius: 8, border: "1px dashed #CBD5E1", marginBottom: 10 }}>
+                  完成全部强依赖后自动解锁。仍可提前预览讲义 / 做题
+                </div>
+              )}
+              {selectedStatus === "unlocked" && (
+                <button onClick={() => actStart(selected.id)} style={{ width: "100%", padding: "7px 0", fontSize: 12, fontWeight: 600, background: "#F8FAFC", color: "#475569", border: "1px solid #E2E8F0", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", marginBottom: 10 }}>🚀 标记为学习中</button>
+              )}
+              {selectedStatus === "learning" && (
+                <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                  <button onClick={() => actMaster(selected.id)} style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 600, background: "#ECFDF5", color: "#047857", border: "1px solid #A7F3D0", borderRadius: 8, cursor: "pointer", fontFamily: "inherit" }}>✓ 已掌握</button>
+                  <button onClick={() => actReset(selected.id)} style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 600, background: "#F8FAFC", color: "#94A3B8", border: "1px solid #E2E8F0", borderRadius: 8, cursor: "pointer", fontFamily: "inherit" }}>⏸ 暂停</button>
+                </div>
+              )}
+              {selectedStatus === "mastered" && (
+                <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                  <button onClick={() => actReview(selected.id)} style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 600, background: "#EEF2FF", color: "#4338CA", border: "1px solid #C7D2FE", borderRadius: 8, cursor: "pointer", fontFamily: "inherit" }}>🔁 刚复习过</button>
+                  <button onClick={() => actPause(selected.id)} style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 600, background: "#F8FAFC", color: "#475569", border: "1px solid #E2E8F0", borderRadius: 8, cursor: "pointer", fontFamily: "inherit" }}>重置</button>
+                </div>
+              )}
+
+              {/* 前置知识 */}
+              <details style={{ marginTop: 6 }}>
+                <summary style={{ fontSize: 11, color: "#64748B", fontWeight: 600, letterSpacing: "0.04em", cursor: "pointer", padding: "4px 0" }}>前置知识 {(selected.deps || []).length > 0 ? `(${selected.deps.length})` : "· 无"}</summary>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                  {(selected.deps || []).length === 0 && <span style={{ fontSize: 11, color: "#CBD5E1" }}>入门节点，可直接开始</span>}
+                  {(selected.deps || []).map(d => {
+                    const depNode = NODE_INDEX[d.id];
+                    if (!depNode) return null;
+                    const depSt = deriveStatus(depNode, progress);
                     return (
-                      <button key={t} onClick={() => openTopicModal(selected.course, selected.chapter, t)} style={{
-                        fontSize: 11.5, padding: "5px 12px", borderRadius: 999,
-                        border: "1px solid " + (hasDetail ? c.ring : "#E2E8F0"),
-                        background: hasDetail ? c.soft : "#F8FAFC",
-                        color: hasDetail ? c.ink : "#94A3B8",
+                      <button key={d.id} onClick={() => { setSelectedId(d.id); }} style={{
+                        fontSize: 10.5, padding: "3px 8px", borderRadius: 999,
+                        border: "1px solid " + (depSt === "mastered" ? "#10B981" : "#E2E8F0"),
+                        background: depSt === "mastered" ? "#ECFDF5" : "#fff",
+                        color: depSt === "mastered" ? "#047857" : "#475569",
                         fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-                        display: "inline-flex", alignItems: "center", gap: 5,
-                      }} title={hasDetail ? "查看讲义内容" : "内容建设中（仍可查看练习）"}>
-                        <span style={{ fontSize: 10, opacity: 0.7 }}>{hasDetail ? "📘" : "○"}</span>
-                        {t}
+                      }}>
+                        {depSt === "mastered" ? "✓ " : ""}{depNode.label}
+                        {d.kind !== "strong" && <span style={{ opacity: 0.55, marginLeft: 4 }}>{d.kind === "weak" ? "建议" : "并列"}</span>}
                       </button>
                     );
                   })}
                 </div>
-              </>
-            )}
-            <div style={{ fontSize: 11, color: "#CBD5E1", marginTop: 10 }}>
-              对应章节：<span style={{ color: "#94A3B8", fontWeight: 600 }}>{selected.chapter || "—"}</span>
-            </div>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 180 }}>
-            {/* 通用：知识点 & 题库入口（所有状态都可用） */}
-            {(selected.topics || []).length > 0 && (
-              <Btn variant="primary" onClick={() => openTopicModal(selected.course, selected.chapter, selected.topics[0])}>
-                📘 查看知识点
-              </Btn>
-            )}
-            {selected.chapter && (
-              <Btn onClick={() => openQuizForNode(selected)}>
-                ✏️ 练习题目（{selected.chapter}）
-              </Btn>
-            )}
+              </details>
 
-            {/* 状态专属操作 */}
-            <div style={{ height: 1, background: "#EEF2F7", margin: "2px 0" }} />
-            {selectedStatus === "locked" && (
-              <div style={{ fontSize: 12, color: "#94A3B8", padding: "10px 12px", background: "#F8FAFC", borderRadius: 10, border: "1px dashed #CBD5E1" }}>
-                完成全部<strong style={{ color: "#475569" }}>强依赖</strong>后自动解锁，但你仍可提前预览讲义 / 做题
-              </div>
-            )}
-            {selectedStatus === "unlocked" && (
-              <Btn onClick={() => actStart(selected.id)}>🚀 标记为学习中</Btn>
-            )}
-            {selectedStatus === "learning" && (
-              <>
-                <Btn onClick={() => actMaster(selected.id)}>✓ 标记已掌握</Btn>
-                <Btn onClick={() => actReset(selected.id)}>⏸ 暂停 / 撤销</Btn>
-                <div style={{ fontSize: 11, color: "#94A3B8", lineHeight: 1.45 }}>
-                  建议先做完上面的「练习题目」再点已掌握
-                </div>
-              </>
-            )}
-            {selectedStatus === "mastered" && (
-              <>
-                <Btn onClick={() => actReview(selected.id)}>🔁 刚复习过一次</Btn>
-                <Btn onClick={() => actPause(selected.id)}>重置为学习中</Btn>
-                <Btn variant="danger" onClick={() => actReset(selected.id)}>清除此节点进度</Btn>
-              </>
-            )}
-          </div>
+              {/* 相关知识点 */}
+              {(selected.topics || []).length > 0 && (
+                <details style={{ marginTop: 4 }} open>
+                  <summary style={{ fontSize: 11, color: "#64748B", fontWeight: 600, letterSpacing: "0.04em", cursor: "pointer", padding: "4px 0" }}>子内容 ({selected.topics.length})</summary>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                    {selected.topics.map(t => {
+                      const hasDetail = !!KNOWLEDGE_CONTENT[t];
+                      return (
+                        <button key={t} onClick={() => openTopicModal(selected.course, selected.chapter, t)}
+                          title={hasDetail ? "查看讲义" : "内容建设中"}
+                          style={{
+                            fontSize: 10.5, padding: "3px 8px", borderRadius: 999,
+                            border: "1px solid " + (hasDetail ? c?.ring : "#E2E8F0"),
+                            background: hasDetail ? c?.soft : "#F8FAFC",
+                            color: hasDetail ? c?.ink : "#94A3B8",
+                            fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                          }}>
+                          {hasDetail ? "📘 " : ""}{t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </details>
+              )}
+            </div>
+          );
+        })()}
+      </div>
+      {/* 空态提示：单击只高亮，双击才看详情 */}
+      {!popoverOpen && selected && (
+        <div style={{ marginTop: 10, padding: "8px 14px", background: "#F8FAFC", border: "1px dashed #E2E8F0", borderRadius: 10, fontSize: 12, color: "#94A3B8", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontFamily: "'Georgia',ui-serif,serif", fontStyle: "italic", color: COURSE_COLORS_TREE[selected.course]?.solid, fontWeight: 700 }}>{selected.sym}</span>
+          <span style={{ color: "#475569", fontWeight: 600 }}>{selected.label}</span>
+          <span style={{ color: "#CBD5E1" }}>·</span>
+          <span>双击节点查看讲义与做题入口</span>
+          <button onClick={() => setPopoverOpen(true)} style={{ marginLeft: "auto", padding: "4px 10px", fontSize: 11, fontWeight: 600, background: "#fff", color: "#475569", border: "1px solid #E2E8F0", borderRadius: 8, cursor: "pointer", fontFamily: "inherit" }}>查看详情 →</button>
         </div>
       )}
 
-      {/* ══ Learning Cockpit ══ */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginTop: 16 }}>
-        {/* Panel A : 今日推荐 */}
-        <div style={{ background: "#FFFFFF", border: "1px solid #EEF2F7", borderRadius: 16, padding: 18 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "#0F172A" }}>🎯 今日推荐</div>
-            <span style={{ fontSize: 11, color: "#94A3B8" }}>基于 DAG 拓扑</span>
-          </div>
-          {recommendations.length === 0 ? (
-            <div style={{ fontSize: 12.5, color: "#94A3B8", padding: "14px 0" }}>全部节点已掌握 🎉</div>
-          ) : recommendations.map(({ node, status }) => {
-            const c = COURSE_COLORS_TREE[node.course];
+      {/* ══ 全局学习看板 · 收缩为可折叠 Tab 条（主角优先：知识树才是主角） ══ */}
+      <div style={{ marginTop: 14, background: "#FFFFFF", border: "1px solid #EEF2F7", borderRadius: 14, overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 6px", borderBottom: cockpitCollapsed ? "none" : "1px solid #F1F5F9" }}>
+          {[
+            { key: "today",    label: "今日推荐", icon: "🎯", badge: recommendations.length || null },
+            { key: "progress", label: "学习进度", icon: "📊", badge: null },
+            { key: "review",   label: "复习提醒", icon: "⏰", badge: reviewDue.length || null },
+          ].map(t => {
+            const active = !cockpitCollapsed && cockpitTab === t.key;
             return (
-              <button key={node.id} onClick={() => setSelectedId(node.id)} style={{
-                width: "100%", display: "flex", alignItems: "center", gap: 10,
-                padding: "9px 12px", marginBottom: 6,
-                borderRadius: 10, border: "1px solid #EEF2F7", background: "#FAFBFD",
-                cursor: "pointer", fontFamily: "inherit", textAlign: "left",
-              }}
-                onMouseEnter={e => (e.currentTarget.style.background = c.soft)}
-                onMouseLeave={e => (e.currentTarget.style.background = "#FAFBFD")}>
-                <span style={{ fontFamily: "'Georgia',ui-serif,serif", fontStyle: "italic", fontSize: 18, color: c.solid, width: 24, textAlign: "center" }}>{node.sym}</span>
-                <span style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{node.label}</div>
-                  <div style={{ fontSize: 11, color: "#64748B" }}>{node.course} · ⏱ {node.estMin} 分钟 · {status === "learning" ? "继续" : "开始"}</div>
-                </span>
-                <span style={{ fontSize: 16, color: c.solid }}>→</span>
+              <button key={t.key}
+                onClick={() => { setCockpitTab(t.key); setCockpitCollapsed(false); }}
+                style={{
+                  padding: "8px 14px", fontSize: 13, fontWeight: active ? 700 : 500,
+                  color: active ? "#0F172A" : "#64748B",
+                  background: active ? "#F8FAFC" : "transparent",
+                  border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+                  display: "inline-flex", alignItems: "center", gap: 6, transition: "all .15s",
+                }}>
+                <span>{t.icon}</span>
+                <span>{t.label}</span>
+                {t.badge != null && (
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 999, background: active ? "#0F172A" : "#E2E8F0", color: active ? "#fff" : "#64748B" }}>{t.badge}</span>
+                )}
               </button>
             );
           })}
+          <button onClick={() => setCockpitCollapsed(v => !v)}
+            style={{ marginLeft: "auto", padding: "6px 10px", fontSize: 11, fontWeight: 600, color: "#94A3B8", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit" }}
+            title={cockpitCollapsed ? "展开面板" : "收起面板"}>
+            {cockpitCollapsed ? "展开 ∧" : "收起 ∨"}
+          </button>
         </div>
-
-        {/* Panel B : 学习进度 */}
-        <div style={{ background: "#FFFFFF", border: "1px solid #EEF2F7", borderRadius: 16, padding: 18 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "#0F172A", marginBottom: 12 }}>📊 学习进度</div>
-          {Array.from(new Set(SKILL_TREE.map(n => n.course))).map(course => {
-            const courseNodes = SKILL_TREE.filter(n => n.course === course);
-            const masteredN = courseNodes.filter(n => progress[n.id]?.status === "mastered").length;
-            const learningN = courseNodes.filter(n => progress[n.id]?.status === "learning").length;
-            const total = courseNodes.length;
-            const c = COURSE_COLORS_TREE[course];
-            const pct = Math.round((masteredN / total) * 100);
-            return (
-              <div key={course} style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: c.ink }}>{course}</span>
-                  <span style={{ fontSize: 11, color: "#64748B" }}>{masteredN}/{total}{learningN > 0 ? ` · +${learningN} 进行中` : ""}</span>
+        {!cockpitCollapsed && (
+          <div style={{ padding: 16 }}>
+            {cockpitTab === "today" && (
+              recommendations.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: "#94A3B8", padding: "10px 0" }}>全部节点已掌握 🎉</div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 8 }}>
+                  {recommendations.map(({ node, status }) => {
+                    const c = COURSE_COLORS_TREE[node.course];
+                    return (
+                      <button key={node.id} onClick={() => { setSelectedId(node.id); setPopoverOpen(true); }} style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "9px 12px", borderRadius: 10, border: "1px solid #EEF2F7", background: "#FAFBFD",
+                        cursor: "pointer", fontFamily: "inherit", textAlign: "left", transition: "all .15s",
+                      }}
+                        onMouseEnter={e => (e.currentTarget.style.background = c.soft)}
+                        onMouseLeave={e => (e.currentTarget.style.background = "#FAFBFD")}>
+                        <span style={{ fontFamily: "'Georgia',ui-serif,serif", fontStyle: "italic", fontSize: 18, color: c.solid, width: 24, textAlign: "center" }}>{node.sym}</span>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{node.label}</div>
+                          <div style={{ fontSize: 11, color: "#64748B" }}>{node.course} · ⏱ {node.estMin} 分钟 · {status === "learning" ? "继续" : "开始"}</div>
+                        </span>
+                        <span style={{ fontSize: 16, color: c.solid }}>→</span>
+                      </button>
+                    );
+                  })}
                 </div>
-                <div style={{ height: 6, background: "#F1F5F9", borderRadius: 3, overflow: "hidden", position: "relative" }}>
-                  <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: (masteredN / total * 100) + "%", background: c.solid, borderRadius: 3, transition: "width .4s" }} />
-                  <div style={{ position: "absolute", left: (masteredN / total * 100) + "%", top: 0, bottom: 0, width: (learningN / total * 100) + "%", background: c.ring, borderRadius: 3, transition: "width .4s" }} />
-                </div>
-                <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 2 }}>{pct}% 已达到精通</div>
+              )
+            )}
+            {cockpitTab === "progress" && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+                {Array.from(new Set(SKILL_TREE.map(n => n.course))).map(course => {
+                  const courseNodes = SKILL_TREE.filter(n => n.course === course);
+                  const masteredN = courseNodes.filter(n => progress[n.id]?.status === "mastered").length;
+                  const learningN = courseNodes.filter(n => progress[n.id]?.status === "learning").length;
+                  const total = courseNodes.length;
+                  const c = COURSE_COLORS_TREE[course];
+                  const pct = Math.round((masteredN / total) * 100);
+                  return (
+                    <div key={course}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: c.ink }}>{course}</span>
+                        <span style={{ fontSize: 11, color: "#64748B" }}>{masteredN}/{total}{learningN > 0 ? ` · +${learningN} 进行中` : ""}</span>
+                      </div>
+                      <div style={{ height: 6, background: "#F1F5F9", borderRadius: 3, overflow: "hidden", position: "relative" }}>
+                        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: (masteredN / total * 100) + "%", background: c.solid, borderRadius: 3, transition: "width .4s" }} />
+                        <div style={{ position: "absolute", left: (masteredN / total * 100) + "%", top: 0, bottom: 0, width: (learningN / total * 100) + "%", background: c.ring, borderRadius: 3, transition: "width .4s" }} />
+                      </div>
+                      <div style={{ fontSize: 10.5, color: "#94A3B8", marginTop: 3 }}>{pct}% 已达到精通</div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-
-        {/* Panel C : 复习提醒 */}
-        <div style={{ background: "#FFFFFF", border: "1px solid #EEF2F7", borderRadius: 16, padding: 18 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "#0F172A" }}>⏰ 复习提醒</div>
-            <span style={{ fontSize: 11, color: "#94A3B8" }}>艾宾浩斯曲线</span>
+            )}
+            {cockpitTab === "review" && (
+              reviewDue.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: "#94A3B8", padding: "10px 0" }}>暂无需要复习的节点（艾宾浩斯曲线会在掌握 7 天后提醒你复盘）</div>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 8 }}>
+                  {reviewDue.map(({ node, p }) => {
+                    const days = Math.floor((Date.now() - p.masteredAt) / MS_DAY);
+                    const c = COURSE_COLORS_TREE[node.course];
+                    return (
+                      <button key={node.id} onClick={() => { setSelectedId(node.id); setPopoverOpen(true); }} style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "9px 12px", borderRadius: 10, border: "1px solid " + c.ring,
+                        background: c.soft, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                      }}>
+                        <span style={{ fontFamily: "'Georgia',ui-serif,serif", fontStyle: "italic", fontSize: 18, color: c.solid, width: 24, textAlign: "center" }}>{node.sym}</span>
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: c.ink }}>{node.label}</div>
+                          <div style={{ fontSize: 11, color: "#64748B" }}>{days} 天前掌握 · 建议复盘</div>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )
+            )}
           </div>
-          {reviewDue.length === 0 ? (
-            <div style={{ fontSize: 12.5, color: "#94A3B8", padding: "14px 0" }}>暂无需要复习的节点</div>
-          ) : reviewDue.map(({ node, p }) => {
-            const days = Math.floor((Date.now() - p.masteredAt) / MS_DAY);
-            const c = COURSE_COLORS_TREE[node.course];
-            return (
-              <button key={node.id} onClick={() => setSelectedId(node.id)} style={{
-                width: "100%", display: "flex", alignItems: "center", gap: 10,
-                padding: "9px 12px", marginBottom: 6,
-                borderRadius: 10, border: "1px solid " + c.ring,
-                background: c.soft, cursor: "pointer", fontFamily: "inherit", textAlign: "left",
-              }}>
-                <span style={{ fontFamily: "'Georgia',ui-serif,serif", fontStyle: "italic", fontSize: 18, color: c.solid, width: 24, textAlign: "center" }}>{node.sym}</span>
-                <span style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: c.ink }}>{node.label}</div>
-                  <div style={{ fontSize: 11, color: "#64748B" }}>{days} 天前掌握 · 建议复盘</div>
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        )}
       </div>
     </div>
     </>
