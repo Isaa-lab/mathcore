@@ -51,6 +51,62 @@ async function runHandler(req, res) {
   const effectiveProvider = hasUserKey ? (userProvider || "groq") : null;
   const hasServerKey = !!(GROQ_KEY || GEMINI_KEY || ANTHROPIC_KEY || DEEPSEEK_KEY || KIMI_KEY);
 
+  // ── Provider-aware：判断这次请求"最终会落在哪个 provider"，用来选配不同的 VIZ 指令 ──
+  // 不同模型的结构化输出能力差异很大：
+  //   · Claude / DeepSeek 强 → 给完整 VIZ schema 没问题
+  //   · Groq (Llama)       弱 → 必须给简化 schema + 更强约束，否则括号经常失衡
+  //   · Gemini             中 → 倾向用自然语言，要强制它出 VIZ 格式
+  //   · Kimi               中 → 和 Gemini 类似
+  // 这里用"最可能"的 provider 来定 prompt；即使实际因 fallback 跑到另一个 provider，
+  // 也能保证至少是兼容的保守 prompt。
+  const resolveLikelyProvider = () => {
+    if (hasUserKey) return effectiveProvider || "groq";
+    if (userProvider && userProvider !== "server" && SERVER_KEY_FOR[userProvider]) return userProvider;
+    // server 模式默认走 Groq（最快最便宜）
+    if (GROQ_KEY) return "groq";
+    if (DEEPSEEK_KEY) return "deepseek";
+    if (GEMINI_KEY) return "gemini";
+    if (ANTHROPIC_KEY) return "anthropic";
+    if (KIMI_KEY) return "kimi";
+    return "groq";
+  };
+  const likelyProvider = resolveLikelyProvider();
+
+  // ── 每个 provider 的 VIZ 能力画像 + 专属指令 ──
+  // preferredStructures：该模型下最稳的 structure 类型（短小、嵌套浅）
+  // maxVizPerReply：每次回复最多允许几个 [VIZ:...]（弱模型只让画 1 个，少犯错）
+  // extraConstraint：附加的硬约束文本，塞进 socratic/tutor prompt
+  const VIZ_PROFILE = {
+    claude: {
+      preferredStructures: ["annotation", "hierarchy", "process", "comparison", "concept", "parametric"],
+      maxVizPerReply: 2,
+      extraConstraint: "",
+    },
+    deepseek: {
+      preferredStructures: ["annotation", "hierarchy", "process", "comparison", "concept", "parametric"],
+      maxVizPerReply: 2,
+      extraConstraint: "",
+    },
+    gemini: {
+      preferredStructures: ["hierarchy", "process", "comparison", "concept"],
+      maxVizPerReply: 1,
+      extraConstraint: "⚠️ Gemini 专属约束：优先用 LaTeX 写公式，只在真的需要『结构图』时画 [VIZ:...]。画图时 structure 必须在 {hierarchy, process, comparison, concept} 四种里选，禁用 annotation 和 parametric（这两种 LaTeX 嵌套多，你画不稳）。",
+    },
+    groq: {
+      // Groq 上 llama-3.1-8b 非常不稳，严格只给 3 种最浅的结构
+      preferredStructures: ["hierarchy", "process", "comparison"],
+      maxVizPerReply: 1,
+      extraConstraint: "⚠️ 你是 Llama 模型，结构化 JSON 能力有限。为避免括号/反斜杠错误：\n· 每轮最多一个 [VIZ:...]\n· structure 只允许用 hierarchy / process / comparison 三种（最简、嵌套最浅）\n· 绝对禁用 annotation 和 parametric（LaTeX 多，你会画崩）\n· data 里不要写超过 4 层嵌套\n· 输出前逐字符数一遍花括号、方括号是否配对；不确定就直接用文字讲，不要硬画",
+    },
+    kimi: {
+      preferredStructures: ["hierarchy", "process", "comparison", "concept"],
+      maxVizPerReply: 1,
+      extraConstraint: "⚠️ 你画 [VIZ:...] 时优先用 hierarchy/process/comparison/concept 这四种浅结构，避免深嵌套。",
+    },
+    custom: { preferredStructures: ["hierarchy", "process", "comparison"], maxVizPerReply: 1, extraConstraint: "" },
+  };
+  const vizProfile = VIZ_PROFILE[likelyProvider] || VIZ_PROFILE.groq;
+
   if (!hasUserKey && !hasServerKey) {
     return res.status(500).json({ error: "暂无可用 AI 服务。请在 Vercel 配 GROQ_KEY 等环境变量，或在「AI 设置」里填你自己的 Key。" });
   }
@@ -217,7 +273,8 @@ ${materialContext ? `\n【课程知识点参考】\n${materialContext}\n` : ""}
 8. 答对了夸，答错了分析原因（计算失误/公式误用/概念盲区）
 9. 用中文，500字以内，生动有趣
 10. 禁止使用 \\begin{tikzpicture} 等LaTeX图形环境
-${VIZ_FRAMEWORK}`;
+${VIZ_FRAMEWORK}
+${vizProfile.extraConstraint ? "\n━━━ 本轮模型专属约束（必须遵守）━━━\n" + vizProfile.extraConstraint + `\n· 本轮允许的 structure：${vizProfile.preferredStructures.join(" / ")}\n· 本轮最多 ${vizProfile.maxVizPerReply} 个 [VIZ:...]\n` : ""}`;
   } else if (isSocraticMode) {
     // 苏格拉底式答题复盘：学生刚做完一道题，希望 AI 引导 TA 搞懂自己的错/对。
     // 这里是硬性约束——AI 必须只做"复盘引导"，绝不偏航去"出新题"或"直接报答案"。
@@ -265,22 +322,22 @@ ${VIZ_FRAMEWORK}`;
 【VIZ 协议】一行合法 JSON：
 [VIZ:{"structure":"<type>","interactionLevel":"L0|L1","title":"标题","description":"一句话","data":{...}}]
 
-structure 对号入座：
+structure 对号入座（本轮可用：${vizProfile.preferredStructures.join(" / ")}）：
 - "什么是X/定义/代表" → annotation（公式拆解）
 - "有哪几种/分类" → hierarchy（层级树）
 - "X vs Y/区别/对比" → comparison（并列对比）
 - "怎么推/证明/步骤" → process（分步）
 - "关系/之间" → concept（关系图）
 
-data 骨架：
+data 骨架（选 structure 对应的那一种即可）：
 · annotation: {"formula":"\\\\frac{dy}{dx}+P(x)y=Q(x)","parts":[{"tex":"\\\\frac{dy}{dx}","label":"导数","tone":"indigo"}, ...]}
 · hierarchy: {"root":{"name":"根","children":[...]}}
 · process: {"steps":[{"title":"第1步","desc":"...","formula":"可选 LaTeX"}]}
 · comparison: {"columns":[{"title":"A","points":[{"text":"优势","tone":"pro"}]}]}
 · concept: {"nodes":[{"id":"x","name":"X","primary":true}],"edges":[{"from":"x","to":"y","label":""}]}
 
-⚠️ JSON 逃逸铁律：LaTeX 的 \\ 必须双写（\\\\frac 而非 \\frac）。合法转义只有 \\" \\\\ \\/ \\b \\f \\n \\r \\t \\uXXXX，其它都要双写。不要尾逗号、不要智能引号、不要代码块围栏，必须完整闭合。
-
+⚠️ JSON 逃逸铁律：LaTeX 的 \\ 必须双写（\\\\frac 而非 \\frac）。合法转义只有 \\" \\\\ \\/ \\b \\f \\n \\r \\t \\uXXXX，其它都要双写。不要尾逗号、不要智能引号、不要代码块围栏，必须完整闭合。本轮最多 ${vizProfile.maxVizPerReply} 个 [VIZ:...]。
+${vizProfile.extraConstraint ? "\n" + vizProfile.extraConstraint + "\n" : ""}
 【这道题的背景】
 题目：${stem || "（未提供）"}
 ${optLines ? `选项：\n${optLines}` : ""}${kps ? `\n知识点：${kps}` : ""}${userPick ? `\n学生选：${userPick}` : ""}${miscon ? `\n错项对应的误解：${miscon}` : ""}
@@ -298,7 +355,8 @@ ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
 5. 400字以内，中文，生动自然
 6. 禁止使用 \\begin{tikzpicture}、\\begin{figure} 等 LaTeX 图形环境，网页无法渲染
 7. 需要展示图形时，用简单文字坐标描述，如"当x增大，y呈指数增长"，或用简单ASCII示意，不要tikz代码
-${VIZ_FRAMEWORK}`;
+${VIZ_FRAMEWORK}
+${vizProfile.extraConstraint ? "\n━━━ 本轮模型专属约束（必须遵守）━━━\n" + vizProfile.extraConstraint + `\n· 本轮允许的 structure：${vizProfile.preferredStructures.join(" / ")}\n· 本轮最多 ${vizProfile.maxVizPerReply} 个 [VIZ:...]\n` : ""}`;
   }
 
   // ── 构建 messages 数组（含历史） ────────────────────────────────────────────

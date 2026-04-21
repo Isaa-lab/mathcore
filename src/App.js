@@ -4799,6 +4799,17 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           updateMsg({ content: "这次答得有点跑偏，你能换个方式再问一下吗？", isError: true, isStreaming: false });
         } else {
           updateMsg({ content: answer, isStreaming: false });
+          // ── 自动静默重试：若 AI 画的 [VIZ:...] 解析失败，立刻带着错误原因再让它画一次 ──
+          // 核心设计：不 push 新的用户气泡，用户看到的只是原 AI 消息在"重画中"然后替换为新内容。
+          // 只重试一次；仍失败才让 FailedVizCard（"这张图没画成功"）浮出来给用户兜底。
+          const blocks = splitQuizChatBlocks(answer);
+          const failed = blocks.find(b => b.type === "viz" && b.parseError);
+          if (failed) {
+            // 标记"正在重画"，让 UI 把红色失败卡替换成淡淡的"AI 正在重画..."状态
+            updateMsg({ content: answer, isStreaming: false, vizRetryInProgress: true });
+            // 异步触发（不 await，避免阻塞 finally 的 setAIIsBusy）
+            setTimeout(() => silentlyRetryFailedViz(aiId, text, answer, failed, history), 180);
+          }
         }
       }
     } catch (e) {
@@ -4811,6 +4822,74 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       });
     } finally {
       setAIIsBusy(false);
+    }
+  };
+
+  // ── 静默重画：AI 第一次画 VIZ 失败时自动触发，用户只看到"AI 正在重画..."然后替换为新内容 ──
+  // 不 push 新的 user 气泡；把失败原因写进 history 里让 AI 知道要规避什么。
+  const silentlyRetryFailedViz = async (aiId, originalUserText, failedAnswer, failedBlock, priorHistory) => {
+    if (!q) return;
+    const activeProvider = getAIConfig().provider;
+    const updateMsg = (patch) => {
+      setAIMessages(prev => prev.map(m => m.id === aiId ? { ...m, ...patch } : m));
+    };
+    // 构造重画指令：告诉 AI 上次哪里错了 + 这次严格用简单结构
+    // 切片防 prompt 爆量（部分失败 VIZ 能上千字）
+    const failedSnippet = String(failedBlock.content || "").slice(0, 300);
+    const reason = String(failedBlock.parseError || "JSON 解析失败").slice(0, 120);
+    const retryHistory = [
+      ...(priorHistory || []),
+      { role: "user", content: originalUserText },
+      { role: "assistant", content: failedAnswer },
+      {
+        role: "user",
+        content: `你刚才那个 [VIZ:...] 没解析成功。错误：${reason}\n失败片段前 300 字：\n${failedSnippet}\n\n请重做这条回复——文字部分可以保留或微调，但 [VIZ:...] 必须换用最简单的结构（从 hierarchy / process / comparison 中选一种），避免深嵌套和 LaTeX 反斜杠错误。如果这个知识点本来就不需要画图，就完全不画图，只用文字 + $LaTeX$ 讲清楚。再试一次。`,
+      },
+    ];
+    try {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "socratic",
+          question: "（自动重试：请重画失败的可视化）",
+          conversationHistory: retryHistory,
+          questionContext: {
+            stem: q.question,
+            options: q.options || null,
+            correctAnswer: q.answer,
+            userSelection: selected !== null ? (q.options ? letters[selected] : (selected === 0 ? "正确" : "错误")) : null,
+            isCorrect: !isWrongAnswered && answered,
+            misconception: misconceptionForChoice || null,
+            knowledgePoints: Array.isArray(q.knowledgePoints) ? q.knowledgePoints : null,
+          },
+          materialTitle: "数学题目复盘",
+          ...buildAIBody(),
+        })
+      });
+      const txt = await res.text();
+      let data = {};
+      try { data = JSON.parse(txt); } catch { data = {}; }
+      if (!res.ok || data.error) {
+        // 重画请求自己也失败 —— 不覆盖原消息内容，只把"重画中"标志清掉，让原来的 FailedVizCard 浮出来
+        updateMsg({ vizRetryInProgress: false, vizRetryExhausted: true });
+        return;
+      }
+      const retryAnswer = String(data.answer || data.text || data.result || "").trim();
+      if (!retryAnswer) {
+        updateMsg({ vizRetryInProgress: false, vizRetryExhausted: true });
+        return;
+      }
+      // 无论第二次是否仍失败都替换；重试标记设为 exhausted，避免第三次循环
+      updateMsg({
+        content: retryAnswer,
+        isStreaming: false,
+        vizRetryInProgress: false,
+        vizRetryExhausted: true,
+        providerId: activeProvider,
+      });
+    } catch {
+      updateMsg({ vizRetryInProgress: false, vizRetryExhausted: true });
     }
   };
 
@@ -5792,6 +5871,27 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                             <div key={bi} style={{ margin: "10px 0 6px", display: "flex" }}>
                               <DynamicVizCard intent={b.intent} onOpen={() => openLab(b.intent)} />
                             </div>
+                          ) : m.vizRetryInProgress ? (
+                            // [VIZ:...] 解析失败 + 正在后台自动重画 —— 显示淡色"重画中"占位，不让用户看到红色错误
+                            <div key={bi} style={{
+                              margin: "10px 0",
+                              padding: "12px 14px",
+                              background: "linear-gradient(90deg, #EEF2FF 0%, #F5F3FF 100%)",
+                              border: "1px dashed rgba(99,102,241,0.35)",
+                              borderRadius: 12,
+                              color: "#4338CA",
+                              display: "flex", alignItems: "center", gap: 10,
+                            }}>
+                              <span style={{ display: "inline-flex", gap: 3 }}>
+                                <span className="mc-typing-dot" style={{ animationDelay: "0ms", background: "#6366F1" }} />
+                                <span className="mc-typing-dot" style={{ animationDelay: "150ms", background: "#6366F1" }} />
+                                <span className="mc-typing-dot" style={{ animationDelay: "300ms", background: "#6366F1" }} />
+                              </span>
+                              <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>
+                                <div style={{ fontWeight: 700 }}>AI 正在重画这张图…</div>
+                                <div style={{ opacity: 0.75, fontSize: 11.5, marginTop: 2 }}>上一次结构化输出没对齐，已自动带着错误原因再试一次</div>
+                              </div>
+                            </div>
                           ) : (
                             // [VIZ:...] 解析失败 —— 不再是死胡同，给用户两条出路
                             <div key={bi} style={{
@@ -5805,9 +5905,13 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                               <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                                 <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1 }}>⚠️</span>
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>这张图没画成功 🤔</div>
+                                  <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>
+                                    {m.vizRetryExhausted ? "自动重画后还是没画成功 🤔" : "这张图没画成功 🤔"}
+                                  </div>
                                   <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "#78350F" }}>
-                                    {userFriendlyVizError(b.parseError)}
+                                    {m.vizRetryExhausted
+                                      ? "AI 这个模型在当前知识点上的结构化输出不稳定。建议换一个 AI 引擎试试，或者让 AI 改用文字讲解。"
+                                      : userFriendlyVizError(b.parseError)}
                                   </div>
                                 </div>
                               </div>
