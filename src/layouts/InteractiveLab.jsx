@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useMathStore } from "../store/useMathStore";
 
@@ -47,10 +48,30 @@ export default function InteractiveLab() {
   const labConfig = useMathStore((s) => s.labConfig);
   const closeLab = useMathStore((s) => s.closeLab);
 
-  return (
+  // ── Z-Axis Breakthrough ─────────────────────────────────────────────────
+  // Render straight into document.body via Portal so no ancestor with
+  // `transform / filter / perspective` (e.g. Framer Motion workspace swaps,
+  // premium-card wrappers, or StudyWorkspace's right canvas) can trap our
+  // `position: fixed` container inside a new containing block.
+  useEffect(() => {
+    if (!labOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => { if (e.key === "Escape") closeLab(); };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [labOpen, closeLab]);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <AnimatePresence>
       {labOpen && <InteractiveLabPanel key="lab" config={labConfig} onClose={closeLab} />}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
 
@@ -110,14 +131,17 @@ function InteractiveLabPanel({ config, onClose }) {
       exit={{ opacity: 0, y: 16, scale: 0.985 }}
       transition={pageTransition}
       style={{
-        position: "absolute",
-        inset: 0,
+        position: "fixed",
+        top: 0,
+        left: 0,
+        width: "100vw",
+        height: "100vh",
         background: "#FAFAFC",
-        zIndex: 50,
+        zIndex: 999,
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
-        borderRadius: 24,
+        borderRadius: 0,
       }}
     >
       {/* Immersive nav bar */}
