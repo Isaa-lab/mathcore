@@ -475,14 +475,20 @@ const getFileExt = (name = "") => {
 
 // ── AI 配置工具（读/写 localStorage）────────────────────────────────────────
 // AI Provider 元数据 —— 单一真源。logo 是文字/emoji，颜色用于头像底色
+// provider 元数据。注意两个独立的 boolean：
+// - free: 该 provider 自己的免费额度（指用户自己去注册拿 Key 时）
+// - recommended: UI 推荐度
+// 另外一个 runtime 状态："platform-provided" —— 不在这里写死，来自 /api/providers
 const AI_PROVIDER_META = {
-  groq:      { id: "groq",      name: "Groq",      logo: "G",  desc: "免费·速度最快",      placeholder: "gsk_...",    link: "https://console.groq.com/keys",                   color: "#F55036", free: true },
-  gemini:    { id: "gemini",    name: "Gemini",    logo: "✦",  desc: "Google·免费 Key",    placeholder: "AIzaSy...",  link: "https://aistudio.google.com/apikey",              color: "#4285F4" },
-  deepseek:  { id: "deepseek",  name: "DeepSeek",  logo: "🐋", desc: "国内·价格低廉",      placeholder: "sk-...",     link: "https://platform.deepseek.com/api_keys",          color: "#4D6BFE" },
-  kimi:      { id: "kimi",      name: "Kimi",      logo: "K",  desc: "月之暗面·国内可访问", placeholder: "sk-...",     link: "https://platform.moonshot.cn/console/api-keys",   color: "#6F5BD9" },
-  anthropic: { id: "anthropic", name: "Claude",    logo: "A",  desc: "Anthropic",          placeholder: "sk-ant-...", link: "https://console.anthropic.com/",                  color: "#D97757" },
-  custom:    { id: "custom",    name: "自定义",    logo: "⚙",  desc: "任意 OpenAI 兼容接口", placeholder: "sk-...",    link: null,                                              color: "#6B7280" },
-  server:    { id: "server",    name: "平台内置",  logo: "🎓", desc: "点一下就能用 · 无需 Key · 平台承担成本",  placeholder: null,         link: null,                                              color: "#10B981", free: true, recommended: true },
+  groq:      { id: "groq",      name: "Groq",      logo: "G",  desc: "Llama 3.x·速度最快",   placeholder: "gsk_...",    link: "https://console.groq.com/keys",                   color: "#F55036", free: true, providerLabel: "Groq" },
+  gemini:    { id: "gemini",    name: "Gemini",    logo: "✦",  desc: "Google·免费额度大",     placeholder: "AIzaSy...",  link: "https://aistudio.google.com/apikey",              color: "#4285F4", free: true, providerLabel: "Google Gemini" },
+  deepseek:  { id: "deepseek",  name: "DeepSeek",  logo: "🐋", desc: "国内·推理强·价格低",     placeholder: "sk-...",     link: "https://platform.deepseek.com/api_keys",          color: "#4D6BFE", providerLabel: "DeepSeek" },
+  kimi:      { id: "kimi",      name: "Kimi",      logo: "K",  desc: "月之暗面·国内可访问",    placeholder: "sk-...",     link: "https://platform.moonshot.cn/console/api-keys",   color: "#6F5BD9", providerLabel: "Kimi (Moonshot)" },
+  anthropic: { id: "anthropic", name: "Claude",    logo: "A",  desc: "Anthropic·擅长复杂推理", placeholder: "sk-ant-...", link: "https://console.anthropic.com/",                  color: "#D97757", providerLabel: "Anthropic Claude" },
+  custom:    { id: "custom",    name: "自定义",    logo: "⚙",  desc: "任意 OpenAI 兼容接口",   placeholder: "sk-...",     link: null,                                              color: "#6B7280", providerLabel: "Custom endpoint" },
+  // server 是一个"行为"而非独立 provider —— 用于"不指定 provider，后端按优先级自动选"
+  // 视觉上告诉用户："默认就是 Groq"，让背后模型透明。
+  server:    { id: "server",    name: "平台内置（Groq）", logo: "G", desc: "默认推荐·免费无需配置·由平台承担成本",  placeholder: null, link: null, color: "#10B981", free: true, recommended: true, providerLabel: "Platform (Groq)" },
 };
 const AI_PROVIDER_ORDER = ["server", "groq", "gemini", "deepseek", "kimi", "anthropic", "custom"];
 
@@ -530,16 +536,36 @@ const setAIKeyFor = (providerId, key) => {
   }
 };
 
-// 后端以 userProvider / userKey 解构；"server" 需要不发送这俩字段让后端走服务器 Key
+// 后端以 userProvider / userKey 解构
+// "server" → 不发 provider/key，后端按优先级走服务器端 Groq 等
+// 非 server + 用户有 Key → 发 user provider + user key
+// 非 server + 用户没 Key → 只发 provider，让后端用该 provider 的平台 Key（如已配置）
 const buildAIBody = () => {
   const cfg = getAIConfig();
   if (cfg.provider === "server") return {};
-  return {
-    userProvider: cfg.provider,
-    userKey: cfg.key,
-    userCustomUrl: cfg.customUrl,
-  };
+  const body = { userProvider: cfg.provider };
+  if (cfg.key) body.userKey = cfg.key;
+  if (cfg.customUrl) body.userCustomUrl = cfg.customUrl;
+  return body;
 };
+
+// 平台提供的 providers 列表（来自 /api/providers）。默认假设 groq=true（90% 用户会这么配），
+// 实际会在 App mount 时异步拉取覆盖。前端 UI 根据这个决定每个 provider 是否显示"平台免费"徽章。
+let _platformProvidersCache = null;
+async function fetchPlatformProviders() {
+  try {
+    const res = await fetch("/api/providers", { method: "GET" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    _platformProvidersCache = data?.platformProviders || null;
+    return _platformProvidersCache;
+  } catch {
+    return null;
+  }
+}
+function getPlatformProviders() {
+  return _platformProvidersCache || { groq: false, gemini: false, deepseek: false, kimi: false, anthropic: false };
+}
 
 // ── ProviderAvatar ── 根据当前 provider 渲染一个圆形头像（chat 气泡 / 面板徽章共用）
 function ProviderAvatar({ providerId, size = 30, showRing = false }) {
@@ -573,6 +599,13 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched }) {
   const [inputUrl, setInputUrl] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [savedPing, setSavedPing] = useState(null);
+  // 平台已配置的 providers；首次渲染取缓存，同时异步刷新一次确保最新
+  const [platformProviders, setPlatformProviders] = useState(() => getPlatformProviders());
+  useEffect(() => {
+    let alive = true;
+    fetchPlatformProviders().then((pp) => { if (alive && pp) setPlatformProviders(pp); });
+    return () => { alive = false; };
+  }, []);
   const popRef = useRef(null);
   const cfg = getAIConfig();
 
@@ -664,7 +697,11 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched }) {
       {AI_PROVIDER_ORDER.map((pid) => {
         const meta = AI_PROVIDER_META[pid];
         const isActive = freshCfg.provider === pid;
-        const hasKey = pid === "server" ? true : !!(freshCfg.allKeys[pid]);
+        const hasUserKey = pid === "server" ? false : !!(freshCfg.allKeys[pid]);
+        // 平台已配置了该 provider 的 server Key？→ 用户不用填自己的 Key 也能用
+        const platformReady = pid === "server" ? true : !!(platformProviders[pid]);
+        // 能直接切换 = 有用户 key OR 平台已提供
+        const canOneClick = hasUserKey || platformReady;
         const isExpanded = expanded === pid;
         const flashed = savedPing === pid;
         return (
@@ -672,7 +709,7 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched }) {
             <div
               onClick={() => {
                 if (isExpanded) return;
-                if (hasKey) activate(pid);
+                if (canOneClick) activate(pid);
                 else expand(pid);
               }}
               style={{
@@ -691,24 +728,35 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched }) {
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   {meta.name}
                   {meta.recommended && <span style={{ fontSize: 9, fontWeight: 700, background: "#10B981", color: "#FFFFFF", padding: "1px 6px", borderRadius: 4 }}>推荐</span>}
-                  {meta.free && !meta.recommended && <span style={{ fontSize: 9, fontWeight: 700, background: "#D1FAE5", color: "#065F46", padding: "1px 6px", borderRadius: 4 }}>免费</span>}
+                  {pid !== "server" && platformReady && !hasUserKey && (
+                    <span style={{ fontSize: 9, fontWeight: 700, background: "#DBEAFE", color: "#1D4ED8", padding: "1px 6px", borderRadius: 4 }} title="平台已配置此 AI 的 Key，用户点一下就能用">平台免费</span>
+                  )}
                 </div>
                 <div style={{ fontSize: 11, color: "#6B7280", marginTop: 1 }}>{meta.desc}</div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                 {isActive ? (
                   <span style={{ fontSize: 10.5, fontWeight: 700, color: "#6D28D9", background: "#EDE9FE", padding: "2px 7px", borderRadius: 999 }}>使用中</span>
-                ) : hasKey ? (
+                ) : hasUserKey ? (
                   <span style={{ fontSize: 10.5, color: "#059669", fontWeight: 600 }}>已连接</span>
+                ) : platformReady && pid !== "server" ? (
+                  <span style={{ fontSize: 10.5, color: "#1D4ED8", fontWeight: 600 }}>点击即用</span>
                 ) : (
-                  <span style={{ fontSize: 10.5, color: "#9CA3AF" }}>未配置</span>
+                  <span style={{ fontSize: 10.5, color: "#9CA3AF" }}>需填 Key</span>
                 )}
-                {pid !== "server" && hasKey && (
+                {pid !== "server" && hasUserKey && (
                   <button
                     onClick={(e) => { e.stopPropagation(); expand(pid); }}
                     title="更换 Key"
                     style={{ border: "none", background: "transparent", color: "#6B7280", cursor: "pointer", fontSize: 12, padding: 2 }}
                   >✏️</button>
+                )}
+                {pid !== "server" && !hasUserKey && platformReady && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); expand(pid); }}
+                    title="想用自己的 Key 替代平台 Key？点这里"
+                    style={{ border: "none", background: "transparent", color: "#9CA3AF", cursor: "pointer", fontSize: 11, padding: 2 }}
+                  >+</button>
                 )}
               </div>
             </div>
@@ -744,7 +792,7 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched }) {
                   <button onClick={() => setShowKey(v => !v)} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 13, padding: 0 }}>{showKey ? "🙈" : "👁"}</button>
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
-                  {hasKey && (
+                  {hasUserKey && (
                     <button onClick={() => { clearKey(pid); setExpanded(null); }} style={{ fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, color: "#6B7280", cursor: "pointer", fontFamily: "inherit" }}>清除</button>
                   )}
                   <button onClick={() => setExpanded(null)} style={{ fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, color: "#6B7280", cursor: "pointer", fontFamily: "inherit" }}>取消</button>
@@ -9652,6 +9700,9 @@ export default function App() {
   };
 
   useEffect(() => {
+    // App 挂载后异步拉一次平台 providers 状态，让 popover 一打开就能显示"平台免费"徽章
+    fetchPlatformProviders();
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) loadProfile(session.user.id);

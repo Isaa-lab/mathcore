@@ -32,17 +32,27 @@ async function runHandler(req, res) {
     userProvider, userKey, userCustomUrl,
   } = body;
 
-  const GEMINI_KEY = process.env.GEMINI_KEY;
+  const GEMINI_KEY    = process.env.GEMINI_KEY;
   const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY;
-  const GROQ_KEY = process.env.GROQ_KEY;
-  const DEEPSEEK_KEY = process.env.DEEPSEEK_KEY;
+  const GROQ_KEY      = process.env.GROQ_KEY;
+  const DEEPSEEK_KEY  = process.env.DEEPSEEK_KEY;
+  const KIMI_KEY      = process.env.KIMI_KEY;
+
+  // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底
+  const SERVER_KEY_FOR = {
+    groq: GROQ_KEY,
+    gemini: GEMINI_KEY,
+    deepseek: DEEPSEEK_KEY,
+    kimi: KIMI_KEY,
+    anthropic: ANTHROPIC_KEY,
+  };
 
   const hasUserKey = userKey && String(userKey).trim().length > 8;
   const effectiveProvider = hasUserKey ? (userProvider || "groq") : null;
-  const hasServerKey = GROQ_KEY || GEMINI_KEY || ANTHROPIC_KEY || DEEPSEEK_KEY;
+  const hasServerKey = !!(GROQ_KEY || GEMINI_KEY || ANTHROPIC_KEY || DEEPSEEK_KEY || KIMI_KEY);
 
   if (!hasUserKey && !hasServerKey) {
-    return res.status(500).json({ error: "暂无可用 AI 服务。请在首页点击「AI 设置」输入你的 API Key（推荐免费的 Groq）。" });
+    return res.status(500).json({ error: "暂无可用 AI 服务。请在 Vercel 配 GROQ_KEY 等环境变量，或在「AI 设置」里填你自己的 Key。" });
   }
   
 
@@ -513,29 +523,51 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   const GROQ_CHAT_MODEL = "llama-3.1-8b-instant";
   const GROQ_GEN_MODEL  = "llama-3.3-70b-versatile";
 
-  // Priority 1: user key
-  if (hasUserKey) {
-    const k = String(userKey).trim();
-    if (effectiveProvider === "groq") {
-      const primary = isChatMode ? GROQ_CHAT_MODEL : GROQ_GEN_MODEL;
-      responseText = await callOpenAICompat("https://api.groq.com/openai/v1", k, primary, `groq(user):${primary}`) || "";
-      // 聊天场景 8B 不行再用 70B 作为质量兜底；出题相反
+  // 帮手：按 provider name 调用对应 API，支持 user key / server key 复用
+  const callProviderWithKey = async (pid, k, source /* "user" | "server" */) => {
+    const tagSrc = source === "server" ? "server" : "user";
+    if (pid === "groq") {
+      const primary  = isChatMode ? GROQ_CHAT_MODEL : GROQ_GEN_MODEL;
       const fallback = isChatMode ? GROQ_GEN_MODEL : GROQ_CHAT_MODEL;
-      if (!responseText) responseText = await callOpenAICompat("https://api.groq.com/openai/v1", k, fallback, `groq(user):${fallback}`) || "";
-    } else if (effectiveProvider === "deepseek") {
-      responseText = await callOpenAICompat("https://api.deepseek.com", k, "deepseek-chat", "deepseek(user)") || "";
-    } else if (effectiveProvider === "kimi") {
-      responseText = await callOpenAICompat("https://api.moonshot.cn/v1", k, "moonshot-v1-8k", "kimi(user)") || "";
-    } else if (effectiveProvider === "custom") {
+      let out = await callOpenAICompat("https://api.groq.com/openai/v1", k, primary, `groq(${tagSrc}):${primary}`) || "";
+      if (!out) out = await callOpenAICompat("https://api.groq.com/openai/v1", k, fallback, `groq(${tagSrc}):${fallback}`) || "";
+      return out;
+    }
+    if (pid === "deepseek") {
+      return await callOpenAICompat("https://api.deepseek.com", k, "deepseek-chat", `deepseek(${tagSrc})`) || "";
+    }
+    if (pid === "kimi") {
+      return await callOpenAICompat("https://api.moonshot.cn/v1", k, "moonshot-v1-8k", `kimi(${tagSrc})`) || "";
+    }
+    if (pid === "gemini") {
+      return await callGemini(k) || "";
+    }
+    if (pid === "custom") {
       const base = String(userCustomUrl || "").trim().replace(/\/$/, "");
-      if (base) responseText = await callOpenAICompat(base, k, "gpt-3.5-turbo", "custom(user)") || "";
-      else providerDiag.push("custom(user): no_base_url");
+      if (!base) { providerDiag.push(`custom(${tagSrc}): no_base_url`); return ""; }
+      return await callOpenAICompat(base, k, "gpt-3.5-turbo", `custom(${tagSrc})`) || "";
+    }
+    return "";
+  };
+
+  // Priority 1: 用户填了自己的 Key，用用户指定的 provider
+  if (hasUserKey) {
+    responseText = await callProviderWithKey(effectiveProvider, String(userKey).trim(), "user");
+  }
+
+  // Priority 1.5: 用户选了某个 provider 但没填 Key —— 用该 provider 的平台 Key
+  // （这是实现"用户点一下 Gemini 就直接用平台 Gemini"的关键）
+  if (!responseText && !hasUserKey && userProvider && userProvider !== "server") {
+    const serverKey = SERVER_KEY_FOR[userProvider];
+    if (serverKey) {
+      providerDiag.push(`using platform key for user-selected provider: ${userProvider}`);
+      responseText = await callProviderWithKey(userProvider, serverKey, "server");
     } else {
-      responseText = await callGemini(k) || "";
+      providerDiag.push(`${userProvider}: no_platform_key_configured`);
     }
   }
 
-  // Priority 2: server Groq
+  // Priority 2: 默认 fallback —— Groq server
   if (!responseText && GROQ_KEY) {
     const primary = isChatMode ? GROQ_CHAT_MODEL : GROQ_GEN_MODEL;
     responseText = await callOpenAICompat("https://api.groq.com/openai/v1", GROQ_KEY, primary, `groq(server):${primary}`) || "";
@@ -551,6 +583,11 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   // Priority 4: server Gemini
   if (!responseText && GEMINI_KEY) {
     responseText = await callGemini(GEMINI_KEY) || "";
+  }
+
+  // Priority 4.5: server Kimi
+  if (!responseText && KIMI_KEY) {
+    responseText = await callOpenAICompat("https://api.moonshot.cn/v1", KIMI_KEY, "moonshot-v1-8k", "kimi(server)") || "";
   }
 
   // Priority 5: Anthropic
