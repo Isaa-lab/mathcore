@@ -14,11 +14,25 @@
 // would risk regressions. Some duplication is accepted for safety.
 // ─────────────────────────────────────────────────────────────────────────
 
-const GEMINI_KEY    = process.env.GEMINI_KEY;
-const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY;
-const GROQ_KEY      = process.env.GROQ_KEY;
-const DEEPSEEK_KEY  = process.env.DEEPSEEK_KEY;
-const KIMI_KEY      = process.env.KIMI_KEY;
+// ── Server-side keys ──
+// We accept BOTH naming schemes:
+//   · GROQ_KEY / GEMINI_KEY / DEEPSEEK_KEY / KIMI_KEY / ANTHROPIC_KEY — explicit per-provider
+//   · PLATFORM_PROVIDER + PLATFORM_API_KEY — the "platform default" slot used by the
+//     older deployment. When PLATFORM_PROVIDER matches a known id, we treat
+//     PLATFORM_API_KEY as the fallback key for that provider (unless the
+//     explicit var is also set, in which case the explicit one wins).
+const platformSlotProvider = String(process.env.PLATFORM_PROVIDER || "").trim().toLowerCase();
+const platformSlotKey      = process.env.PLATFORM_API_KEY;
+const keyFromPlatformSlot = (pid) =>
+  (platformSlotProvider === pid && platformSlotKey && platformSlotKey.trim().length > 8)
+    ? platformSlotKey
+    : null;
+
+const GROQ_KEY      = process.env.GROQ_KEY      || keyFromPlatformSlot("groq");
+const GEMINI_KEY    = process.env.GEMINI_KEY    || keyFromPlatformSlot("gemini");
+const DEEPSEEK_KEY  = process.env.DEEPSEEK_KEY  || keyFromPlatformSlot("deepseek");
+const KIMI_KEY      = process.env.KIMI_KEY      || keyFromPlatformSlot("kimi");
+const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || keyFromPlatformSlot("anthropic");
 
 export const SERVER_KEY_FOR = {
   groq:      GROQ_KEY,
@@ -31,6 +45,36 @@ export const SERVER_KEY_FOR = {
 export const HAS_ANY_SERVER_KEY = Object.values(SERVER_KEY_FOR).some(
   (k) => typeof k === "string" && k.trim().length > 8,
 );
+
+// ── Effective-provider resolution ────────────────────────────────────────
+// Caller (e.g. concept-graph.js) needs to know in advance which provider will
+// actually be used, so it can select provider-specific strategies (e.g. the
+// Groq multi-stage pipeline). Mirrors the priority inside callAI():
+//   1. user's chosen provider (if they also provided a key OR we have a server key for it)
+//   2. first server key in the fallback chain
+export function resolveEffectiveProvider({ userProvider, userKey } = {}) {
+  const hasUserKey = typeof userKey === "string" && userKey.trim().length > 8;
+  const chosen = (userProvider || "").toLowerCase();
+  if (chosen && chosen !== "server") {
+    if (hasUserKey) return { provider: chosen, keySource: "user" };
+    if (SERVER_KEY_FOR[chosen]) return { provider: chosen, keySource: "server" };
+  }
+  // Fallback chain (same order as callAI): groq → deepseek → gemini → kimi → anthropic
+  const chain = ["groq", "deepseek", "gemini", "kimi", "anthropic"];
+  for (const pid of chain) {
+    if (SERVER_KEY_FOR[pid]) return { provider: pid, keySource: "server" };
+  }
+  return { provider: null, keySource: "none" };
+}
+
+export function pickKeyFor(provider, { userProvider, userKey } = {}) {
+  const hasUserKey = typeof userKey === "string" && userKey.trim().length > 8;
+  if (hasUserKey && (userProvider || "").toLowerCase() === provider) {
+    return { key: userKey.trim(), source: "user" };
+  }
+  const k = SERVER_KEY_FOR[provider];
+  return k ? { key: k, source: "server" } : { key: null, source: "none" };
+}
 
 // ── Fetch with timeout ──
 async function fetchWithTimeout(url, opts, ms) {

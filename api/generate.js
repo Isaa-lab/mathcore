@@ -32,11 +32,18 @@ async function runHandler(req, res) {
     userProvider, userKey, userCustomUrl,
   } = body;
 
-  const GEMINI_KEY    = process.env.GEMINI_KEY;
-  const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY;
-  const GROQ_KEY      = process.env.GROQ_KEY;
-  const DEEPSEEK_KEY  = process.env.DEEPSEEK_KEY;
-  const KIMI_KEY      = process.env.KIMI_KEY;
+  // Accept both explicit per-provider env vars and the legacy
+  // PLATFORM_PROVIDER + PLATFORM_API_KEY pairing as a fallback.
+  const __platformSlotProv = String(process.env.PLATFORM_PROVIDER || "").trim().toLowerCase();
+  const __platformSlotKey  = process.env.PLATFORM_API_KEY;
+  const __fromPlatformSlot = (pid) =>
+    (__platformSlotProv === pid && __platformSlotKey && __platformSlotKey.trim().length > 8)
+      ? __platformSlotKey : null;
+  const GEMINI_KEY    = process.env.GEMINI_KEY    || __fromPlatformSlot("gemini");
+  const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || __fromPlatformSlot("anthropic");
+  const GROQ_KEY      = process.env.GROQ_KEY      || __fromPlatformSlot("groq");
+  const DEEPSEEK_KEY  = process.env.DEEPSEEK_KEY  || __fromPlatformSlot("deepseek");
+  const KIMI_KEY      = process.env.KIMI_KEY      || __fromPlatformSlot("kimi");
 
   // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底
   const SERVER_KEY_FOR = {

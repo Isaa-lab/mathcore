@@ -15,7 +15,8 @@
 // format.
 // ─────────────────────────────────────────────────────────────────────────
 
-import { callAI, HAS_ANY_SERVER_KEY } from "./_lib/ai-call.js";
+import { callAI, HAS_ANY_SERVER_KEY, resolveEffectiveProvider, pickKeyFor } from "./_lib/ai-call.js";
+import { buildGraphWithGroq } from "./_lib/groq-pipeline.js";
 
 // ── JSON repair utilities (same logic as frontend's repairVizJson) ──
 // LLMs drift on JSON all the time: smart quotes, trailing commas, unescaped
@@ -317,8 +318,52 @@ export default async function handler(req, res) {
     if (!hasUserKey && !HAS_ANY_SERVER_KEY) {
       return res.status(400).json({
         error: "no_ai_key",
-        hint: "No user key and no server key configured. Set GROQ_KEY / GEMINI_KEY / DEEPSEEK_KEY / KIMI_KEY / ANTHROPIC_KEY.",
+        hint: "No user key and no server key configured. Set GROQ_KEY / GEMINI_KEY / DEEPSEEK_KEY / KIMI_KEY / ANTHROPIC_KEY (or PLATFORM_PROVIDER=groq + PLATFORM_API_KEY).",
       });
+    }
+
+    // ── Groq-specific route: three-stage pipeline ────────────────────────
+    // Rationale: Llama 3.3 70B loses structural consistency on single-shot
+    // 3000-token JSON tasks. The pipeline splits the same work into tiny,
+    // well-scoped calls (skeleton → per-dimension expansion in parallel →
+    // edges), each within Groq's stable structured-output regime.
+    let groqPipelineFallback = null;  // best-effort pipeline result, used if
+                                       // single-shot also fails downstream
+    const { provider: effectiveProvider } = resolveEffectiveProvider({ userProvider, userKey });
+    if (effectiveProvider === "groq") {
+      const { key: groqKey, source: groqKeySource } = pickKeyFor("groq", { userProvider, userKey });
+      if (groqKey) {
+        const stageLog = [];
+        try {
+          const pipelineGraph = await buildGraphWithGroq({
+            concept: conceptName,
+            context: String(context || "").slice(0, 800),
+            apiKey: groqKey,
+            onStage: (info) => stageLog.push(info),
+          });
+          const pipelineValidation = validateGraph(pipelineGraph);
+          groqPipelineFallback = { graph: pipelineGraph, validation: pipelineValidation, stageLog, keySource: groqKeySource };
+          // Pipeline output is usually *good enough*; only fall through to the
+          // single-shot retry path if richness is catastrophically low.
+          if (pipelineValidation.ok || pipelineValidation.score >= 55) {
+            return res.status(200).json({
+              graph: pipelineGraph,
+              validation: pipelineValidation,
+              cached: false,
+              provider: "groq",
+              keySource: groqKeySource,
+              strategy: "groq_pipeline",
+              stageLog,
+              round: 1,
+              elapsed: Date.now() - startedAt,
+            });
+          }
+          stageLog.push({ stage: "pipeline:score_too_low", score: pipelineValidation.score });
+        } catch (pipelineErr) {
+          stageLog.push({ stage: "pipeline:error", err: String(pipelineErr?.message || pipelineErr) });
+          groqPipelineFallback = { stageLog, error: String(pipelineErr?.message || pipelineErr) };
+        }
+      }
     }
 
     const prompt = buildGraphPrompt({
@@ -389,13 +434,48 @@ export default async function handler(req, res) {
           lastValidation = v;
         }
       } else if (!lastGraph) {
-        // Both attempts failed to parse — return error
+        // Both attempts failed to parse. If the Groq pipeline produced
+        // *anything* earlier (even sub-threshold), return that instead of
+        // leaving the user with nothing.
+        if (groqPipelineFallback && groqPipelineFallback.graph) {
+          return res.status(200).json({
+            graph: groqPipelineFallback.graph,
+            validation: groqPipelineFallback.validation,
+            cached: false,
+            provider: "groq",
+            keySource: groqPipelineFallback.keySource,
+            strategy: "groq_pipeline_as_last_resort",
+            stageLog: groqPipelineFallback.stageLog,
+            round,
+            elapsed: Date.now() - startedAt,
+          });
+        }
         return res.status(200).json({
           error: "parse_failed",
           hint: "Model output could not be parsed as JSON after 2 attempts.",
           validation: lastValidation,
           provider: lastProvider,
           diag: lastDiag,
+          stageLog: groqPipelineFallback?.stageLog,
+          round,
+          elapsed: Date.now() - startedAt,
+        });
+      }
+    }
+
+    // If the Groq pipeline scored higher than the single-shot result, prefer it
+    if (groqPipelineFallback && groqPipelineFallback.graph && groqPipelineFallback.validation) {
+      const pScore = groqPipelineFallback.validation.score || 0;
+      const sScore = lastValidation?.score || 0;
+      if (pScore > sScore + 5) {   // small margin to avoid flapping
+        return res.status(200).json({
+          graph: groqPipelineFallback.graph,
+          validation: groqPipelineFallback.validation,
+          cached: false,
+          provider: "groq",
+          keySource: groqPipelineFallback.keySource,
+          strategy: "groq_pipeline_beat_singleshot",
+          stageLog: groqPipelineFallback.stageLog,
           round,
           elapsed: Date.now() - startedAt,
         });
@@ -410,6 +490,8 @@ export default async function handler(req, res) {
       cached: false,
       provider: lastProvider,
       diag: lastDiag,
+      strategy: "singleshot",
+      stageLog: groqPipelineFallback?.stageLog,
       round,
       elapsed: Date.now() - startedAt,
     });
