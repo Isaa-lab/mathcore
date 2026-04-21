@@ -162,7 +162,7 @@ async function runHandler(req, res) {
   "有哪几种" / "X分为" / "X的分类" / "种类" / "包括"    → hierarchy  (层级树)
   "X vs Y" / "区别" / "X和Y不同" / "对比" / "哪个好"    → comparison (并列对比)
   "怎么推" / "证明" / "推导" / "如何得到" / "步骤"       → process    (分步)
-  "关系" / "关联" / "之间" / "概念图" / "网络"           → concept    (关系图)
+  "关系" / "关联" / "之间" / "概念图" / "网络" / "知识图谱" → **[GRAPH_REF:slug|名称]** （独立管道，v2 起强制，不再内联 concept JSON）
   "X改变会怎样" / "参数的作用" / "调整X" / "敏感性"      → parametric (参数图)
     ⚠️ parametric 是最严苛的保留形态，仅当用户真的需要"手动调数值看变化"时才用
 
@@ -225,7 +225,20 @@ async function runHandler(req, res) {
   · comparison → 并列对比：
     data:{"columns":[{"title":"方法A","subtitle":"可选","points":[{"text":"优势","tone":"pro"},{"text":"劣势","tone":"con"},"普通点"]},{"title":"方法B","points":[...]}]}
 
-  · concept → 概念关系网络（这是"知识图谱级"可视化，不是"两个概念画条线"）：
+  · concept → 【重要升级：概念关系网络已独立成专属管道】
+    从 v2 起，"概念关系网络" 不再在本次聊天里内联输出 JSON，改用**引用标记**触发独立高质量管道：
+        [GRAPH_REF:<slug>|<中文概念名>]
+    · slug：小写英文 + 下划线，例：lagrange_interpolation / taylor_series / newton_method / runge_phenomenon / chebyshev_nodes
+    · 同一概念的 slug 必须稳定（不要同一个概念今天写 lagrange_interp 明天写 lagrange_interpolation_poly），系统会按 slug 缓存。
+    · 示例：  [GRAPH_REF:lagrange_interpolation|Lagrange 插值多项式]
+    触发条件（满足任一即用 GRAPH_REF，而不是继续在本次回复里画）：
+        ① 用户显式说"帮我梳理/可视化/画图理解/知识图谱 X"
+        ② 讲解涉及多个相互关联的子概念时（Lagrange/Taylor/Fourier 这类"有丰富结构"的主题）
+        ③ 用户问"X 和 Y 的关系"/"X 的整体脉络"
+    前端收到 [GRAPH_REF:...] 会异步请求独立接口生成高质量 10-15 节点图谱并缓存；你无需在本次回复里塞任何 JSON。
+    如果本次回复不触发上述条件，就完全不要提"概念图/知识图谱"，也不要输出 GRAPH_REF。
+
+    【兼容旧格式 — 仅限降级场景】若你坚持在本次 chat 中内联 concept JSON（例如用户明确只要一小片段），仍可用：
     data:{
       "nodes":[
         {"id":"n_center","name":"Lagrange 插值多项式","primary":true,"level":0,"dimension":"definition","importance":"core","desc":"通过 n+1 个点的唯一 n 次多项式"},
@@ -301,7 +314,7 @@ async function runHandler(req, res) {
 ✅ 正确：用户问"积分因子法怎么推导" → 输出 structure=process 的分步展开
 
 ❌ 反模式：用户问"微分方程和代数方程的关系" → 输出 parametric
-✅ 正确：用户问"...的关系" → 输出 structure=concept 的关系图
+✅ 正确：用户问"...的关系" → 输出 [GRAPH_REF:<slug>|<中文名>]（独立管道；不要内联 concept JSON）
 
 ❌ 错误："下面这张图展示了分类：├── 一阶 ├── 高阶 └── 非线性"
 ✅ 正确：
@@ -381,15 +394,17 @@ structure 对号入座（本轮可用：${vizProfile.preferredStructures.join(" 
 - "有哪几种/分类" → hierarchy（层级树）
 - "X vs Y/区别/对比" → comparison（并列对比）
 - "怎么推/证明/步骤" → process（分步）
-- "关系/之间/知识图谱" → concept（节点网，≥8 节点 ≥4 维度，必须 level 0/1 分层；2 节点就放行=严重偷懒）
+- "关系/之间/知识图谱/脉络" → 输出引用标记 **[GRAPH_REF:<slug>|<中文名>]**（不要内联 concept JSON；独立管道会异步生成 10-15 节点的高质量图谱并缓存）
 
 data 骨架（选 structure 对应的那一种即可）：
 · annotation: {"formula":"\\\\frac{dy}{dx}+P(x)y=Q(x)","parts":[{"tex":"\\\\frac{dy}{dx}","label":"导数","tone":"indigo"}, ...]}
 · hierarchy: {"root":{"name":"根","children":[...]}}
 · process: {"steps":[{"title":"第1步","desc":"...","formula":"可选 LaTeX"}]}
 · comparison: {"columns":[{"title":"A","points":[{"text":"优势","tone":"pro"}]}]}
-· concept: {"nodes":[{"id":"c","name":"中心","primary":true,"level":0,"dimension":"definition"}, {"id":"a","name":"基函数 Lᵢ(x)","level":1,"dimension":"construction","latex":"L_i(x)=\\\\prod_{j\\\\ne i}..."}, ...≥8 个...],"edges":[{"from":"c","to":"a","label":"由...构造"},... ≥n-1 条 ...]}
-  · concept 硬约束：nodes 必须 ≥ 5（建议 8-12），每条 edge 必须带 label，level 分 0/1/2 三层，dimension 覆盖 definition/formula/construction/property/error/application/related 中的 ≥4 类。
+· concept：本版本改为**引用标记** [GRAPH_REF:<slug>|<中文名>]。例：[GRAPH_REF:lagrange_interpolation|Lagrange 插值多项式]
+  · 不要再在本次回复里输出 {"structure":"concept", ...} 的内联 JSON
+  · slug 规则：小写英文 + 下划线，同一概念 slug 必须稳定
+  · 前端会异步拉取 10-15 节点的高质量图谱并缓存
 
 ⚠️ JSON 逃逸铁律：LaTeX 的 \\ 必须双写（\\\\frac 而非 \\frac）。合法转义只有 \\" \\\\ \\/ \\b \\f \\n \\r \\t \\uXXXX，其它都要双写。不要尾逗号、不要智能引号、不要代码块围栏，必须完整闭合。本轮最多 ${vizProfile.maxVizPerReply} 个 [VIZ:...]。
 ${vizProfile.extraConstraint ? "\n" + vizProfile.extraConstraint + "\n" : ""}

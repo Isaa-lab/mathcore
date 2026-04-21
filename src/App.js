@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useMathStore } from "./store/useMathStore";
 import QuizPageView from "./pages/QuizPage";
 import MaterialChatPageView, { DynamicVizCard, normalizeVizIntent, repairVizJson } from "./pages/MaterialChatPage";
+import ConceptGraphCard from "./components/ConceptGraphCard";
 import InteractiveMathChart from "./components/InteractiveMathChart";
 import StudyWorkspace from "./layouts/StudyWorkspace";
 import SprintWorkspace from "./layouts/SprintWorkspace";
@@ -5869,6 +5870,17 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                         {blocks && blocks.map((b, bi) => (
                           b.type === "text" ? (
                             b.content.trim() ? <MathText key={bi} text={b.content} /> : null
+                          ) : b.type === "graphRef" ? (
+                            // [GRAPH_REF:slug|label] → 专属独立管道（异步拉取 /api/concept-graph + localStorage 缓存）
+                            <div key={bi} style={{ margin: "10px 0 6px" }}>
+                              <ConceptGraphCard
+                                slug={b.slug}
+                                label={b.label}
+                                context={q?.stem || q?.topic || ""}
+                                aiBody={buildAIBody()}
+                                onOpen={(intent) => openLab(intent)}
+                              />
+                            </div>
                           ) : b.intent && !b.qualityIssue ? (
                             // [VIZ:...] 解析成功且丰度达标 → 渲染预览卡（点击进入 InteractiveLab 全屏）
                             <div key={bi} style={{ margin: "10px 0 6px", display: "flex" }}>
@@ -7332,6 +7344,30 @@ function splitQuizChatBlocks(text) {
     if (buf) { out.push({ type: "text", content: buf }); buf = ""; }
   };
   while (i < src.length) {
+    // ── [GRAPH_REF:slug|label] —— v2 concept graph 专属独立管道 ──
+    // 格式: [GRAPH_REF:lagrange_interpolation|Lagrange 插值多项式]
+    // 前端遇到这种标记不解析 JSON，而是占位 + 异步请求 /api/concept-graph。
+    if (src.slice(i, i + 11) === "[GRAPH_REF:") {
+      const end = src.indexOf("]", i + 11);
+      if (end > 0) {
+        const inner = src.slice(i + 11, end);
+        const pipe = inner.indexOf("|");
+        const slugRaw = (pipe >= 0 ? inner.slice(0, pipe) : inner).trim();
+        const label = (pipe >= 0 ? inner.slice(pipe + 1) : "").trim();
+        // slug normalizer: lowercase, allow [a-z0-9_-]
+        const slug = slugRaw
+          .toLowerCase()
+          .replace(/\s+/g, "_")
+          .replace(/[^a-z0-9_-]/g, "")
+          .replace(/^_+|_+$/g, "");
+        if (slug) {
+          flushText();
+          out.push({ type: "graphRef", slug, label: label || slug.replace(/_/g, " ") });
+          i = end + 1;
+          continue;
+        }
+      }
+    }
     // [VIZ:{...}] 或 [CHART:{...}] 兼容
     const prefix = src.slice(i, i + 5) === "[VIZ:" ? "[VIZ:" : src.slice(i, i + 7) === "[CHART:" ? "[CHART:" : null;
     if (prefix) {
@@ -7888,6 +7924,7 @@ function MaterialChatPage({ setPage, profile }) {
             conversationHistory={history}
             currentMaterial={selectedMaterial}
             renderChart={() => <InteractiveMathChart />}
+            aiBody={buildAIBody()}
           />
         </motion.div>
         {chatting && (

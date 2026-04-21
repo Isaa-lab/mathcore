@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import katex from "katex";
 import { useMathStore } from "../store/useMathStore";
+import ConceptGraphCard from "../components/ConceptGraphCard";
 
 const springTransition = { type: "spring", stiffness: 300, damping: 25 };
 const bubbleVariants = {
@@ -455,10 +456,11 @@ function renderInline(text, keyPrefix = "") {
   });
 }
 
-// ── Placeholder extraction (accepts both [VIZ:...] and legacy [CHART:...]) ─
+// ── Placeholder extraction (accepts [VIZ:...], legacy [CHART:...], and [GRAPH_REF:...]) ─
 function extractMacros(src) {
   const varBlocks = [];
   const vizBlocks = [];
+  const graphRefs = [];
   let out = "";
   let i = 0;
   while (i < src.length) {
@@ -468,6 +470,27 @@ function extractMacros(src) {
       out += `__VAR_${varBlocks.length - 1}__`;
       i += v[0].length;
       continue;
+    }
+    // [GRAPH_REF:slug|label] — v2 concept graph reference (async pipeline)
+    if (src.slice(i, i + 11) === "[GRAPH_REF:") {
+      const end = src.indexOf("]", i + 11);
+      if (end > 0) {
+        const inner = src.slice(i + 11, end);
+        const pipe = inner.indexOf("|");
+        const slugRaw = (pipe >= 0 ? inner.slice(0, pipe) : inner).trim();
+        const label = (pipe >= 0 ? inner.slice(pipe + 1) : "").trim();
+        const slug = slugRaw
+          .toLowerCase()
+          .replace(/\s+/g, "_")
+          .replace(/[^a-z0-9_-]/g, "")
+          .replace(/^_+|_+$/g, "");
+        if (slug) {
+          graphRefs.push({ slug, label: label || slug.replace(/_/g, " ") });
+          out += `__GRAPHREF_${graphRefs.length - 1}__`;
+          i = end + 1;
+          continue;
+        }
+      }
     }
     // [VIZ:{...}] or [CHART:{...}] — depth-aware bracket match
     const prefix = src.slice(i, i + 5) === "[VIZ:" ? "[VIZ:" : src.slice(i, i + 7) === "[CHART:" ? "[CHART:" : null;
@@ -493,14 +516,14 @@ function extractMacros(src) {
     out += src[i];
     i++;
   }
-  return { out, varBlocks, vizBlocks };
+  return { out, varBlocks, vizBlocks, graphRefs };
 }
 
 // ── Block renderer ─────────────────────────────────────────────────────────
 function renderMarkdown(text, context) {
   if (!text) return null;
   const cleaned = preprocessLaTeX(text);
-  const { out: prepared0, varBlocks, vizBlocks } = extractMacros(cleaned);
+  const { out: prepared0, varBlocks, vizBlocks, graphRefs } = extractMacros(cleaned);
   const prepared = prepared0
     .replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, "")
     .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/g, "");
@@ -583,6 +606,25 @@ function renderMarkdown(text, context) {
       if (!intent) return;
       blocks.push(
         <DynamicVizCard key={`viz-${idx}`} intent={intent} onOpen={() => context?.onOpenViz?.(intent)} />
+      );
+      return;
+    }
+
+    const graphRefOnly = t.match(/^__GRAPHREF_(\d+)__$/);
+    if (graphRefOnly) {
+      flushList();
+      const ref = graphRefs[Number(graphRefOnly[1])];
+      if (!ref || !ref.slug) return;
+      // Render as a full-width async card; reuse onOpenViz as the "open lab" entry
+      blocks.push(
+        <ConceptGraphCard
+          key={`gref-${idx}`}
+          slug={ref.slug}
+          label={ref.label}
+          context={context?.currentMaterial || ""}
+          aiBody={context?.aiBody}
+          onOpen={(intent) => context?.onOpenViz?.(intent)}
+        />
       );
       return;
     }
@@ -671,11 +713,14 @@ export default function MaterialChatPage({
   currentMaterial,
   renderChart,
   onOpenChart,
+  aiBody,
 }) {
   const stream = messages || conversationHistory || [];
   const openLab = useMathStore((s) => s.openLab);
   const context = {
     renderChart,
+    currentMaterial,
+    aiBody,
     onOpenViz: (intent) => {
       openLab(intent);
       if (onOpenChart) onOpenChart(intent);
