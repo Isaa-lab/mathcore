@@ -3825,7 +3825,7 @@ function HomePage({ setPage, profile }) {
   );
 }
 
-function KnowledgePage({ setPage, setChapterFilter, switchStudyTab }) {
+function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTab }) {
   // 在学习工作台中，"题库练习"页并不会被渲染；此时应切 StudyWorkspace 的"小测"tab
   const routeSetPage = (p) => {
     if (p === "题库练习" && typeof switchStudyTab === "function") switchStudyTab("小测");
@@ -4044,7 +4044,11 @@ function KnowledgePage({ setPage, setChapterFilter, switchStudyTab }) {
                               style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: chColor, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>
                               📖 查看内容
                             </button>
-                            <button onClick={() => { setChapterFilter(chapterStr); routeSetPage("题库练习"); }}
+                            <button onClick={() => {
+                              setChapterFilter(chapterStr);
+                              if (typeof setQuizIntent === "function") setQuizIntent({ source: "knowledge_point", chapter: chapterStr, topicName: t.name || null, count: 5 });
+                              routeSetPage("题库练习");
+                            }}
                               style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 600, background: "#f0f9ff", color: G.blue, border: `1.5px solid ${G.blue}33`, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>
                               ✏️ 练习题目
                             </button>
@@ -4115,7 +4119,7 @@ const QUIZ_buckets = (n) => {
 const QUIZ_ABILITY_LABEL = { concept: "概念理解", calc: "计算推演", proof: "证明书写", application: "综合应用" };
 const QUIZ_STATUS_LABEL  = { new: "全新题目", wrong: "错题重做", unsure: "不熟复习", mastered: "巩固已会" };
 
-function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setChapterFilter, onAnswer, materialId = null, materialTitle = null, sessionAnswers = {}, isSprint = false }) {
+function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setChapterFilter, onAnswer, materialId = null, materialTitle = null, sessionAnswers = {}, isSprint = false, autoStartIntent = null }) {
   const [allQuestions, setAllQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
   // Setup state (moved to top - never in conditional)
@@ -4255,6 +4259,30 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     return () => clearInterval(timerRef.current);
   }, [timerOn, quizMode, finished]);
 
+  // 意图驱动：从知识树跳转过来时（autoStartIntent = { chapter, count? }），加载完就直接开练，
+  // 不让用户再次手动点"开始练习"
+  const autoStartFiredRef = useRef(false);
+  useEffect(() => {
+    if (autoStartFiredRef.current) return;
+    if (!autoStartIntent) return;
+    if (loading) return;
+    if (quizMode) return; // 已经在做题中
+    if (!allQuestions || allQuestions.length === 0) return;
+    autoStartFiredRef.current = true;
+    const { chapter, count } = autoStartIntent;
+    const parseOf = (c) => QUIZ_parseChapter(c) || null;
+    const targetParsed = parseOf(chapter);
+    const pool = allQuestions.filter(q => {
+      if (!chapter) return true;
+      if (q.chapter === chapter) return true;
+      const qp = parseOf(q.chapter);
+      if (targetParsed && qp && qp.num === targetParsed.num && qp.course === targetParsed.course) return true;
+      return false;
+    });
+    if (pool.length === 0) return; // 没题就留在 setup 页，让用户知道
+    startWithPool(pool, count || Math.min(5, pool.length));
+  }, [autoStartIntent, loading, allQuestions, quizMode]);
+
   useEffect(() => { setTimer(0); }, [current]);
 
   const allChapters = [...new Set(allQuestions.map(q => q.chapter).filter(Boolean))].sort((a, b) => {
@@ -4313,25 +4341,49 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
   const letters = ["A", "B", "C", "D"];
 
+  // 最近一次 askQuestionAI 的输入，用于失败后"重试"按钮
+  const [lastAskInput, setLastAskInput] = useState("");
   const askQuestionAI = async (userMsg) => {
     if (!q) return;
     setAIHelpLoading(true);
     setAIHelpReply("");
+    setLastAskInput(userMsg);
     try {
-      const prompt = "题目：" + q.question + (q.options ? "\n选项：" + q.options.join(" / ") : "") + "\n\n" + userMsg;
+      // ⚠️ 后端以 { question: chatQuestion } 解构 —— 必须用 question 作为 key，
+      // 否则 isChatMode 为 false，整个请求会被误当成"出题"任务处理（这是之前 JSON 解析失败 bug 的根因）
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "chat", chatQuestion: prompt, materialTitle: "数学题目解析" })
+        body: JSON.stringify({
+          mode: "socratic",
+          question: userMsg,
+          questionContext: {
+            stem: q.question,
+            options: q.options || null,
+            correctAnswer: q.answer,
+            userSelection: selected !== null ? (q.options ? letters[selected] : (selected === 0 ? "正确" : "错误")) : null,
+            isCorrect: !isWrongAnswered && answered,
+            misconception: misconceptionForChoice || null,
+            knowledgePoints: Array.isArray(q.knowledgePoints) ? q.knowledgePoints : null,
+          },
+          materialTitle: "数学题目复盘"
+        })
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        setAIHelpReply("⚠️ " + (data.error || "请求失败，请检查 AI 设置页面是否配置了 API Key"));
+        // 不把技术错误（JSON解析失败 / stack trace / token 超限）丢给用户，统一降级
+        setAIHelpReply("__FRIENDLY_ERROR__");
       } else {
-        setAIHelpReply(data.answer || data.text || data.result || "AI 未返回内容，请重试");
+        const answer = data.answer || data.text || data.result || "";
+        // 即使走到这，也要防御 AI 把 JSON 数组当成答案返回（例如服务端 fallback 失效）
+        if (/^\s*[\[{]/.test(answer.trim()) && /"question"\s*:/.test(answer)) {
+          setAIHelpReply("__FRIENDLY_ERROR__");
+        } else {
+          setAIHelpReply(answer || "__FRIENDLY_ERROR__");
+        }
       }
     } catch (e) {
-      setAIHelpReply("网络错误，请稍后再试");
+      setAIHelpReply("__FRIENDLY_ERROR__");
     }
     setAIHelpLoading(false);
   };
@@ -4980,6 +5032,22 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   return (
     <div className="quiz-stage">
+      {/* 意图面包屑（从知识树 / 知识点页跳来时显示 —— 告诉用户"这是你想做的题目范围"） */}
+      {autoStartIntent && (autoStartIntent.nodeLabel || autoStartIntent.topicName || autoStartIntent.chapter) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", marginBottom: 10, background: "linear-gradient(90deg, #EEF2FF, #F5F3FF)", borderRadius: 12, border: "1px solid #DDD6FE", fontSize: 13 }}>
+          <span style={{ fontSize: 16 }}>🎯</span>
+          <div style={{ flex: 1, color: "#4338CA", fontWeight: 600 }}>
+            正在练习：<span style={{ fontWeight: 800 }}>{autoStartIntent.nodeLabel || autoStartIntent.topicName || autoStartIntent.chapter}</span>
+            <span style={{ marginLeft: 8, fontWeight: 500, color: "#6366F1", fontSize: 12 }}>
+              · {displayQ.length} 题 · 来自{autoStartIntent.source === "knowledge_tree" ? "知识树" : autoStartIntent.source === "knowledge_point" ? "知识点" : "推荐"}
+            </span>
+          </div>
+          <button onClick={() => { setQuizMode(null); setFinished(false); setCurrent(0); }}
+            style={{ padding: "6px 12px", fontSize: 12, fontWeight: 600, background: "#fff", color: "#4338CA", border: "1px solid #C7D2FE", borderRadius: 8, cursor: "pointer" }}>
+            ⚙ 调整范围
+          </button>
+        </div>
+      )}
       {/* 顶部：可交互进度条 · 章节/知识点/难度 · 计时器 */}
       <div className="premium-card" style={{ marginBottom: 14, padding: "14px 18px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -5155,7 +5223,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         </motion.div>
       )}
 
-      {/* 内联 AI 引导面板（上下文感知） */}
+      {/* 内联 AI 引导面板（上下文感知 · 纯对话，不暴露 prompt） */}
       {showAIHelp && (
         <motion.div
           initial={{ opacity: 0, height: 0 }}
@@ -5165,17 +5233,26 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           style={{ marginTop: 12, padding: 18, borderLeft: "4px solid #6366F1", overflow: "hidden" }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: "#4338CA" }}>💬 AI 引导</div>
-            <button onClick={() => { setShowAIHelp(false); setAIHelpReply(""); }} style={{ border: "none", background: "transparent", color: "#6B7280", cursor: "pointer", fontSize: 13 }}>收起 ×</button>
+            <div style={{ fontSize: 14, fontWeight: 800, color: "#4338CA" }}>💬 AI 正在和你一起拆解这道题</div>
+            <button onClick={() => { setShowAIHelp(false); setAIHelpReply(""); setAIContextPrompt(""); }} style={{ border: "none", background: "transparent", color: "#6B7280", cursor: "pointer", fontSize: 13 }}>收起 ×</button>
           </div>
-          {aiContextPrompt && (
-            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 8, padding: "8px 10px", background: "#F3F4F6", borderRadius: 10, whiteSpace: "pre-wrap", maxHeight: 72, overflow: "hidden", position: "relative" }}>
-              <b style={{ color: "#4338CA" }}>发给 AI 的上下文：</b>
-              <div style={{ marginTop: 4 }}>{aiContextPrompt.length > 180 ? aiContextPrompt.slice(0, 180) + "..." : aiContextPrompt}</div>
+          {aiHelpLoading && (
+            <div style={{ fontSize: 13, color: "#6366F1", display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="mc-pulse-dot" style={{ width: 8, height: 8, borderRadius: "50%", background: "#6366F1", display: "inline-block" }} />
+              AI 正在思考中…
             </div>
           )}
-          {aiHelpLoading && <div style={{ fontSize: 13, color: "#6366F1" }}>AI 正在思考中…</div>}
-          {!aiHelpLoading && aiHelpReply && (
+          {!aiHelpLoading && aiHelpReply === "__FRIENDLY_ERROR__" && (
+            <div style={{ padding: "12px 14px", background: "#FEF3C7", borderRadius: 12, color: "#92400E" }}>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>哎呀，AI 引导这会儿没接上 🤔</div>
+              <div style={{ fontSize: 13, marginBottom: 10 }}>可能是网络抖动或 API 配额暂满，要不要再试一次？</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Btn size="sm" variant="primary" onClick={() => { if (lastAskInput) askQuestionAI(lastAskInput); }}>重试一次</Btn>
+                <Btn size="sm" onClick={() => { setShowAIHelp(false); setAIHelpReply(""); }}>稍后再说</Btn>
+              </div>
+            </div>
+          )}
+          {!aiHelpLoading && aiHelpReply && aiHelpReply !== "__FRIENDLY_ERROR__" && (
             <div style={{ fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)" }}>
               <MathText text={aiHelpReply} />
             </div>
@@ -5191,25 +5268,29 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             />
             <Btn size="sm" onClick={() => { if (aiHelpInput.trim()) { askQuestionAI(aiHelpInput); setAIHelpInput(""); } }}>发送</Btn>
           </div>
+          {/* dev-only: 查看真实发给 AI 的 prompt 原文 */}
+          {process.env.NODE_ENV === "development" && aiContextPrompt && (
+            <details style={{ marginTop: 10, fontSize: 11, color: "#9CA3AF" }}>
+              <summary style={{ cursor: "pointer" }}>🔧 dev: 查看 prompt</summary>
+              <pre style={{ whiteSpace: "pre-wrap", marginTop: 6, padding: 8, background: "#F9FAFB", borderRadius: 8, maxHeight: 180, overflow: "auto" }}>{aiContextPrompt}</pre>
+            </details>
+          )}
         </motion.div>
       )}
 
-      {/* 底部辅助工具栏（次要操作） */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14, padding: "0 4px" }}>
-        <Btn size="sm" onClick={() => { if (current > 0) jumpTo(current - 1); }} disabled={current === 0}>← 上一题</Btn>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn size="sm" onClick={() => {
-            try {
-              const bookmarks = JSON.parse(localStorage.getItem("mc_quiz_bookmarks") || "[]");
-              const key = q.id || q.question;
-              if (bookmarks.includes(key)) {
-                localStorage.setItem("mc_quiz_bookmarks", JSON.stringify(bookmarks.filter(b => b !== key)));
-              } else {
-                localStorage.setItem("mc_quiz_bookmarks", JSON.stringify([...bookmarks, key]));
-              }
-            } catch {}
-          }}>★ 标记</Btn>
-        </div>
+      {/* 底部辅助工具栏（只留"标记"，移除重复的"上一题"—— 顶部已有可跳转进度条 + 未答题时的上一题按钮） */}
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: 14, padding: "0 4px" }}>
+        <Btn size="sm" onClick={() => {
+          try {
+            const bookmarks = JSON.parse(localStorage.getItem("mc_quiz_bookmarks") || "[]");
+            const key = q.id || q.question;
+            if (bookmarks.includes(key)) {
+              localStorage.setItem("mc_quiz_bookmarks", JSON.stringify(bookmarks.filter(b => b !== key)));
+            } else {
+              localStorage.setItem("mc_quiz_bookmarks", JSON.stringify([...bookmarks, key]));
+            }
+          } catch {}
+        }}>★ 标记</Btn>
       </div>
     </div>
   );
@@ -7800,7 +7881,7 @@ function computeRecommendations(progress) {
 
 const MS_DAY = 86400000;
 
-function SkillTreePage({ setPage, setChapterFilter, switchStudyTab }) {
+function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTab }) {
   // 新数据模型：{ [id]: { status, updatedAt, masteredAt } }
   // 向后兼容旧的 mc_skill_mastery (number 0/1/2)
   const [progress, setProgress] = useState(() => {
@@ -7839,7 +7920,16 @@ function SkillTreePage({ setPage, setChapterFilter, switchStudyTab }) {
   };
   const openQuizForNode = (node) => {
     if (!node) return;
+    // 意图流转：从知识树跳转，直接把"做 5 题 · 本章节"的意图传给 QuizPage，无需用户再手动点开始
     if (typeof setChapterFilter === "function") setChapterFilter(node.chapter || null);
+    if (typeof setQuizIntent === "function") {
+      setQuizIntent({
+        source: "knowledge_tree",
+        chapter: node.chapter || null,
+        nodeLabel: node.label || null,
+        count: 5,
+      });
+    }
     goToQuiz();
   };
   // TopicModal 内的"开始练习"按钮同样会调 setPage("题库练习") —— 用包装版本把它路由到 小测 tab
@@ -8581,6 +8671,10 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [retryQuestion, setRetryQuestion] = useState(null);
   const [chapterFilter, setChapterFilter] = useState(null);
+  // 学习意图：任何入口（知识树 / 错题本 / 推荐）想让 QuizPage 直接开练时，设置这个对象。
+  // QuizPage 一旦收到且题库加载完成，就自动 startWithPool，不再停在 setup 页让用户重选。
+  // 形如 { chapter: "ODE Ch.2", count: 5, source: "knowledge_tree" }
+  const [quizIntent, setQuizIntent] = useState(null);
   const [studyTab, setStudyTab] = useState("资料库");
   // 在学习工作台（StudyWorkspace）内部切换到"小测"tab —— 供 SkillTreePage / TopicModal 的"去做题"按钮使用
   const switchStudyTab = (tab) => setStudyTab(tab);
@@ -8653,7 +8747,7 @@ export default function App() {
   const handleLogout = async () => { await supabase.auth.signOut(); setSurface("gateway"); setPage("首页"); };
 
   const handleSetPage = (p) => {
-    if (p !== "题库练习") { setRetryQuestion(null); setChapterFilter(null); }
+    if (p !== "题库练习") { setRetryQuestion(null); setChapterFilter(null); setQuizIntent(null); }
     setPage(p);
   };
 
@@ -8682,7 +8776,7 @@ export default function App() {
         matId = parts[0];
         matTitle = decodeURIComponent(parts.slice(1).join("_"));
       }
-      return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} materialId={matId} materialTitle={matTitle} sessionAnswers={sessionAnswers} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
+      return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} materialId={matId} materialTitle={matTitle} sessionAnswers={sessionAnswers} autoStartIntent={quizIntent} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
     }
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
@@ -8695,9 +8789,9 @@ export default function App() {
   const renderStudyTab = (tab) => {
     if (tab === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
     if (tab === "AI对话") return <MaterialChatPage setPage={handleSetPage} profile={profile} />;
-    if (tab === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} switchStudyTab={switchStudyTab} />;
-    if (tab === "知识树") return <SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} switchStudyTab={switchStudyTab} />;
-    if (tab === "小测") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
+    if (tab === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} setQuizIntent={setQuizIntent} switchStudyTab={switchStudyTab} />;
+    if (tab === "知识树") return <SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} setQuizIntent={setQuizIntent} switchStudyTab={switchStudyTab} />;
+    if (tab === "小测") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} autoStartIntent={quizIntent} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
     return null;
   };
 
