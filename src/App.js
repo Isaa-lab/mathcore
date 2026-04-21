@@ -4713,18 +4713,28 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           ...buildAIBody(),
         })
       });
-      const data = await res.json().catch(() => ({}));
+      // 关键：如果后端超时返回 HTML，res.json() 会抛；我们要把 HTTP 状态 + 响应片段都抓住
+      let data = {};
+      let rawBodySnippet = "";
+      try {
+        const txt = await res.text();
+        rawBodySnippet = txt.slice(0, 400);
+        try { data = JSON.parse(txt); } catch { data = {}; }
+      } catch (e) { /* 读不到 body */ }
       if (!res.ok || data.error) {
         // 后端给的 error 文本本身就是用户可读的（"暂无可用 AI 服务..." 这类），
         // 直接透出来，别再被"抱歉卡住了"一层吞掉。根据关键词推断具体错因 + 给出口。
         const rawErr = String(data.error || data.message || `HTTP ${res.status}`).trim();
         const hint = classifyChatError(rawErr, res.status);
+        // 诊断详情在所有环境都保留（折叠展示），这样线上也能排查
+        const diagLine = data.diag ? `\n诊断: ${data.diag}` : "";
+        const elapsedLine = data.elapsed ? `\n耗时: ${data.elapsed}ms` : "";
         updateMsg({
           content: hint.message,
           isError: true,
           isStreaming: false,
           errorCategory: hint.category,
-          errorDetail: process.env.NODE_ENV === "development" ? rawErr : null,
+          errorDetail: `HTTP ${res.status}\n${rawErr}${diagLine}${elapsedLine}\n\n原始响应 (前 400 字)：\n${rawBodySnippet || "(空)"}`,
         });
       } else {
         const answer = String(data.answer || data.text || data.result || "").trim();
@@ -5705,8 +5715,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                         </div>
                         {m.errorDetail && (
                           <details style={{ marginTop: 8, fontSize: 10.5, color: "#92400E", opacity: 0.8 }}>
-                            <summary style={{ cursor: "pointer" }}>🔧 dev: 原始错误</summary>
-                            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", marginTop: 4, padding: 6, background: "#FEF3C7", borderRadius: 4, maxHeight: 140, overflow: "auto" }}>{m.errorDetail}</pre>
+                            <summary style={{ cursor: "pointer", userSelect: "none" }}>🔧 诊断详情（点击展开）</summary>
+                            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", marginTop: 4, padding: 6, background: "#FEF3C7", borderRadius: 4, maxHeight: 180, overflow: "auto", fontSize: 10 }}>{m.errorDetail}</pre>
                           </details>
                         )}
                       </>
