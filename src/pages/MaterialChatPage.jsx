@@ -48,6 +48,27 @@ const IconComparison = ({ size = 16, color }) => (
     <polyline points="16 3 20 7 16 11" /><polyline points="8 21 4 17 8 13" /><line x1="20" y1="7" x2="4" y2="7" /><line x1="4" y1="17" x2="20" y2="17" />
   </svg>
 );
+const IconAnnotation = ({ size = 16, color }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 3h7v7H3z" opacity="0.65" />
+    <path d="M14 3h7v7h-7z" />
+    <path d="M3 14h7v7H3z" />
+    <path d="M14 14h7v7h-7z" opacity="0.4" />
+  </svg>
+);
+const IconConcept = ({ size = 16, color }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3" />
+    <circle cx="5" cy="5" r="2" />
+    <circle cx="19" cy="5" r="2" />
+    <circle cx="5" cy="19" r="2" />
+    <circle cx="19" cy="19" r="2" />
+    <line x1="9.7" y1="9.7" x2="6.4" y2="6.4" />
+    <line x1="14.3" y1="9.7" x2="17.6" y2="6.4" />
+    <line x1="9.7" y1="14.3" x2="6.4" y2="17.6" />
+    <line x1="14.3" y1="14.3" x2="17.6" y2="17.6" />
+  </svg>
+);
 
 // ── LaTeX Pre-processor + Bare-Math Rescuer ────────────────────────────────
 // Defense in depth: even if the AI forgets to wrap formulas in $...$, we
@@ -179,6 +200,39 @@ const VIZ_DICTIONARY = {
         <motion.rect initial={{ scaleY: 0 }} animate={{ scaleY: 1 }} transition={{ duration: 0.5, ease: "easeOut" }} style={{ originY: "100%" }} x="16" y="12" width="26" height="22" rx="4" fill="currentColor" opacity="0.45" />
         <motion.rect initial={{ scaleY: 0 }} animate={{ scaleY: 1 }} transition={{ duration: 0.5, delay: 0.12, ease: "easeOut" }} style={{ originY: "100%" }} x="58" y="8" width="26" height="26" rx="4" fill="currentColor" opacity="0.85" />
         <line x1="50" y1="20" x2="50" y2="20" stroke="currentColor" strokeWidth="0.5" />
+      </svg>
+    ),
+  },
+  annotation: {
+    label: "公式标注 · 概念拆解",
+    fg: "#6D28D9", bg: "#F5F3FF", border: "rgba(221,214,254,0.7)", accent: "#8B5CF6",
+    Icon: IconAnnotation,
+    preview: () => (
+      <svg width="100%" height="100%" viewBox="0 0 100 40" preserveAspectRatio="none">
+        <motion.rect initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.45, ease: "easeOut" }} style={{ originX: "0%" }} x="12" y="16" width="20" height="10" rx="3" fill="#C4B5FD" opacity="0.9" />
+        <motion.rect initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.45, delay: 0.18, ease: "easeOut" }} style={{ originX: "0%" }} x="38" y="16" width="26" height="10" rx="3" fill="#6EE7B7" opacity="0.9" />
+        <motion.rect initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.45, delay: 0.36, ease: "easeOut" }} style={{ originX: "0%" }} x="70" y="16" width="18" height="10" rx="3" fill="#FCD34D" opacity="0.9" />
+        <motion.line initial={{ opacity: 0 }} animate={{ opacity: 0.55 }} transition={{ delay: 0.55 }} x1="22" y1="28" x2="22" y2="34" stroke="#8B5CF6" strokeWidth="0.8" />
+        <motion.line initial={{ opacity: 0 }} animate={{ opacity: 0.55 }} transition={{ delay: 0.6 }} x1="51" y1="28" x2="51" y2="34" stroke="#10B981" strokeWidth="0.8" />
+        <motion.line initial={{ opacity: 0 }} animate={{ opacity: 0.55 }} transition={{ delay: 0.65 }} x1="79" y1="28" x2="79" y2="34" stroke="#F59E0B" strokeWidth="0.8" />
+      </svg>
+    ),
+  },
+  concept: {
+    label: "概念关系网络",
+    fg: "#0F766E", bg: "#F0FDFA", border: "rgba(153,246,228,0.7)", accent: "#14B8A6",
+    Icon: IconConcept,
+    preview: () => (
+      <svg width="100%" height="100%" viewBox="0 0 100 40" preserveAspectRatio="none">
+        <motion.g initial={{ opacity: 0 }} animate={{ opacity: 0.55 }} transition={{ duration: 0.6 }}>
+          <line x1="50" y1="20" x2="22" y2="10" stroke="#14B8A6" strokeWidth="0.9" />
+          <line x1="50" y1="20" x2="22" y2="30" stroke="#14B8A6" strokeWidth="0.9" />
+          <line x1="50" y1="20" x2="78" y2="10" stroke="#14B8A6" strokeWidth="0.9" />
+          <line x1="50" y1="20" x2="78" y2="30" stroke="#14B8A6" strokeWidth="0.9" />
+        </motion.g>
+        {[[50, 20, 4.5, 0.95], [22, 10, 2.8, 0.6], [22, 30, 2.8, 0.6], [78, 10, 2.8, 0.6], [78, 30, 2.8, 0.6]].map(([x, y, r, op], i) => (
+          <motion.circle key={i} cx={x} cy={y} r={r} fill="#14B8A6" opacity={op} initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", stiffness: 260, damping: 18, delay: i * 0.09 }} />
+        ))}
       </svg>
     ),
   },

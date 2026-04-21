@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import katex from "katex";
 import { useMathStore } from "../store/useMathStore";
 
 const pageTransition = { type: "spring", stiffness: 260, damping: 26 };
@@ -30,10 +31,23 @@ const IconCheck = ({ size = 14, color = "#10B981" }) => (
 
 // ── Structure accent tokens (kept in sync with chat card dictionary) ──────
 const STRUCT_ACCENT = {
-  parametric: { fg: "#4338CA", bg: "#EEF2FF", accent: "#6366F1", label: "参数可调模型", tag: "PARAMETRIC" },
-  hierarchy:  { fg: "#1D4ED8", bg: "#EFF6FF", accent: "#3B82F6", label: "层级 · 树状拓扑", tag: "HIERARCHY" },
-  process:    { fg: "#047857", bg: "#ECFDF5", accent: "#10B981", label: "流程 · 时序推演", tag: "PROCESS" },
-  comparison: { fg: "#B45309", bg: "#FFFBEB", accent: "#F59E0B", label: "对比 · 并列分析", tag: "COMPARISON" },
+  parametric: { fg: "#4338CA", bg: "#EEF2FF", accent: "#6366F1", label: "参数可调模型",   tag: "PARAMETRIC" },
+  hierarchy:  { fg: "#1D4ED8", bg: "#EFF6FF", accent: "#3B82F6", label: "层级 · 树状拓扑",   tag: "HIERARCHY"  },
+  process:    { fg: "#047857", bg: "#ECFDF5", accent: "#10B981", label: "流程 · 时序推演",   tag: "PROCESS"    },
+  comparison: { fg: "#B45309", bg: "#FFFBEB", accent: "#F59E0B", label: "对比 · 并列分析",   tag: "COMPARISON" },
+  annotation: { fg: "#6D28D9", bg: "#F5F3FF", accent: "#8B5CF6", label: "公式标注 · 拆解", tag: "ANNOTATION" },
+  concept:    { fg: "#0F766E", bg: "#F0FDFA", accent: "#14B8A6", label: "概念关系网络",     tag: "CONCEPT"    },
+};
+
+// Annotation tone palette
+const TONE_MAP = {
+  indigo:  { bg: "#EEF2FF", fg: "#4338CA", accent: "#6366F1" },
+  blue:    { bg: "#EFF6FF", fg: "#1D4ED8", accent: "#3B82F6" },
+  emerald: { bg: "#ECFDF5", fg: "#047857", accent: "#10B981" },
+  amber:   { bg: "#FFFBEB", fg: "#B45309", accent: "#F59E0B" },
+  rose:    { bg: "#FFF1F2", fg: "#BE123C", accent: "#F43F5E" },
+  violet:  { bg: "#F5F3FF", fg: "#6D28D9", accent: "#8B5CF6" },
+  slate:   { bg: "#F1F5F9", fg: "#334155", accent: "#64748B" },
 };
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -65,6 +79,12 @@ export default function InteractiveLab() {
     </AnimatePresence>,
     document.body
   );
+}
+
+// Safe KaTeX rendering helper
+function katexRender(tex, displayMode = false) {
+  try { return katex.renderToString(String(tex || ""), { throwOnError: false, displayMode }); }
+  catch { return `<code>${tex}</code>`; }
 }
 
 // Normalize any incoming config (may be null / legacy / full intent)
@@ -132,9 +152,11 @@ function InteractiveLabShell({ intent: raw, onClose }) {
       {/* Structure-aware body */}
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         {intent.structure === "parametric" && <ParametricStage intent={intent} accent={accent} />}
-        {intent.structure === "hierarchy" && <HierarchyStage intent={intent} accent={accent} />}
-        {intent.structure === "process" && <ProcessStage intent={intent} accent={accent} />}
+        {intent.structure === "hierarchy"  && <HierarchyStage  intent={intent} accent={accent} />}
+        {intent.structure === "process"    && <ProcessStage    intent={intent} accent={accent} />}
         {intent.structure === "comparison" && <ComparisonStage intent={intent} accent={accent} />}
+        {intent.structure === "annotation" && <AnnotationStage intent={intent} accent={accent} />}
+        {intent.structure === "concept"    && <ConceptStage    intent={intent} accent={accent} />}
       </div>
     </motion.div>
   );
@@ -465,6 +487,258 @@ function ComparisonStage({ intent, accent }) {
             </motion.div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//                            STAGE 5: ANNOTATION
+//   Formula decomposition — each part colored, clickable, with explanation
+// ───────────────────────────────────────────────────────────────────────────
+function AnnotationStage({ intent, accent }) {
+  const data = intent?.data || {};
+  const formula = data.formula || "y";
+  const parts = Array.isArray(data.parts) && data.parts.length > 0
+    ? data.parts
+    : [{ tex: formula, label: "表达式", desc: "（AI 未提供拆解）", tone: "indigo" }];
+  const [selected, setSelected] = useState(0);
+
+  const fullHTML = useMemo(() => katexRender(formula, true), [formula]);
+
+  const columns = Math.min(parts.length, 3);
+  const selectedPalette = TONE_MAP[parts[selected]?.tone] || TONE_MAP.indigo;
+
+  return (
+    <div style={{ flex: 1, padding: 32, overflowY: "auto" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", flexDirection: "column", gap: 28 }}>
+        {/* Hero: full formula */}
+        <div style={{ background: "#FFFFFF", borderRadius: 28, padding: "56px 48px", border: "1px solid #F3F4F6", boxShadow: "0 15px 50px rgba(0,0,0,0.04)", display: "flex", flexDirection: "column", alignItems: "center", gap: 14, position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${accent.accent} 0%, ${selectedPalette.accent} 100%)` }} />
+          <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.14em", color: "#9CA3AF", textTransform: "uppercase" }}>公式结构拆解</span>
+          <div style={{ fontSize: "1.3em", textAlign: "center" }} dangerouslySetInnerHTML={{ __html: fullHTML }} />
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", marginTop: 8 }}>
+            {parts.map((p, i) => {
+              const pal = TONE_MAP[p.tone] || TONE_MAP.indigo;
+              const isSel = i === selected;
+              return (
+                <motion.button
+                  type="button" key={i}
+                  onClick={() => setSelected(i)}
+                  whileHover={{ y: -1 }}
+                  whileTap={{ scale: 0.97 }}
+                  style={{
+                    padding: "5px 12px", borderRadius: 999,
+                    background: isSel ? pal.accent : pal.bg,
+                    color: isSel ? "#FFFFFF" : pal.fg,
+                    border: `1.5px solid ${isSel ? pal.accent : "transparent"}`,
+                    fontSize: 11.5, fontWeight: 800, letterSpacing: "0.04em",
+                    cursor: "pointer", fontFamily: "inherit",
+                    boxShadow: isSel ? `0 4px 14px ${pal.accent}55` : "none",
+                  }}
+                >
+                  {p.label || `部分 ${i + 1}`}
+                </motion.button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Part legend grid */}
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: 20 }}>
+          {parts.map((part, i) => {
+            const pal = TONE_MAP[part.tone] || TONE_MAP.indigo;
+            const isSel = i === selected;
+            const partHTML = katexRender(part.tex, false);
+            return (
+              <motion.div
+                key={i}
+                onClick={() => setSelected(i)}
+                whileHover={{ y: -2 }}
+                transition={{ type: "spring", stiffness: 260, damping: 24 }}
+                style={{
+                  background: "#FFFFFF",
+                  border: `2px solid ${isSel ? pal.accent : "#F3F4F6"}`,
+                  borderRadius: 20, padding: "22px 24px", cursor: "pointer",
+                  boxShadow: isSel ? `0 12px 40px ${pal.accent}22` : "0 4px 14px rgba(0,0,0,0.03)",
+                  display: "flex", flexDirection: "column", gap: 14,
+                  transition: "box-shadow 0.2s, border-color 0.2s",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ width: 26, height: 26, borderRadius: 8, background: pal.bg, color: pal.fg, fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", letterSpacing: "0.04em" }}>{i + 1}</span>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "#111827", letterSpacing: "-0.01em" }}>{part.label || `部分 ${i + 1}`}</span>
+                </div>
+                <div style={{ padding: "14px 16px", background: pal.bg, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 56 }}>
+                  <span style={{ color: pal.fg, fontSize: "1.15em" }} dangerouslySetInnerHTML={{ __html: partHTML }} />
+                </div>
+                {part.desc && (
+                  <p style={{ margin: 0, fontSize: 13, color: "#374151", lineHeight: 1.65 }}>{part.desc}</p>
+                )}
+              </motion.div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//                            STAGE 6: CONCEPT
+//   Radial node-link diagram — 1 primary center + satellite concepts
+// ───────────────────────────────────────────────────────────────────────────
+function ConceptStage({ intent, accent }) {
+  const data = intent?.data || {};
+  const rawNodes = Array.isArray(data.nodes) && data.nodes.length > 0
+    ? data.nodes
+    : [{ id: "root", name: intent.title || "核心", primary: true }];
+  const edges = Array.isArray(data.edges) ? data.edges : [];
+
+  // Ensure exactly one primary — default to first node
+  let primaryIdx = rawNodes.findIndex((n) => n && n.primary);
+  if (primaryIdx < 0) primaryIdx = 0;
+  const nodes = rawNodes.map((n, i) => ({ ...n, primary: i === primaryIdx }));
+  const primary = nodes[primaryIdx];
+  const satellites = nodes.filter((_, i) => i !== primaryIdx);
+
+  const W = 920, H = 560;
+  const CX = W / 2, CY = H / 2;
+  const R = Math.min(240, 120 + satellites.length * 10);
+
+  const positions = useMemo(() => {
+    const p = {};
+    p[primary.id] = { x: CX, y: CY };
+    satellites.forEach((n, i) => {
+      const angle = (i / Math.max(satellites.length, 1)) * 2 * Math.PI - Math.PI / 2;
+      p[n.id] = { x: CX + R * Math.cos(angle), y: CY + R * Math.sin(angle) };
+    });
+    return p;
+  }, [primary.id, satellites, R]);
+
+  const [hovered, setHovered] = useState(null);
+
+  const nodeSelectedDesc = hovered
+    ? nodes.find((n) => n.id === hovered)
+    : primary;
+
+  return (
+    <div style={{ flex: 1, padding: 32, display: "flex", gap: 24, minHeight: 0 }}>
+      <div style={{ flex: 1, background: "#FFFFFF", borderRadius: 28, padding: 24, border: "1px solid #F3F4F6", boxShadow: "0 15px 50px rgba(0,0,0,0.04)", overflow: "hidden", position: "relative", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ position: "absolute", inset: 0, opacity: 0.04, backgroundImage: "radial-gradient(#111827 1.4px, transparent 1.4px)", backgroundSize: "30px 30px", pointerEvents: "none" }} />
+        <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" style={{ overflow: "visible", maxHeight: 620, position: "relative", zIndex: 1 }}>
+          {/* Edges */}
+          {edges.map((e, i) => {
+            const from = positions[e.from];
+            const to = positions[e.to];
+            if (!from || !to) return null;
+            const mx = (from.x + to.x) / 2, my = (from.y + to.y) / 2;
+            const isActive = hovered && (hovered === e.from || hovered === e.to);
+            return (
+              <g key={i}>
+                <motion.line
+                  x1={from.x} y1={from.y} x2={to.x} y2={to.y}
+                  stroke={isActive ? accent.accent : "#CBD5E1"}
+                  strokeWidth={isActive ? 2.4 : 1.4}
+                  initial={{ pathLength: 0, opacity: 0 }}
+                  animate={{ pathLength: 1, opacity: 1 }}
+                  transition={{ duration: 0.8, delay: 0.1 + i * 0.06, ease: "easeOut" }}
+                  style={{ transition: "stroke 0.18s, stroke-width 0.18s" }}
+                />
+                {e.label && (
+                  <g>
+                    <rect
+                      x={mx - String(e.label).length * 4.5}
+                      y={my - 16}
+                      width={String(e.label).length * 9}
+                      height="16"
+                      rx="4"
+                      fill="#FFFFFF"
+                      stroke={isActive ? accent.accent : "#E5E7EB"}
+                      strokeWidth={isActive ? 1.2 : 0.8}
+                      opacity={isActive ? 1 : 0.85}
+                      style={{ transition: "stroke 0.18s, opacity 0.18s" }}
+                    />
+                    <text
+                      x={mx} y={my - 4}
+                      fill={isActive ? accent.fg : "#6B7280"}
+                      fontSize="10.5" fontWeight="700" textAnchor="middle"
+                      style={{ transition: "fill 0.18s", userSelect: "none" }}
+                    >{e.label}</text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
+
+          {/* Nodes */}
+          {nodes.map((n, i) => {
+            const pos = positions[n.id];
+            if (!pos) return null;
+            const isPrimary = n.primary;
+            const isHovered = hovered === n.id;
+            const baseR = isPrimary ? 46 : 34;
+            const pulseR = baseR + 8;
+            const label = String(n.name || n.id);
+            const maxCharWidth = isPrimary ? 8 : 7;
+            const displayLabel = label.length > maxCharWidth ? label.slice(0, maxCharWidth) + "…" : label;
+            return (
+              <motion.g
+                key={n.id}
+                initial={{ scale: 0, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring", stiffness: 240, damping: 22, delay: 0.05 + i * 0.06 }}
+                onMouseEnter={() => setHovered(n.id)}
+                onMouseLeave={() => setHovered(null)}
+                style={{ cursor: "pointer" }}
+              >
+                <circle cx={pos.x} cy={pos.y} r={pulseR} fill={isPrimary ? accent.bg : "#FAFAFC"} opacity={isHovered ? 1 : 0.55} style={{ transition: "opacity 0.18s" }} />
+                <circle
+                  cx={pos.x} cy={pos.y} r={baseR}
+                  fill={isPrimary ? accent.accent : "#FFFFFF"}
+                  stroke={isPrimary ? accent.fg : (isHovered ? accent.accent : "#E5E7EB")}
+                  strokeWidth={isPrimary ? 2.5 : (isHovered ? 2 : 1.6)}
+                  style={{ transition: "stroke 0.18s, stroke-width 0.18s" }}
+                />
+                <text
+                  x={pos.x} y={pos.y + 4}
+                  fill={isPrimary ? "#FFFFFF" : "#111827"}
+                  fontSize={isPrimary ? 13 : 12}
+                  fontWeight="800" textAnchor="middle"
+                  style={{ userSelect: "none", letterSpacing: "-0.01em", pointerEvents: "none" }}
+                >{displayLabel}</text>
+              </motion.g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Side info panel */}
+      <div style={{ width: 300, flexShrink: 0, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ background: "#FFFFFF", borderRadius: 20, padding: 22, border: "1px solid #F3F4F6", boxShadow: "0 8px 24px rgba(0,0,0,0.03)" }}>
+          <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.12em", color: "#9CA3AF", textTransform: "uppercase" }}>{hovered ? "聚焦节点" : "中心概念"}</span>
+          <h3 style={{ margin: "8px 0 10px", fontSize: 18, fontWeight: 800, color: nodeSelectedDesc?.primary ? accent.fg : "#111827", letterSpacing: "-0.015em" }}>
+            {nodeSelectedDesc?.name || "—"}
+          </h3>
+          {nodeSelectedDesc?.desc && (
+            <p style={{ margin: 0, fontSize: 13, color: "#374151", lineHeight: 1.65 }}>{nodeSelectedDesc.desc}</p>
+          )}
+        </div>
+        <div style={{ background: "#FAFAFC", borderRadius: 20, padding: 20, border: "1px solid #F3F4F6" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+            <span style={{ width: 6, height: 6, borderRadius: 999, background: accent.accent }} />
+            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", color: "#6B7280", textTransform: "uppercase" }}>节点数</span>
+            <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#111827" }}>{nodes.length}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 6, height: 6, borderRadius: 999, background: "#94A3B8" }} />
+            <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", color: "#6B7280", textTransform: "uppercase" }}>连接数</span>
+            <span style={{ marginLeft: "auto", fontSize: 13, fontWeight: 800, color: "#111827" }}>{edges.length}</span>
+          </div>
+        </div>
+        <p style={{ margin: 0, fontSize: 11.5, color: "#9CA3AF", lineHeight: 1.55 }}>
+          悬停任一节点可高亮其关联路径。
+        </p>
       </div>
     </div>
   );
