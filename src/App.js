@@ -8005,6 +8005,94 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const NODE_W = 136;
   const NODE_H = 68;
 
+  // ══ 画布缩放 / 平移 ══
+  // 默认 0.7x —— 让整棵树在一屏内概览可见，细看时再用滚轮放大
+  const MIN_ZOOM = 0.35;
+  const MAX_ZOOM = 2.0;
+  const DEFAULT_ZOOM = 0.7;
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const canvasRef = useRef(null);
+  const dragState = useRef({ dragging: false, startX: 0, startY: 0, originX: 0, originY: 0, moved: false });
+
+  // 滚轮缩放：以鼠标位置为不动点（"缩放到我指的地方"）
+  const handleWheel = useCallback((e) => {
+    e.preventDefault();
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const delta = e.deltaY > 0 ? -0.08 : 0.08;
+    setZoom(prevZoom => {
+      const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prevZoom + delta * (prevZoom < 0.6 ? 0.6 : 1)));
+      if (next === prevZoom) return prevZoom;
+      // 保证 (mx, my) 处画面内容不动：mx = (mx - pan.x) * (next/prev) + pan.x'
+      setPan(prevPan => ({
+        x: mx - (mx - prevPan.x) * (next / prevZoom),
+        y: my - (my - prevPan.y) * (next / prevZoom),
+      }));
+      return next;
+    });
+  }, []);
+
+  // 非 passive 绑定 wheel（React onWheel 默认 passive，preventDefault 无效 → 页面会跟着滚）
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const wheelHandler = (e) => handleWheel(e);
+    el.addEventListener("wheel", wheelHandler, { passive: false });
+    return () => el.removeEventListener("wheel", wheelHandler);
+  }, [handleWheel]);
+
+  const handleMouseDown = (e) => {
+    if (e.button !== 0) return;
+    // 在节点上按下 → 不启动拖拽（让节点的 click / dblclick 正常工作）
+    if (e.target.closest && e.target.closest("g[data-node='1']")) return;
+    dragState.current = {
+      dragging: true, moved: false,
+      startX: e.clientX, startY: e.clientY,
+      originX: pan.x, originY: pan.y,
+    };
+  };
+  const handleMouseMove = (e) => {
+    const s = dragState.current;
+    if (!s.dragging) return;
+    const dx = e.clientX - s.startX;
+    const dy = e.clientY - s.startY;
+    if (!s.moved && Math.hypot(dx, dy) > 3) s.moved = true;
+    if (s.moved) setPan({ x: s.originX + dx, y: s.originY + dy });
+  };
+  const handleMouseUpOrLeave = () => {
+    dragState.current.dragging = false;
+    // moved 标志保留到下一次 onClick 之后再由 onClick 清理
+  };
+
+  const handleCanvasClick = () => {
+    // 如果刚才是拖拽（而不是纯点击），忽略这个 click，避免误关浮层
+    if (dragState.current.moved) {
+      dragState.current.moved = false;
+      return;
+    }
+    setPopoverOpen(false);
+    setSelectedId(null);
+  };
+
+  const resetView = () => { setZoom(DEFAULT_ZOOM); setPan({ x: 0, y: 0 }); };
+  const zoomBy = (factor) => {
+    setZoom(prevZoom => {
+      const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prevZoom * factor));
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (rect) {
+        const cx = rect.width / 2, cy = rect.height / 2;
+        setPan(prevPan => ({
+          x: cx - (cx - prevPan.x) * (next / prevZoom),
+          y: cy - (cy - prevPan.y) * (next / prevZoom),
+        }));
+      }
+      return next;
+    });
+  };
+
   // 边渲染：只保留双端都在当前视图内的边；cross-module 边用浅指示灰
   const edges = useMemo(() => {
     const list = [];
@@ -8115,10 +8203,23 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         </div>
       </div>
 
-      {/* ══ Canvas —— 主角优先：知识树占据最大空间；节点详情以浮层形式收纳到节点交互内 ══ */}
-      <div style={{ background: "#FFFFFF", borderRadius: 18, border: "1px solid #EEF2F7", padding: 0, overflow: "auto", maxHeight: 720, position: "relative" }}
-           onClick={() => { /* 点击空白处（未被节点 stopPropagation 拦下的事件）关闭浮层 */ setPopoverOpen(false); setSelectedId(null); }}>
-        <svg width={Math.max(maxX, 1200)} height={Math.max(maxY, 340)} style={{ minWidth: "100%", display: "block", background: "linear-gradient(180deg,#FAFBFD 0%,#FFFFFF 140px)" }}>
+      {/* ══ Canvas —— 主角优先：知识树占据最大空间；节点详情以浮层形式收纳到节点交互内
+             支持滚轮缩放（以鼠标位置为不动点）+ 左键拖拽平移（空白处） ══ */}
+      <div ref={canvasRef}
+           style={{ background: "linear-gradient(180deg,#FAFBFD 0%,#FFFFFF 140px)", borderRadius: 18, border: "1px solid #EEF2F7", padding: 0, overflow: "hidden", height: 620, position: "relative", cursor: dragState.current.dragging ? "grabbing" : "grab", userSelect: "none" }}
+           onMouseDown={handleMouseDown}
+           onMouseMove={handleMouseMove}
+           onMouseUp={handleMouseUpOrLeave}
+           onMouseLeave={handleMouseUpOrLeave}
+           onClick={handleCanvasClick}>
+        <svg width={Math.max(maxX, 1200)} height={Math.max(maxY, 340)}
+             style={{
+               display: "block",
+               transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+               transformOrigin: "0 0",
+               transition: dragState.current.dragging ? "none" : "transform .12s ease-out",
+               pointerEvents: "auto",
+             }}>
           <defs>
             <marker id="mc-arrow-strong" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 Z" fill="#64748B" />
@@ -8191,7 +8292,9 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
 
             return (
               <g key={node.id}
+                 data-node="1"
                  transform={"translate(" + node.x + "," + node.y + ")"}
+                 onMouseDown={(e) => e.stopPropagation()}
                  onClick={(e) => { e.stopPropagation(); setSelectedId(node.id); }}
                  onDoubleClick={(e) => { e.stopPropagation(); setSelectedId(node.id); setPopoverOpen(true); }}
                  style={{ cursor: status === "locked" ? "help" : "pointer", opacity: effectiveOpacity, transition: "opacity .25s" }}>
@@ -8258,14 +8361,18 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           </g>
         </svg>
 
-        {/* ══ 节点详情浮层（L3 · 双击触发；锚定在节点右侧，超出右边界自动翻到左侧） ══ */}
+        {/* ══ 节点详情浮层（L3 · 双击触发；锚定在节点右侧，超出右边界自动翻到左侧）
+               位置按 zoom/pan 重算（浮层在 transform 之外，需要屏幕坐标） ══ */}
         {selected && popoverOpen && (() => {
           const POP_W = 340;
-          const canvasW = Math.max(maxX, 1200);
-          const nodeRightX = selected.x + NODE_W;
-          const fitsRight = nodeRightX + POP_W + 16 <= canvasW;
-          const popLeft = fitsRight ? nodeRightX + 12 : Math.max(8, selected.x - POP_W - 12);
-          const popTop = Math.max(8, selected.y + CANVAS_TOP_PAD - 4);
+          const canvasW = canvasRef.current?.clientWidth || 1200;
+          // 节点在画布坐标系里的屏幕位置
+          const nodeScreenRight = (selected.x + NODE_W) * zoom + pan.x;
+          const nodeScreenLeft  = selected.x * zoom + pan.x;
+          const nodeScreenTop   = (selected.y + CANVAS_TOP_PAD) * zoom + pan.y;
+          const fitsRight = nodeScreenRight + POP_W + 16 <= canvasW;
+          const popLeft = fitsRight ? nodeScreenRight + 12 : Math.max(8, nodeScreenLeft - POP_W - 12);
+          const popTop = Math.max(8, nodeScreenTop - 4);
           const c = COURSE_COLORS_TREE[selected.course];
           return (
             <div onClick={(e) => e.stopPropagation()}
@@ -8393,6 +8500,31 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
             </div>
           );
         })()}
+
+        {/* ══ 缩放控件（右下角悬浮） ══ */}
+        <div onClick={(e) => e.stopPropagation()}
+             onMouseDown={(e) => e.stopPropagation()}
+             style={{ position: "absolute", right: 12, bottom: 12, display: "flex", flexDirection: "column", gap: 4, background: "#fff", border: "1px solid #E2E8F0", borderRadius: 10, boxShadow: "0 4px 12px rgba(15,23,42,0.08)", padding: 4, zIndex: 10 }}>
+          <button onClick={() => zoomBy(1.2)} title="放大 (滚轮向上)"
+            style={{ width: 28, height: 28, border: "none", background: "transparent", color: "#475569", fontSize: 16, fontWeight: 700, cursor: "pointer", borderRadius: 6, fontFamily: "inherit" }}
+            onMouseEnter={e => (e.currentTarget.style.background = "#F1F5F9")}
+            onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>＋</button>
+          <div style={{ fontSize: 10, color: "#94A3B8", textAlign: "center", fontVariantNumeric: "tabular-nums", padding: "0 2px", fontWeight: 600 }}>{Math.round(zoom * 100)}%</div>
+          <button onClick={() => zoomBy(1 / 1.2)} title="缩小 (滚轮向下)"
+            style={{ width: 28, height: 28, border: "none", background: "transparent", color: "#475569", fontSize: 18, fontWeight: 700, cursor: "pointer", borderRadius: 6, fontFamily: "inherit", lineHeight: 1 }}
+            onMouseEnter={e => (e.currentTarget.style.background = "#F1F5F9")}
+            onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>−</button>
+          <div style={{ height: 1, background: "#EEF2F7", margin: "2px 4px" }} />
+          <button onClick={resetView} title="恢复默认视图"
+            style={{ width: 28, height: 28, border: "none", background: "transparent", color: "#475569", fontSize: 13, cursor: "pointer", borderRadius: 6, fontFamily: "inherit" }}
+            onMouseEnter={e => (e.currentTarget.style.background = "#F1F5F9")}
+            onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>⌖</button>
+        </div>
+
+        {/* ══ 操作提示（左下角，首次可见即退场） ══ */}
+        <div style={{ position: "absolute", left: 12, bottom: 12, fontSize: 11, color: "#94A3B8", background: "rgba(255,255,255,0.82)", padding: "4px 10px", borderRadius: 8, border: "1px solid #EEF2F7", backdropFilter: "blur(4px)", pointerEvents: "none" }}>
+          🖱 滚轮缩放 · 拖空白处平移 · 双击节点看详情
+        </div>
       </div>
       {/* 空态提示：单击只高亮，双击才看详情 */}
       {!popoverOpen && selected && (
