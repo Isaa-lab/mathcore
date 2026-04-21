@@ -4,7 +4,7 @@ import katex from "katex";
 import { AnimatePresence, motion } from "framer-motion";
 import { useMathStore } from "./store/useMathStore";
 import QuizPageView from "./pages/QuizPage";
-import MaterialChatPageView, { DynamicVizCard, normalizeVizIntent } from "./pages/MaterialChatPage";
+import MaterialChatPageView, { DynamicVizCard, normalizeVizIntent, repairVizJson } from "./pages/MaterialChatPage";
 import InteractiveMathChart from "./components/InteractiveMathChart";
 import StudyWorkspace from "./layouts/StudyWorkspace";
 import SprintWorkspace from "./layouts/SprintWorkspace";
@@ -5381,23 +5381,63 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                         {blocks && blocks.map((b, bi) => (
                           b.type === "text" ? (
                             b.content.trim() ? <MathText key={bi} text={b.content} /> : null
+                          ) : b.intent ? (
+                            // [VIZ:...] 解析成功 → 渲染预览卡（点击进入 InteractiveLab 全屏）
+                            <div key={bi} style={{ margin: "10px 0 6px", display: "flex" }}>
+                              <DynamicVizCard intent={b.intent} onOpen={() => openLab(b.intent)} />
+                            </div>
                           ) : (
-                            // [VIZ:...] → 渲染预览卡（点击进入 InteractiveLab 全屏）
-                            (() => {
-                              const intent = normalizeVizIntent(b.content);
-                              if (!intent) {
-                                return (
-                                  <div key={bi} style={{ margin: "8px 0", padding: 10, background: "#FEF3C7", border: "1px solid #FDE68A", borderRadius: 10, fontSize: 12, color: "#92400E" }}>
-                                    AI 给出的可视化指令解析失败 —— 已折叠。
+                            // [VIZ:...] 解析失败 —— 不再是死胡同，给用户两条出路
+                            <div key={bi} style={{
+                              margin: "10px 0",
+                              padding: "12px 14px",
+                              background: "#FFFBEB",
+                              border: "1px solid #FDE68A",
+                              borderRadius: 12,
+                              color: "#92400E",
+                            }}>
+                              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                <span style={{ fontSize: 18, lineHeight: 1, marginTop: 1 }}>⚠️</span>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>这张图没画成功 🤔</div>
+                                  <div style={{ fontSize: 12.5, lineHeight: 1.6, color: "#78350F" }}>
+                                    {userFriendlyVizError(b.parseError)}
                                   </div>
-                                );
-                              }
-                              return (
-                                <div key={bi} style={{ margin: "10px 0 6px", display: "flex" }}>
-                                  <DynamicVizCard intent={intent} onOpen={() => openLab(intent)} />
                                 </div>
-                              );
-                            })()
+                              </div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                                <Btn
+                                  size="sm"
+                                  variant="primary"
+                                  disabled={aiIsBusy}
+                                  onClick={() => {
+                                    if (aiIsBusy) return;
+                                    sendChatMessage(
+                                      "刚才那张可视化图的指令我这边没解析出来，请重新生成一次 [VIZ:{...}]，务必注意：\n" +
+                                      "1) JSON 字符串里的反斜杠必须双写（LaTeX 里写 \\\\frac 而不是 \\frac，\\\\int 而不是 \\int）\n" +
+                                      "2) 所有括号必须完整闭合，不要截断\n" +
+                                      "3) 不要把 [VIZ:...] 放进 markdown 代码块里\n" +
+                                      "4) 字段名严格按 structure/interactionLevel/title/description/data"
+                                    );
+                                  }}
+                                >🔄 让 AI 重新画一次</Btn>
+                                <Btn
+                                  size="sm"
+                                  disabled={aiIsBusy}
+                                  onClick={() => {
+                                    if (aiIsBusy) return;
+                                    sendChatMessage("那这张图先不画了，请你只用文字和 LaTeX 把这个知识点讲清楚。");
+                                  }}
+                                >📝 改用文字讲解</Btn>
+                              </div>
+                              {process.env.NODE_ENV === "development" && (
+                                <details style={{ marginTop: 10, fontSize: 11, color: "#A16207" }}>
+                                  <summary style={{ cursor: "pointer", userSelect: "none" }}>🔧 dev: 查看原始指令与错误</summary>
+                                  <div style={{ marginTop: 6, fontSize: 10.5, color: "#B45309" }}>错误: {String(b.parseError || "unknown")}</div>
+                                  <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", marginTop: 4, padding: 8, background: "#FEF3C7", borderRadius: 6, maxHeight: 180, overflow: "auto" }}>{b.content}</pre>
+                                </details>
+                              )}
+                            </div>
                           )
                         ))}
                         {/* 快捷追问 —— 只对最后一条完成态的 AI 消息显示，把能力暴露给用户 */}
@@ -6755,7 +6795,8 @@ function SimpleChart({ config }) {
 // AI 偶尔会把数学内容吐成纯文本（如 "d²θ/dt² + sinθ = 0"、"u(x) = e^∫p(x)dx"）。
 // 这里用保守的模式匹配补上 $...$ 包裹，避免前端展平成 "d t 2"。
 // ── 从 AI 回复里切出 [VIZ:{...}] 工具调用 —— 用于 QuizPage 的内联对话流 ──
-// 返回 [{type:"text", content}, {type:"viz", content (raw JSON string)}, ...]
+// 返回 [{type:"text", content}, {type:"viz", content (raw JSON string), intent? , parseError?}, ...]
+// 解析即时发生：命中就把 intent 和可能的错误带出来，避免下游重复解析。
 function splitQuizChatBlocks(text) {
   if (!text) return [];
   const src = String(text);
@@ -6775,8 +6816,20 @@ function splitQuizChatBlocks(text) {
         else if (src[j] === "]") depth--;
         j++;
       }
+      const raw = src.slice(i + prefix.length, j - 1).trim();
       flushText();
-      out.push({ type: "viz", content: src.slice(i + prefix.length, j - 1).trim() });
+      // 尝试解析（normalizeVizIntent 内含 repair 级联）
+      let intent = null;
+      let parseError = null;
+      try { intent = normalizeVizIntent(raw); }
+      catch (e) { parseError = e?.message || "unknown"; }
+      if (!intent && !parseError) {
+        // 走完 repair 级联还是 null —— 再抓一次底层错误供 dev 面板显示
+        try { JSON.parse(repairVizJson(raw)); }
+        catch (e2) { parseError = e2?.message || "schema_mismatch"; }
+        if (!parseError) parseError = "schema_mismatch";
+      }
+      out.push({ type: "viz", content: raw, intent, parseError });
       i = j;
       continue;
     }
@@ -6785,6 +6838,21 @@ function splitQuizChatBlocks(text) {
   }
   flushText();
   return out;
+}
+
+// 用户可读的失败原因（不暴露 stack trace）
+function userFriendlyVizError(reason) {
+  const r = String(reason || "");
+  if (/Unexpected end|Unterminated|Unexpected token.*in JSON.*position \d+$/.test(r)) {
+    return "这次生成被截断了，让 AI 重新画一张完整的。";
+  }
+  if (/Unexpected token \\|backslash|escape/i.test(r)) {
+    return "公式里的反斜杠转义没写对，让 AI 重新来一次。";
+  }
+  if (/schema_mismatch/.test(r)) {
+    return "AI 给的字段结构不太对，我们让 TA 换个方式再试一次。";
+  }
+  return "这张图没画成功，要不让 AI 换个方式再试试？";
 }
 
 function rescueQuizMath(input) {
