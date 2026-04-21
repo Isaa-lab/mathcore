@@ -4420,8 +4420,17 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) {
-        // 技术错误统一翻译成人话，并标记为可重试
-        updateMsg({ content: "抱歉，我这会儿有点卡住了。要不再问一次？", isError: true, isStreaming: false });
+        // 后端给的 error 文本本身就是用户可读的（"暂无可用 AI 服务..." 这类），
+        // 直接透出来，别再被"抱歉卡住了"一层吞掉。根据关键词推断具体错因 + 给出口。
+        const rawErr = String(data.error || data.message || `HTTP ${res.status}`).trim();
+        const hint = classifyChatError(rawErr, res.status);
+        updateMsg({
+          content: hint.message,
+          isError: true,
+          isStreaming: false,
+          errorCategory: hint.category,
+          errorDetail: process.env.NODE_ENV === "development" ? rawErr : null,
+        });
       } else {
         const answer = String(data.answer || data.text || data.result || "").trim();
         // 防御 AI 把 JSON 数组当成答案返回（fallback 失效时）
@@ -4434,7 +4443,13 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         }
       }
     } catch (e) {
-      updateMsg({ content: "网络有点慢，要不再试一次？", isError: true, isStreaming: false });
+      updateMsg({
+        content: "网络没连上 —— 请检查一下网络，或稍后再试。",
+        isError: true,
+        isStreaming: false,
+        errorCategory: "network",
+        errorDetail: process.env.NODE_ENV === "development" ? String(e?.message || e) : null,
+      });
     } finally {
       setAIIsBusy(false);
     }
@@ -5372,9 +5387,22 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                     ) : m.isError ? (
                       <>
                         <MathText text={m.content} />
-                        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                          <Btn size="sm" variant="primary" onClick={() => { if (lastAskInput) sendChatMessage(lastAskInput); }}>重试</Btn>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                          {m.errorCategory === "no_key" ? (
+                            <Btn size="sm" variant="primary" onClick={() => useMathStore.getState().openAISettings()}>⚙️ 去 AI 设置</Btn>
+                          ) : (
+                            <Btn size="sm" variant="primary" disabled={aiIsBusy} onClick={() => { if (lastAskInput && !aiIsBusy) sendChatMessage(lastAskInput); }}>🔄 重试</Btn>
+                          )}
+                          {m.errorCategory === "no_key" && (
+                            <Btn size="sm" disabled={aiIsBusy} onClick={() => { if (lastAskInput && !aiIsBusy) sendChatMessage(lastAskInput); }}>先试一下</Btn>
+                          )}
                         </div>
+                        {m.errorDetail && (
+                          <details style={{ marginTop: 8, fontSize: 10.5, color: "#92400E", opacity: 0.8 }}>
+                            <summary style={{ cursor: "pointer" }}>🔧 dev: 原始错误</summary>
+                            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", marginTop: 4, padding: 6, background: "#FEF3C7", borderRadius: 4, maxHeight: 140, overflow: "auto" }}>{m.errorDetail}</pre>
+                          </details>
+                        )}
                       </>
                     ) : (
                       <>
@@ -6838,6 +6866,55 @@ function splitQuizChatBlocks(text) {
   }
   flushText();
   return out;
+}
+
+// 把后端/网络错误归类，决定消息文案和后续出路
+// category: "no_key" | "rate_limit" | "timeout" | "provider_down" | "bad_request" | "network" | "unknown"
+function classifyChatError(rawErr, httpStatus) {
+  const err = String(rawErr || "").toLowerCase();
+  const status = Number(httpStatus) || 0;
+  // 1) 无 Key / Key 失效
+  if (/暂无可用|no.*(api.*key|ai.*service)|api.*key.*required|unauthorized|invalid.*key|incorrect.*api/i.test(rawErr) || status === 401) {
+    return {
+      category: "no_key",
+      message: "AI 服务还没配置好 —— 去「AI 设置」加一个 API Key 就能开聊（推荐 Groq，免费）。",
+    };
+  }
+  // 2) 配额 / 限流
+  if (/quota|配额|rate.?limit|限流|too many|429/i.test(err) || status === 429) {
+    return {
+      category: "rate_limit",
+      message: "AI 服务太忙了（超出频率限制），等一分钟再试一次？",
+    };
+  }
+  // 3) 请求超时 / 网关
+  if (status === 504 || /timeout|timed out|超时/i.test(err)) {
+    return {
+      category: "timeout",
+      message: "这次等太久了 —— 先别急，再问一次通常就好。",
+    };
+  }
+  // 4) Provider 挂了 / 5xx
+  if (status >= 500 && status < 600) {
+    return {
+      category: "provider_down",
+      message: "AI 服务暂时不稳定，稍后重试；如果一直不行可以在「AI 设置」换一个 Provider。",
+    };
+  }
+  // 5) 请求参数问题
+  if (status === 400 || status === 413 || /json解析|格式错误|bad request|invalid/i.test(err)) {
+    return {
+      category: "bad_request",
+      message: "这次请求被服务端拒了 —— 换个问法再来一次？",
+    };
+  }
+  // 6) 兜底
+  return {
+    category: "unknown",
+    message: rawErr && rawErr.length < 200 && /[\u4e00-\u9fa5]/.test(rawErr)
+      ? rawErr  // 后端已经给了中文人话错误，直接透出
+      : "抱歉，我这会儿有点卡住了。要不再问一次？",
+  };
 }
 
 // 用户可读的失败原因（不暴露 stack trace）
@@ -9391,6 +9468,15 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+      {/* 全局 AI 设置弹窗 —— 由 zustand store 控制，任意子组件都可唤出 */}
+      <GlobalAISettingsPortal />
     </div>
   );
+}
+
+function GlobalAISettingsPortal() {
+  const open = useMathStore((s) => s.aiSettingsOpen);
+  const close = useMathStore((s) => s.closeAISettings);
+  if (!open) return null;
+  return <AISettingsModal onClose={close} />;
 }
