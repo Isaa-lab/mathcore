@@ -5953,10 +5953,10 @@ function MaterialChatPage({ setPage, profile }) {
         </div>
       </header>
 
-      {/* Scrollable chat canvas */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "28px 24px 12px" }}>
+      {/* Scrollable chat canvas — full-bleed, generous horizontal padding */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "32px 48px 12px" }}>
         {history.length === 0 && (
-          <div style={{ maxWidth: 820, margin: "0 auto", padding: "24px 8px", color: "#9CA3AF", fontSize: 14, lineHeight: 1.85 }}>
+          <div style={{ padding: "24px 0", color: "#9CA3AF", fontSize: 14, lineHeight: 1.85 }}>
             {chatMode === "tutor"
               ? "试着输入：帮我制定 3 天复习计划；先从第一章讲起；输出 [VAR:a,1,10] 与 [CHART] 进行可视化。"
               : "试着输入：这份资料的核心知识点是什么？并输出 [VAR:a,1,10] 与 [CHART]。"}
@@ -5972,33 +5972,33 @@ function MaterialChatPage({ setPage, profile }) {
           />
         </motion.div>
         {chatting && (
-          <div style={{ maxWidth: 820, margin: "0 auto 16px", display: "flex", gap: 14, paddingLeft: 4 }}>
-            <div style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 14, background: "linear-gradient(135deg, #6366F1 0%, #A855F7 100%)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 14px rgba(99,102,241,0.25)" }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>
+          <div style={{ display: "flex", gap: 14, marginBottom: 28, paddingLeft: 0 }}>
+            <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 10, background: "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(99,102,241,0.18)", marginTop: 2 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>
             </div>
-            <div style={{ flex: 1, background: "#fff", border: "1px solid #F3F4F6", borderRadius: 24, borderTopLeftRadius: 6, padding: "16px 22px", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 20px rgba(0,0,0,0.03)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 8 }}>
               {[0, 1, 2].map(i => (
-                <motion.span key={i} style={{ width: 8, height: 8, borderRadius: 999, background: "#A5B4FC" }} animate={{ y: [0, -4, 0], opacity: [0.4, 1, 0.4] }} transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }} />
+                <motion.span key={i} style={{ width: 7, height: 7, borderRadius: 999, background: "#A5B4FC" }} animate={{ y: [0, -3, 0], opacity: [0.4, 1, 0.4] }} transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }} />
               ))}
-              <span style={{ marginLeft: 6, color: "#6B7280", fontSize: 13 }}>正在思考…</span>
+              <span style={{ marginLeft: 4, color: "#6B7280", fontSize: 13 }}>正在思考…</span>
             </div>
           </div>
         )}
         <div ref={chatEndRef} />
       </div>
 
-      {/* Floating input pod */}
-      <div style={{ flexShrink: 0, padding: "16px 24px 20px", background: "linear-gradient(to top, #FFFFFF 60%, rgba(255,255,255,0) 100%)" }}>
-        <div style={{ maxWidth: 820, margin: "0 auto", position: "relative" }}>
+      {/* Floating input pod — full width */}
+      <div style={{ flexShrink: 0, padding: "12px 48px 24px", background: "linear-gradient(to top, #FFFFFF 60%, rgba(255,255,255,0) 100%)" }}>
+        <div style={{ position: "relative" }}>
           <textarea
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !chatting) { e.preventDefault(); ask(); } }}
-            onFocus={(e) => { e.target.style.borderColor = "#818CF8"; e.target.style.boxShadow = "0 0 0 4px rgba(99,102,241,0.1), 0 10px 30px rgba(0,0,0,0.04)"; }}
+            onFocus={(e) => { e.target.style.borderColor = "#6366F1"; e.target.style.boxShadow = "0 0 0 4px #EEF2FF, 0 10px 30px rgba(0,0,0,0.04)"; }}
             onBlur={(e) => { e.target.style.borderColor = "#E5E7EB"; e.target.style.boxShadow = "0 4px 20px rgba(0,0,0,0.04)"; }}
             placeholder="输入数学问题，或让 AI 生成复习提纲…"
             rows={1}
-            style={{ width: "100%", background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 24, padding: "18px 64px 18px 22px", fontFamily: "inherit", fontSize: 14, lineHeight: 1.6, color: "#111827", outline: "none", resize: "none", minHeight: 60, maxHeight: 160, boxSizing: "border-box", boxShadow: "0 4px 20px rgba(0,0,0,0.04)", transition: "border-color 0.2s, box-shadow 0.2s" }}
+            style={{ width: "100%", background: "#FAFAFC", border: "1px solid #E5E7EB", borderRadius: 20, padding: "16px 60px 16px 22px", fontFamily: "inherit", fontSize: 14.5, lineHeight: 1.6, color: "#111827", outline: "none", resize: "none", minHeight: 56, maxHeight: 140, boxSizing: "border-box", boxShadow: "0 4px 20px rgba(0,0,0,0.04)", transition: "border-color 0.2s, box-shadow 0.2s" }}
           />
           <motion.button
             type="button"
@@ -6007,10 +6007,10 @@ function MaterialChatPage({ setPage, profile }) {
             whileHover={canSend ? { scale: 1.06 } : undefined}
             whileTap={canSend ? { scale: 0.94 } : undefined}
             transition={{ type: "spring", stiffness: 400, damping: 18 }}
-            style={{ position: "absolute", right: 10, top: 10, width: 40, height: 40, borderRadius: 14, background: canSend ? "#111827" : "#D1D5DB", color: "#fff", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: canSend ? "pointer" : "not-allowed", boxShadow: canSend ? "0 4px 14px rgba(17,24,39,0.2)" : "none", fontFamily: "inherit" }}
+            style={{ position: "absolute", right: 10, top: 10, width: 36, height: 36, borderRadius: 14, background: canSend ? "#111827" : "#D1D5DB", color: "#fff", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: canSend ? "pointer" : "not-allowed", boxShadow: canSend ? "0 4px 14px rgba(17,24,39,0.2)" : "none", fontFamily: "inherit" }}
             aria-label="发送"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 2 }}><path d="m3 3 3 9-3 9 19-9Z"/><path d="M6 12h16"/></svg>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 2 }}><path d="m3 3 3 9-3 9 19-9Z"/><path d="M6 12h16"/></svg>
           </motion.button>
         </div>
       </div>

@@ -4,8 +4,8 @@ import { useMathStore } from "../store/useMathStore";
 
 const springTransition = { type: "spring", stiffness: 300, damping: 25 };
 const bubbleVariants = {
-  hidden: { opacity: 0, y: 16, scale: 0.98 },
-  visible: { opacity: 1, y: 0, scale: 1, transition: springTransition },
+  hidden: { opacity: 0, y: 10 },
+  visible: { opacity: 1, y: 0, transition: springTransition },
 };
 
 // ── Inline SVG icons (Lucide-style) ────────────────────────────────────────
@@ -26,7 +26,22 @@ const IconChevron = ({ size = 16, color }) => (
   </svg>
 );
 
-// ── Inline variable slider (preserved from legacy spec) ────────────────────
+// ── LaTeX Pre-processor ────────────────────────────────────────────────────
+// Fixes invalid spacing around block math ($$ ... $$) returned by LLMs
+function preprocessLaTeX(content) {
+  if (!content) return "";
+  let processed = String(content);
+  // Collapse redundant blank lines right after an opening $$
+  processed = processed.replace(/\$\$\s*\n\s*\n+/g, "$$\n");
+  // Collapse redundant blank lines right before a closing $$
+  processed = processed.replace(/\n\s*\n+\s*\$\$/g, "\n$$");
+  // Normalize inline "$$ expr $$" on a single line where LLM left extra spaces
+  processed = processed.replace(/\$\$[ \t]+/g, "$$");
+  processed = processed.replace(/[ \t]+\$\$/g, "$$");
+  return processed;
+}
+
+// ── Inline variable slider (preserved) ─────────────────────────────────────
 function InlineVarSlider({ name, min, max }) {
   const value = useMathStore((s) => s.interactiveParams[name] ?? Number(min));
   const setInteractiveParam = useMathStore((s) => s.setInteractiveParam);
@@ -48,46 +63,52 @@ function InlineVarSlider({ name, min, max }) {
   );
 }
 
-// ── Trigger Card (architectural compromise: no heavy charts inside bubbles) ─
+// ── Trigger Card ───────────────────────────────────────────────────────────
 function InteractiveTriggerCard({ title, onOpen }) {
   return (
     <motion.button
       type="button"
       onClick={onOpen}
-      whileHover={{ scale: 1.015, y: -2 }}
+      whileHover={{ scale: 1.01, y: -2 }}
       whileTap={{ scale: 0.99 }}
       transition={springTransition}
       style={{
-        marginTop: 16,
-        width: "100%",
-        padding: 16,
-        borderRadius: 16,
-        background: "#F8F9FF",
+        marginTop: 20,
+        marginBottom: 4,
+        maxWidth: 420,
+        padding: "12px 14px",
+        borderRadius: 14,
+        background: "#F8FAFC",
         border: "1px solid rgba(219,234,254,0.6)",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
+        gap: 12,
         cursor: "pointer",
         fontFamily: "inherit",
         textAlign: "left",
-        transition: "background 0.2s, border-color 0.2s",
+        transition: "background 0.2s, box-shadow 0.2s",
       }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "#FFFFFF"; e.currentTarget.style.boxShadow = "0 8px 30px rgba(0,0,0,0.06)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "#F8FAFC"; e.currentTarget.style.boxShadow = "none"; }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ width: 36, height: 36, borderRadius: 12, background: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", color: "#2563EB", flexShrink: 0, boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 10, background: "#EFF6FF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <IconActivity size={16} color="#2563EB" />
         </div>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <span style={{ color: "#111827", fontWeight: 700, fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase" }}>交互实验室</span>
-          <span style={{ color: "#6B7280", fontSize: 13, fontWeight: 500, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+          <span style={{ color: "#111827", fontWeight: 700, fontSize: 13, letterSpacing: "-0.01em" }}>开启动态可视化图谱</span>
+          <span style={{ color: "#6B7280", fontSize: 12, fontWeight: 500, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
         </div>
       </div>
-      <IconChevron size={16} color="#60A5FA" />
+      <div style={{ width: 28, height: 28, borderRadius: 999, background: "#fff", border: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 1px 2px rgba(0,0,0,0.04)", flexShrink: 0 }}>
+        <IconChevron size={14} color="#9CA3AF" />
+      </div>
     </motion.button>
   );
 }
 
-// ── Inline renderer: bold, italic, highlight, code, math, [VAR] placeholders
+// ── Inline renderer: bold, italic, highlight, code, math, [VAR] ────────────
 function renderInline(text, keyPrefix = "") {
   if (text == null) return null;
   const str = String(text);
@@ -98,7 +119,7 @@ function renderInline(text, keyPrefix = "") {
     if (part.startsWith("$$") && part.endsWith("$$") && part.length > 4) {
       try {
         const html = katex.renderToString(part.slice(2, -2).trim(), { throwOnError: false, displayMode: true });
-        return <span key={key} style={{ display: "block", overflowX: "auto", margin: "10px 0" }} dangerouslySetInnerHTML={{ __html: html }} />;
+        return <span key={key} style={{ display: "block", overflowX: "auto", margin: "8px 0" }} dangerouslySetInnerHTML={{ __html: html }} />;
       } catch { return <code key={key}>{part}</code>; }
     }
     if (part.startsWith("$") && part.endsWith("$") && part.length > 2) {
@@ -107,7 +128,6 @@ function renderInline(text, keyPrefix = "") {
         return <span key={key} dangerouslySetInnerHTML={{ __html: html }} />;
       } catch { return <code key={key}>{part}</code>; }
     }
-    // Highlighter: ==text== or <mark>text</mark>
     if (part.startsWith("==") && part.endsWith("==") && part.length > 4) {
       return <mark key={key} style={{ background: "rgba(254,240,138,0.8)", color: "#854D0E", padding: "1px 5px", borderRadius: 4, fontWeight: 500 }}>{part.slice(2, -2)}</mark>;
     }
@@ -115,13 +135,13 @@ function renderInline(text, keyPrefix = "") {
       return <mark key={key} style={{ background: "rgba(254,240,138,0.8)", color: "#854D0E", padding: "1px 5px", borderRadius: 4, fontWeight: 500 }}>{part.slice(6, -7)}</mark>;
     }
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      return <strong key={key} style={{ fontWeight: 700, color: "#111827", background: "rgba(224,231,255,0.8)", padding: "0 5px", borderRadius: 4 }}>{part.slice(2, -2)}</strong>;
+      return <strong key={key} style={{ fontWeight: 700, color: "#111827", background: "#EEF2FF", padding: "2px 6px", borderRadius: 6 }}>{part.slice(2, -2)}</strong>;
     }
     if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
       return <em key={key} style={{ fontStyle: "italic", color: "#4B5563", borderBottom: "1px solid #E5E7EB", paddingBottom: 1 }}>{part.slice(1, -1)}</em>;
     }
     if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
-      return <code key={key} style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "0.9em", padding: "2px 6px", background: "#F3F4F6", borderRadius: 6, color: "#111827" }}>{part.slice(1, -1)}</code>;
+      return <code key={key} style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "0.9em", padding: "2px 6px", background: "#F3F4F6", borderRadius: 6, color: "#6366F1" }}>{part.slice(1, -1)}</code>;
     }
     const varMatch = part.match(/^__VAR_(\d+)__$/);
     if (varMatch) return <span key={key} data-var-slot={varMatch[1]} />;
@@ -132,12 +152,14 @@ function renderInline(text, keyPrefix = "") {
 // ── Block-level Markdown renderer ──────────────────────────────────────────
 function renderMarkdown(text, context) {
   if (!text) return null;
-  // Extract [VAR:...] and [CHART:...] into indexed placeholders first
+  // Pre-process LaTeX spacing first, before any placeholder extraction
+  const cleaned = preprocessLaTeX(text);
+
   const varBlocks = [];
   const chartBlocks = [];
   let prepared = "";
   let i = 0;
-  const src = String(text);
+  const src = cleaned;
   while (i < src.length) {
     const v = src.slice(i).match(/^\[VAR:([a-zA-Z_]\w*),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\]/);
     if (v) {
@@ -157,7 +179,7 @@ function renderMarkdown(text, context) {
       prepared += `__CHART_${chartBlocks.length - 1}__`;
       i = j;
     } else if (src.slice(i, i + 7) === "[CHART]") {
-      chartBlocks.push(null); // legacy marker
+      chartBlocks.push(null);
       prepared += `__CHART_${chartBlocks.length - 1}__`;
       i += 7;
     } else {
@@ -170,7 +192,6 @@ function renderMarkdown(text, context) {
     .replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/g, "");
 
   const replaceVars = (node) => {
-    // walk children: replace spans with data-var-slot
     if (!Array.isArray(node)) return node;
     return node.map((el, idx) => {
       if (el && el.props && el.props["data-var-slot"] != null) {
@@ -181,16 +202,40 @@ function renderMarkdown(text, context) {
     });
   };
 
-  const lines = prepared.split("\n");
+  // ── Block-math grouping: collapse multi-line $$ ... $$ blocks across lines ─
+  const rawLines = prepared.split("\n");
+  const lines = [];
+  let bm = null; // buffer for block math
+  for (let li = 0; li < rawLines.length; li++) {
+    const raw = rawLines[li];
+    if (bm != null) {
+      bm.push(raw);
+      if (/\$\$\s*$/.test(raw.trim())) {
+        lines.push(bm.join("\n"));
+        bm = null;
+      }
+      continue;
+    }
+    const openOnly = /^\$\$\s*$/.test(raw.trim());
+    const hasOpen = raw.includes("$$");
+    const hasBothOnSameLine = (raw.match(/\$\$/g) || []).length >= 2;
+    if (openOnly || (hasOpen && !hasBothOnSameLine && !/\$\$[\s\S]*\$\$/.test(raw))) {
+      bm = [raw];
+      continue;
+    }
+    lines.push(raw);
+  }
+  if (bm) lines.push(bm.join("\n"));
+
   const blocks = [];
   let listBuffer = null;
   const flushList = () => {
     if (!listBuffer) return;
     blocks.push(
-      <ul key={`ul-${blocks.length}`} style={{ margin: "6px 0 20px 4px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 10 }}>
+      <ul key={`ul-${blocks.length}`} style={{ margin: "4px 0 16px 4px", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 6 }}>
         {listBuffer.map((item, idx) => (
-          <li key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 10, lineHeight: 1.8, color: "#374151", fontSize: 15 }}>
-            <span style={{ flexShrink: 0, marginTop: 9, width: 5, height: 5, borderRadius: 999, background: "#A5B4FC" }} />
+          <li key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 10, lineHeight: 1.65, color: "#1F2937", fontSize: 14.5 }}>
+            <span style={{ flexShrink: 0, marginTop: 9, width: 5, height: 5, borderRadius: 999, background: "#8B5CF6" }} />
             <div style={{ flex: 1, minWidth: 0 }}>{replaceVars(renderInline(item, `li-${idx}`))}</div>
           </li>
         ))}
@@ -198,13 +243,25 @@ function renderMarkdown(text, context) {
     );
     listBuffer = null;
   };
-  const flushListIfNeeded = (isListLine) => { if (!isListLine) flushList(); };
 
   lines.forEach((rawLine, idx) => {
-    const line = rawLine.trimEnd();
-    const t = line.trim();
+    const t = rawLine.trim();
 
-    // Chart placeholder on its own line → trigger card
+    // Pure block math paragraph (may span several lines, joined by \n)
+    if (/^\$\$[\s\S]+\$\$$/.test(t)) {
+      flushList();
+      const inner = t.replace(/^\$\$\s*/, "").replace(/\s*\$\$$/, "").trim();
+      try {
+        const html = katex.renderToString(inner, { throwOnError: false, displayMode: true });
+        blocks.push(
+          <div key={`bm-${idx}`} style={{ overflowX: "auto", margin: "10px 0 16px" }} dangerouslySetInnerHTML={{ __html: html }} />
+        );
+      } catch {
+        blocks.push(<code key={`bm-${idx}`}>{t}</code>);
+      }
+      return;
+    }
+
     const chartOnly = t.match(/^__CHART_(\d+)__$/);
     if (chartOnly) {
       flushList();
@@ -224,33 +281,32 @@ function renderMarkdown(text, context) {
       return;
     }
 
-    if (!t) { flushList(); blocks.push(<div key={`sp-${idx}`} style={{ height: 8 }} />); return; }
+    if (!t) { flushList(); blocks.push(<div key={`sp-${idx}`} style={{ height: 6 }} />); return; }
     if (t.startsWith("### ")) {
       flushList();
-      blocks.push(<h3 key={`h3-${idx}`} style={{ margin: "20px 0 10px", fontSize: 15, fontWeight: 800, color: "#111827", letterSpacing: "-0.01em" }}>{replaceVars(renderInline(t.slice(4), `h3-${idx}`))}</h3>);
+      blocks.push(<h3 key={`h3-${idx}`} style={{ margin: "16px 0 8px", fontSize: 15, fontWeight: 800, color: "#111827", letterSpacing: "-0.01em" }}>{replaceVars(renderInline(t.slice(4), `h3-${idx}`))}</h3>);
       return;
     }
     if (t.startsWith("## ")) {
       flushList();
-      blocks.push(<h2 key={`h2-${idx}`} style={{ margin: "22px 0 12px", fontSize: 17, fontWeight: 800, color: "#0F172A", paddingBottom: 6, borderBottom: "1px solid #F3F4F6", letterSpacing: "-0.015em" }}>{replaceVars(renderInline(t.slice(3), `h2-${idx}`))}</h2>);
+      blocks.push(<h2 key={`h2-${idx}`} style={{ margin: "20px 0 12px", fontSize: 16, fontWeight: 800, color: "#111827", paddingBottom: 8, borderBottom: "1px solid #F3F4F6", letterSpacing: "-0.015em" }}>{replaceVars(renderInline(t.slice(3), `h2-${idx}`))}</h2>);
       return;
     }
     if (t.startsWith("# ")) {
       flushList();
-      blocks.push(<h1 key={`h1-${idx}`} style={{ margin: "24px 0 14px", fontSize: 19, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.02em" }}>{replaceVars(renderInline(t.slice(2), `h1-${idx}`))}</h1>);
+      blocks.push(<h1 key={`h1-${idx}`} style={{ margin: "20px 0 12px", fontSize: 18, fontWeight: 800, color: "#111827", letterSpacing: "-0.02em" }}>{replaceVars(renderInline(t.slice(2), `h1-${idx}`))}</h1>);
       return;
     }
     const ulM = t.match(/^[-*]\s+(.+)/);
     const olM = t.match(/^\d+\.\s+(.+)/);
     if (ulM || olM) {
-      flushListIfNeeded(true);
       if (!listBuffer) listBuffer = [];
       listBuffer.push((ulM || olM)[1]);
       return;
     }
     flushList();
     blocks.push(
-      <p key={`p-${idx}`} style={{ margin: "0 0 20px", lineHeight: 1.8, color: "#374151", fontSize: 15, letterSpacing: "0.01em" }}>
+      <p key={`p-${idx}`} style={{ margin: "0 0 12px", lineHeight: 1.65, color: "#1F2937", fontSize: 14.5, letterSpacing: "0.005em" }}>
         {replaceVars(renderInline(t, `p-${idx}`))}
       </p>
     );
@@ -259,48 +315,43 @@ function renderMarkdown(text, context) {
   return blocks;
 }
 
-// ── AI Bubble ──────────────────────────────────────────────────────────────
+// ── AI Bubble (full-bleed, no card chrome) ─────────────────────────────────
 function AIBubble({ content, context }) {
   return (
-    <motion.div variants={bubbleVariants} style={{ display: "flex", gap: 14, width: "100%", maxWidth: 820, margin: "0 auto 40px" }}>
-      <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 12, background: "#6366F1", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 18px rgba(99,102,241,0.18)" }}>
+    <motion.div variants={bubbleVariants} style={{ display: "flex", gap: 14, width: "100%", margin: "0 0 28px" }}>
+      <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 10, background: "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 8px rgba(99,102,241,0.18)", marginTop: 2 }}>
         <IconSparkles size={16} />
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          background: "#FFFFFF",
-          borderRadius: 24,
-          borderTopLeftRadius: 6,
-          padding: "24px 28px",
-          boxShadow: "0 10px 30px rgba(0,0,0,0.02)",
-          border: "1px solid rgba(243,244,246,0.6)",
-          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
-          WebkitFontSmoothing: "antialiased",
-          MozOsxFontSmoothing: "grayscale",
-        }}>
-          {renderMarkdown(content, context)}
-        </div>
+      <div style={{
+        flex: 1,
+        minWidth: 0,
+        paddingRight: 24,
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif",
+        WebkitFontSmoothing: "antialiased",
+        MozOsxFontSmoothing: "grayscale",
+      }}>
+        {renderMarkdown(content, context)}
       </div>
     </motion.div>
   );
 }
 
-// ── User Bubble ────────────────────────────────────────────────────────────
+// ── User Bubble (compact monochrome) ───────────────────────────────────────
 function UserBubble({ content }) {
   return (
-    <motion.div variants={bubbleVariants} style={{ display: "flex", gap: 14, width: "100%", maxWidth: 820, margin: "0 auto 40px", justifyContent: "flex-end" }}>
+    <motion.div variants={bubbleVariants} style={{ display: "flex", gap: 14, width: "100%", margin: "0 0 28px", paddingLeft: 48, justifyContent: "flex-end" }}>
       <div style={{
         background: "#111827",
         color: "#FFFFFF",
-        borderRadius: 24,
-        borderTopRightRadius: 6,
-        padding: "14px 24px",
-        boxShadow: "0 10px 25px rgba(229,231,235,0.5)",
-        maxWidth: "75%",
+        borderRadius: 20,
+        borderTopRightRadius: 4,
+        padding: "12px 20px",
+        boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
+        maxWidth: "85%",
         fontSize: 14.5,
-        lineHeight: 1.625,
+        lineHeight: 1.6,
         fontWeight: 500,
-        letterSpacing: "0.015em",
+        letterSpacing: "0.01em",
       }}>
         {renderInline(content, "ub")}
       </div>
@@ -320,14 +371,10 @@ export default function MaterialChatPage({
     renderChart,
     onOpenChart: (cfg) => {
       if (onOpenChart) { onOpenChart(cfg); return; }
-      // Fallback: inline render if caller didn't provide portal handler
-      if (renderChart) {
-        // no-op: caller renders charts elsewhere
-      }
     },
   };
   return (
-    <div style={{ width: "100%", maxWidth: 820, margin: "0 auto", padding: "8px 4px 16px" }}>
+    <div style={{ width: "100%", padding: "4px 0 12px" }}>
       {stream.map((msg, i) =>
         msg.role === "user" ? (
           <UserBubble key={i} content={msg.text} />
