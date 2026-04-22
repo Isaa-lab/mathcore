@@ -590,7 +590,7 @@ function SprintAnimations() {
 // =============================================================================
 // 主组件
 // =============================================================================
-export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQuestions = [], onStartTask }) {
+export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQuestions = [], onAutoStartQuiz, onResetQuizIntent }) {
   const [rightPanelMode, setRightPanelMode] = useState("chat");
   const [setupOpen, setSetupOpen] = useState(false);
   const [selectedDayKey, setSelectedDayKey] = useState(null);
@@ -671,9 +671,32 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
 
   function handleStartTaskInternal(task) {
     if (!task) return;
-    onStartTask && onStartTask(task);
-    if (task.type === "concept_study") setRightPanelMode("chat");
-    else setRightPanelMode("quiz");
+
+    // 概念学习类任务 → 切到 AI 复习对讲（chat）
+    if (task.type === "concept_study") {
+      setRightPanelMode("chat");
+      setSelectedDayKey(null);
+      return;
+    }
+
+    // 其他任务 → 直接进入答题（绕过 QuizPage 的"选择入口"页）
+    // autoStartIntent = { chapter, count, source, nodeLabel } 会被 QuizPage 的 useEffect 识别并自动开练
+    const intent = {
+      chapter: task.chapter || null,
+      count: task.target_count || 5,
+      source: task.type === "sm2_due" || task.type === "wrong_review" ? "wrong_review" :
+              task.type === "mock_exam" ? "mock_exam" :
+              task.type === "light_review" ? "light_review" : "plan_task",
+      nodeLabel: task.title || undefined,
+      topicName: task.subtitle || undefined,
+      taskType: task.type,
+      taskId: task.id,
+    };
+
+    // QuizPage 通过 intent 的 taskId 识别新意图，同一任务只 fire 一次
+    if (onAutoStartQuiz) onAutoStartQuiz(intent);
+
+    setRightPanelMode("quiz");
     setSelectedDayKey(null);
   }
 

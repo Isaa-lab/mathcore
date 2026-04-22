@@ -4630,10 +4630,19 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     return () => clearInterval(timerRef.current);
   }, [timerOn, quizMode, finished]);
 
-  // 意图驱动：从知识树跳转过来时（autoStartIntent = { chapter, count? }），加载完就直接开练，
+  // 意图驱动：从知识树/冲刺计划跳转过来时（autoStartIntent = { chapter, count?, taskId? }），加载完就直接开练，
   // 不让用户再次手动点"开始练习"
   const autoStartFiredRef = useRef(false);
+  const lastIntentKeyRef = useRef(null);
   useEffect(() => {
+    // 同一个 intent 只触发一次；intent 换了（比如冲刺计划切到下一个任务）就重置
+    const intentKey = autoStartIntent
+      ? `${autoStartIntent.taskId || ""}|${autoStartIntent.chapter || ""}|${autoStartIntent.source || ""}|${autoStartIntent.count || ""}`
+      : null;
+    if (intentKey !== lastIntentKeyRef.current) {
+      autoStartFiredRef.current = false;
+      lastIntentKeyRef.current = intentKey;
+    }
     if (autoStartFiredRef.current) return;
     if (!autoStartIntent) return;
     if (loading) return;
@@ -11231,10 +11240,14 @@ export default function App() {
                 <motion.div key="sprint" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25 }}>
                   <SprintWorkspace
                     chatPage={<MaterialChatPage setPage={handleSetPage} profile={profile} />}
-                    quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} isSprint onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
+                    quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} isSprint autoStartIntent={quizIntent} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
                     onViewWrong={() => handleSetPage("错题本")}
                     allQuestions={ALL_QUESTIONS}
-                    onStartTask={(task) => { if (task && task.chapter && setChapterFilter) setChapterFilter([task.chapter]); }}
+                    onAutoStartQuiz={(intent) => {
+                      if (intent && intent.chapter && setChapterFilter) setChapterFilter([intent.chapter]);
+                      setQuizIntent(intent || null);
+                    }}
+                    onResetQuizIntent={() => setQuizIntent(null)}
                   />
                 </motion.div>
               )}
