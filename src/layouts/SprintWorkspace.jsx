@@ -576,7 +576,7 @@ function SprintAnimations() {
 // =============================================================================
 // 主组件
 // =============================================================================
-export default function SprintWorkspace({ chatPage, quizPage, onViewPlan, onViewWrong, allQuestions = [], onStartTask }) {
+export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQuestions = [], onStartTask }) {
   const [rightPanelMode, setRightPanelMode] = useState("chat");
   const [setupOpen, setSetupOpen] = useState(false);
   const [selectedDayKey, setSelectedDayKey] = useState(null);
@@ -668,7 +668,7 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewPlan, onView
   return (
     <div style={{ display: "flex", flex: 1, padding: 24, gap: 24, overflow: "hidden", boxSizing: "border-box" }}>
       <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: 24 }}>
-        <div className="premium-card" style={{ flex: "1 1 50%", padding: 20, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+        <div className="premium-card" style={{ flex: "1 1 auto", padding: 20, overflowY: "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
             <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>冲刺日历</h3>
             <button onClick={() => setSetupOpen(true)} title={hasPlan ? "修改考试计划" : "设置考试日期"}
@@ -707,7 +707,7 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewPlan, onView
           />
         </div>
 
-        <div className="premium-card" style={{ flex: "1 1 50%", padding: 20, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="premium-card" style={{ flex: "0 0 auto", padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
           <h3 style={{ margin: "0 0 8px 0", fontSize: 16, fontWeight: 700, color: "#111827" }}>目标与错题</h3>
           <button onClick={() => setRightPanelMode("chat")}
             style={{
@@ -726,10 +726,6 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewPlan, onView
               color: rightPanelMode === "quiz" ? "#FFFFFF" : "#111827",
             }}>
             🧩 AI 出题检测
-          </button>
-          <button onClick={onViewPlan}
-            style={{ padding: 12, textAlign: "center", background: "#F3F4F6", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, color: "#111827", fontFamily: "inherit" }}>
-            📋 查看复习计划
           </button>
           <button onClick={onViewWrong}
             style={{ padding: 12, textAlign: "center", background: "#F3F4F6", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, color: "#111827", fontFamily: "inherit" }}>
