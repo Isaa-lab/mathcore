@@ -7461,7 +7461,7 @@ function WrongDrill({ questions, onExit, onMastered }) {
 // 数据源改造：从硬编码 4 道 + sessionAnswers 派生的"假薄弱章节"，
 // 升级到持久化 wrong_items 表：所有答题入口通过 recordAnswer 自动落表，
 // 错题本只读表、渲染、触发重做/标签/AI 变式。
-function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion }) {
+function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChapterFilter }) {
   const [items, setItems] = useState(() => getWrongItemsFromStore());
   const [filter, setFilter] = useState({ chapter: "all", status: "active", errorTag: "all" });
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -7469,6 +7469,28 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion }) {
   const [drillKind, setDrillKind] = useState("original"); // "original" | "variant"
   const [regenLoading, setRegenLoading] = useState(false);
   const [regenMsg, setRegenMsg] = useState("");
+  // 联动 1：TopicModal（点击卡片章节标签 → 打开知识点详情）
+  const [topicTarget, setTopicTarget] = useState(null); // { name, chapterNum, course }
+  // 联动 2：苏格拉底 AI 带练抽屉（点击 "🧠 AI 带练 →" 按钮）
+  const [socraticTarget, setSocraticTarget] = useState(null); // { item, question }
+
+  // 把错题反查为 TopicModal 入参：{ name, chapterNum, course }
+  // - question 带 course 字段时优先用；否则从 chapter_label（如 "ODE Ch.1"）解析
+  // - 找不到匹配 topic 时用该章节 topics[0] 兜底
+  function resolveTopicSeed(item, question) {
+    const chapterStr = item.chapter_label || item.chapter || "";
+    const m = chapterStr.match(/^(.+?)\s+(Ch\.?\d+.*)$/i);
+    const course = question?.course || (m ? m[1].trim() : "");
+    const chapterNum = m ? m[2].trim() : chapterStr;
+    const ch = CHAPTERS.find(
+      (c) => c.course === course && String(c.num).toLowerCase() === String(chapterNum).toLowerCase()
+    );
+    const preferredTopic = (question?.topic)
+      || (Array.isArray(question?.knowledgePoints) ? question.knowledgePoints[0] : null)
+      || (ch?.topics?.[0])
+      || chapterNum;
+    return { name: preferredTopic, chapterNum: ch?.num || chapterNum, course: course || "数值分析" };
+  }
 
   // 从 store 拉最新数据
   function refresh() {
@@ -7766,30 +7788,63 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion }) {
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 18 }}>
-              {filteredItems.map((item) => (
-                <MistakeCard
-                  key={item.id}
-                  item={item}
-                  question={resolveQuestion(item)}
-                  selected={selectedIds.has(item.id)}
-                  onToggleSelect={() => toggleSelect(item.id)}
-                  onMarkMastered={() => { markMastered(item.id); refresh(); }}
-                  onSuspend={() => { suspendItem(item.id); refresh(); }}
-                  onRetry={() => startDrill([item.id], "original")}
-                  onAiPractice={() => startAIPractice(item)}
-                  onAiDiagnosed={(reasoning, tags) => { saveAiReasoning(item.id, reasoning, tags); refresh(); }}
-                  onTagsChange={(tags) => { tagWrongItem(item.id, tags); refresh(); }}
-                  onAskAI={() => {
-                    const q = resolveQuestion(item);
-                    if (!q) return;
-                    if (typeof onAskAIAboutQuestion === "function") onAskAIAboutQuestion(q);
-                    else setPage("资料对话");
-                  }}
-                />
-              ))}
+              {filteredItems.map((item) => {
+                const q = resolveQuestion(item);
+                return (
+                  <MistakeCard
+                    key={item.id}
+                    item={item}
+                    question={q}
+                    selected={selectedIds.has(item.id)}
+                    onToggleSelect={() => toggleSelect(item.id)}
+                    onMarkMastered={() => { markMastered(item.id); refresh(); }}
+                    onSuspend={() => { suspendItem(item.id); refresh(); }}
+                    onRetry={() => startDrill([item.id], "original")}
+                    onAiPractice={() => startAIPractice(item)}
+                    onStartSocratic={(it, qq) => setSocraticTarget({ item: it, question: qq || q })}
+                    onOpenTopic={(it, qq) => {
+                      const seed = resolveTopicSeed(it, qq || q);
+                      setTopicTarget(seed);
+                    }}
+                    onAiDiagnosed={(reasoning, tags) => { saveAiReasoning(item.id, reasoning, tags); refresh(); }}
+                    onTagsChange={(tags) => { tagWrongItem(item.id, tags); refresh(); }}
+                    onAskAI={() => {
+                      if (!q) return;
+                      if (typeof onAskAIAboutQuestion === "function") onAskAIAboutQuestion(q);
+                      else setPage("资料对话");
+                    }}
+                  />
+                );
+              })}
             </div>
           )}
         </>
+      )}
+
+      {/* 联动传送门 1：知识点详情（TopicModal） */}
+      {topicTarget && (
+        <TopicModal
+          topic={topicTarget.name}
+          chapterNum={topicTarget.chapterNum}
+          course={topicTarget.course}
+          setPage={setPage}
+          setChapterFilter={setChapterFilter}
+          onClose={() => setTopicTarget(null)}
+        />
+      )}
+
+      {/* 联动传送门 2：苏格拉底 AI 带练抽屉 */}
+      {socraticTarget && (
+        <SocraticCoachDrawer
+          item={socraticTarget.item}
+          question={socraticTarget.question}
+          onClose={() => setSocraticTarget(null)}
+          onMarkMastered={() => {
+            markMastered(socraticTarget.item.id);
+            refresh();
+            setSocraticTarget(null);
+          }}
+        />
       )}
     </div>
   );
@@ -7865,12 +7920,13 @@ function miniChip(primary, loading) {
   };
 }
 
-// ———————— 错题胶囊卡片 ————————
-function MistakeCard({ item, question, selected, onToggleSelect, onMarkMastered, onSuspend, onRetry, onAiPractice, onAiDiagnosed, onTagsChange, onAskAI }) {
+// ———————— 错题胶囊卡片（诊断 + 三大联动传送门） ————————
+function MistakeCard({ item, question, selected, onToggleSelect, onMarkMastered, onSuspend, onRetry, onAiPractice, onStartSocratic, onOpenTopic, onAiDiagnosed, onTagsChange, onAskAI }) {
   const [hover, setHover] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
+  const [expanded, setExpanded] = useState(false);
 
   if (!question) {
     return (
@@ -7944,12 +8000,26 @@ function MistakeCard({ item, question, selected, onToggleSelect, onMarkMastered,
         position: "relative",
       }}
     >
-      {/* 顶部：章节 chip + 日期 + "⋯" 菜单 */}
+      {/* 顶部：知识点溯源标签（点击→TopicModal）+ 日期 + "⋯" 菜单 */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-          <span style={{ padding: "3px 9px", borderRadius: 7, background: "#FEF2F2", color: "#DC2626", fontSize: 10.5, fontWeight: 800, letterSpacing: "0.04em", whiteSpace: "nowrap" }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); if (onOpenTopic) onOpenTopic(item, question); }}
+            title="打开知识点详情"
+            style={{
+              padding: "3px 10px", borderRadius: 8,
+              background: "#F5F3FF", color: "#7C3AED",
+              fontSize: 10.5, fontWeight: 800, letterSpacing: "0.04em",
+              whiteSpace: "nowrap", cursor: "pointer", border: "1px solid #DDD6FE",
+              fontFamily: "inherit", transition: "background .15s",
+              display: "inline-flex", alignItems: "center", gap: 4,
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "#EDE9FE"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "#F5F3FF"; }}
+          >
+            <span style={{ fontSize: 10, opacity: 0.75 }}>⊚</span>
             {chapterLabel}
-          </span>
+          </button>
           <span style={{ padding: "3px 9px", borderRadius: 7, background: "#F9FAFB", color: "#9CA3AF", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap" }}>
             {dayStr}
           </span>
@@ -7974,17 +8044,75 @@ function MistakeCard({ item, question, selected, onToggleSelect, onMarkMastered,
         </div>
       </div>
 
-      {/* 题干摘要（3 行截断） —— 用 MathText 渲染 LaTeX，容器裁切 */}
-      <div style={{
-        margin: 0, fontSize: 14.5, fontWeight: 700, color: "#111827",
-        lineHeight: 1.55,
-        maxHeight: "calc(1.55em * 3)",
-        overflow: "hidden",
-        wordBreak: "break-word",
-        position: "relative",
-      }}>
-        <MathText text={String(question.question || "")} />
-      </div>
+      {/* 题干：默认 3 行截断，点击展开完整原题 + 选项 + 正确答案（链接 3：原题上下文源） */}
+      {(() => {
+        const opts = question.options ? (typeof question.options === "string" ? (() => { try { return JSON.parse(question.options); } catch { return null; } })() : question.options) : null;
+        const letters = ["A", "B", "C", "D"];
+        const lastAttempt = (item.attempts || []).filter((a) => !a.correct).slice(-1)[0];
+        const userAns = lastAttempt?.user_answer || "";
+        return (
+          <div
+            onClick={() => setExpanded((v) => !v)}
+            title={expanded ? "点击收起" : "点击展开原题"}
+            style={{ cursor: "pointer", display: "flex", flexDirection: "column", gap: 10 }}
+          >
+            <div style={{
+              fontSize: 14.5, fontWeight: 700, color: "#111827",
+              lineHeight: 1.55,
+              maxHeight: expanded ? "none" : "calc(1.55em * 3)",
+              overflow: "hidden",
+              wordBreak: "break-word",
+              position: "relative",
+              transition: "max-height .22s ease",
+            }}>
+              <MathText text={String(question.question || "")} />
+            </div>
+            {expanded && opts && Array.isArray(opts) && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingLeft: 2 }}>
+                {opts.map((opt, i) => {
+                  const isCorrect = letters[i] === question.answer;
+                  const isUserWrong = userAns && letters[i] === userAns && !isCorrect;
+                  return (
+                    <div key={i} style={{
+                      fontSize: 12.5, lineHeight: 1.55, color: "#374151",
+                      padding: "6px 10px", borderRadius: 9,
+                      background: isCorrect ? "#ECFDF5" : isUserWrong ? "#FEF2F2" : "#FAFAFC",
+                      border: "1px solid " + (isCorrect ? "#A7F3D0" : isUserWrong ? "#FECACA" : "#F3F4F6"),
+                      display: "flex", gap: 8, alignItems: "flex-start",
+                    }}>
+                      <span style={{
+                        fontSize: 10.5, fontWeight: 800,
+                        color: isCorrect ? "#047857" : isUserWrong ? "#B91C1C" : "#9CA3AF",
+                        flexShrink: 0, marginTop: 2,
+                      }}>
+                        {isCorrect ? "✓" : isUserWrong ? "✗" : letters[i]}
+                      </span>
+                      <span style={{ flex: 1, minWidth: 0, wordBreak: "break-word", fontWeight: isCorrect ? 700 : 500 }}>
+                        <MathText text={String(opt || "")} />
+                      </span>
+                    </div>
+                  );
+                })}
+                {userAns && userAns !== question.answer && (
+                  <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2, fontStyle: "italic" }}>
+                    你当时选的是 <b style={{ color: "#B91C1C" }}>{userAns}</b>，正确答案是 <b style={{ color: "#047857" }}>{question.answer}</b>
+                  </div>
+                )}
+              </div>
+            )}
+            {expanded && question.explanation && (
+              <div style={{
+                fontSize: 12, lineHeight: 1.7, color: "#475569",
+                padding: "8px 10px", borderRadius: 9,
+                background: "#F8FAFC", border: "1px dashed #E2E8F0",
+              }}>
+                <span style={{ fontWeight: 800, color: "#0F172A", marginRight: 4 }}>官方解析：</span>
+                <MathText text={String(question.explanation)} />
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* AI 归因诊断框 —— 卡片核心 */}
       <div style={{
@@ -8049,9 +8177,10 @@ function MistakeCard({ item, question, selected, onToggleSelect, onMarkMastered,
           )}
         </div>
         <div style={{ display: "flex", gap: 6, opacity: hover ? 1 : 0, transform: hover ? "translateX(0)" : "translateX(4px)", transition: "all .15s ease" }}>
-          <button onClick={onRetry} title="原题重做" style={{ padding: "6px 11px", background: "#fff", color: "#374151", border: "1px solid #E5E7EB", borderRadius: 9, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>重做</button>
-          <button onClick={onAiPractice} style={{ padding: "6px 14px", background: "#111827", color: "#fff", border: "none", borderRadius: 9, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 4 }}>
-            AI 带练 →
+          <button onClick={(e) => { e.stopPropagation(); onRetry(); }} title="原题重做" style={{ padding: "6px 11px", background: "#fff", color: "#374151", border: "1px solid #E5E7EB", borderRadius: 9, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>重做</button>
+          <button onClick={(e) => { e.stopPropagation(); if (onAiPractice) onAiPractice(); }} title="AI 生成同类变式" style={{ padding: "6px 11px", background: "#EEF2FF", color: "#4338CA", border: "1px solid #C7D2FE", borderRadius: 9, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>变式</button>
+          <button onClick={(e) => { e.stopPropagation(); if (onStartSocratic) onStartSocratic(item, question); }} title="打开苏格拉底式 AI 带练" style={{ padding: "6px 14px", background: "#111827", color: "#fff", border: "none", borderRadius: 9, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            🧠 AI 带练 →
           </button>
         </div>
       </div>
@@ -8091,6 +8220,244 @@ const menuItem = {
   cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "#374151",
   borderRadius: 7, fontFamily: "inherit",
 };
+
+// ———————— 苏格拉底 AI 带练抽屉 ————————
+// 从右侧滑入；装载时向 /api/generate (mode:"socratic") 发送带上下文的 seed prompt，
+// AI 会用反问法带用户逐步重推，不直接给答案。
+function SocraticCoachDrawer({ item, question, onClose, onMarkMastered }) {
+  const [messages, setMessages] = useState([]); // {role:"user"|"assistant"|"system-note", content}
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const endRef = useRef(null);
+  const firedRef = useRef(false);
+
+  const chapterLabel = item?.chapter_label || item?.chapter || "未分类";
+  const activeTags = item?.error_tags || [];
+  const errorTagLabels = activeTags.length > 0
+    ? activeTags.map((id) => (ERROR_TAGS.find((t) => t.id === id) || {}).label || id).join(" / ")
+    : null;
+
+  // 构造错题上下文（给 AI 的 seed）
+  const buildContext = () => {
+    const lastAttempt = (item?.attempts || []).filter((a) => !a.correct).slice(-1)[0];
+    const userAns = lastAttempt?.user_answer || "(未记录)";
+    const opts = question?.options ? (typeof question.options === "string" ? (() => { try { return JSON.parse(question.options); } catch { return null; } })() : question.options) : null;
+    const optsText = Array.isArray(opts)
+      ? opts.map((o, i) => `${"ABCD"[i]}. ${o}`).join("\n")
+      : "(判断题)";
+    const diagnosisHint = item?.ai_reasoning
+      ? `\n\n【AI 之前诊断的错因】：${item.ai_reasoning}`
+      : "";
+    const tagsHint = errorTagLabels ? `\n【已标注错因类型】：${errorTagLabels}` : "";
+
+    return [
+      `我刚刚做错了一道 ${chapterLabel} 的题目，想请你用【苏格拉底式提问法】带我一步步重新推导，不要直接给答案。`,
+      ``,
+      `【题目】`,
+      question?.question || "",
+      ``,
+      `【选项】`,
+      optsText,
+      ``,
+      `【正确答案】${question?.answer || ""}`,
+      `【我当时选的】${userAns}`,
+      tagsHint,
+      diagnosisHint,
+      ``,
+      `请遵守以下规则：`,
+      `1. 一次只问一个关键问题，帮助我看清自己的思维卡点；`,
+      `2. 鼓励我先说自己的思路，再根据我的回答决定下一步引导；`,
+      `3. 不要把完整推导一口气讲完；`,
+      `4. 用简短文字 + LaTeX（用 $...$ 包裹）表达公式；`,
+      `5. 当我真的推不下去时，再给一个最小提示（不是完整答案）。`,
+      ``,
+      `现在请先问我一个引导性的问题开始。`,
+    ].join("\n");
+  };
+
+  async function sendToAI(userText, historyForAI) {
+    setBusy(true);
+    setError("");
+    const aiCfg = getAIConfig();
+    try {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "socratic",
+          question: userText,
+          conversationHistory: historyForAI,
+          vizIntent: { wantsViz: false, reason: "socratic-coach" },
+          dialogueMode: "socratic",
+          dialogueModeReason: "wrong-item-coach",
+          userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+        }),
+      });
+      const data = await res.json();
+      if (data?.error) throw new Error(data.error);
+      const content = data.answer || data.reply || data.content || data.text || data.result || "(AI 暂无回复)";
+      setMessages((prev) => [...prev, { role: "assistant", content }]);
+    } catch (e) {
+      setError(e.message || "AI 调用失败");
+      setMessages((prev) => [...prev, { role: "assistant", content: `(抱歉，AI 调用失败：${e.message || "未知错误"})`, isError: true }]);
+    }
+    setBusy(false);
+  }
+
+  // 首次装载：自动发送 seed
+  useEffect(() => {
+    if (firedRef.current) return;
+    if (!question || !item) return;
+    firedRef.current = true;
+    const seed = buildContext();
+    const nextHistory = [{ role: "user", content: seed }];
+    setMessages(nextHistory);
+    sendToAI(seed, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 自动滚到底
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, busy]);
+
+  // ESC 关闭
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function handleSend() {
+    const text = input.trim();
+    if (!text || busy) return;
+    setInput("");
+    const history = messages
+      .filter((m) => !m.isError && m.content)
+      .map((m) => ({ role: m.role, content: m.content }));
+    setMessages((prev) => [...prev, { role: "user", content: text }]);
+    sendToAI(text, history);
+  }
+
+  if (!item || !question) return null;
+
+  return (
+    <div style={{
+      position: "fixed", top: 0, right: 0, bottom: 0, left: 0, zIndex: 1000,
+      background: "rgba(15,23,42,0.35)", backdropFilter: "blur(3px)",
+      display: "flex", justifyContent: "flex-end",
+      animation: "mcFadeIn .18s ease",
+    }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: "min(560px, 96vw)", height: "100%",
+        background: "#FCFCFD",
+        display: "flex", flexDirection: "column",
+        boxShadow: "-10px 0 40px rgba(0,0,0,0.12)",
+        animation: "mcSlideInRight .22s ease",
+      }}>
+        {/* 顶栏 */}
+        <div style={{
+          padding: "16px 20px", borderBottom: "1px solid #F1F5F9",
+          display: "flex", alignItems: "center", gap: 10,
+          background: "linear-gradient(135deg,#EEF2FF,#F5F3FF)",
+        }}>
+          <div style={{ fontSize: 22 }}>🧠</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.01em" }}>
+              苏格拉底 AI 带练
+            </div>
+            <div style={{ fontSize: 11.5, color: "#64748B", marginTop: 2 }}>
+              {chapterLabel}{errorTagLabels ? ` · ${errorTagLabels}` : ""}
+            </div>
+          </div>
+          <button onClick={onMarkMastered} title="标记这道题已掌握"
+            style={{ padding: "6px 10px", borderRadius: 9, border: "1px solid #A7F3D0", background: "#ECFDF5", color: "#047857", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+            ✓ 我懂了
+          </button>
+          <button onClick={onClose} title="关闭 (Esc)"
+            style={{ width: 30, height: 30, borderRadius: 8, border: "none", background: "#fff", color: "#64748B", fontSize: 18, cursor: "pointer", fontFamily: "inherit" }}>
+            ×
+          </button>
+        </div>
+
+        {/* 原题迷你预览 */}
+        <div style={{ padding: "10px 20px", borderBottom: "1px solid #F1F5F9", background: "#fff", fontSize: 12.5, color: "#475569", lineHeight: 1.6, maxHeight: 90, overflowY: "auto" }}>
+          <span style={{ fontSize: 10, fontWeight: 800, color: "#94A3B8", letterSpacing: "0.06em", marginRight: 6 }}>原题</span>
+          <MathText text={String(question.question || "")} />
+        </div>
+
+        {/* 消息流 */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+          {messages.length === 0 && busy && (
+            <div style={{ color: "#94A3B8", fontSize: 13, textAlign: "center", padding: "30px 0" }}>正在唤醒 AI 教练…</div>
+          )}
+          {messages.map((m, i) => {
+            // 首条 user seed 比较长，折叠展示
+            const isSeed = i === 0 && m.role === "user";
+            if (isSeed) {
+              return (
+                <details key={i} style={{ fontSize: 11.5, color: "#94A3B8", background: "#F8FAFC", borderRadius: 10, padding: "8px 12px", border: "1px dashed #E2E8F0" }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 700 }}>📌 已把这道错题的完整上下文发给 AI（点击查看）</summary>
+                  <pre style={{ whiteSpace: "pre-wrap", margin: "8px 0 0", fontSize: 11, color: "#64748B", fontFamily: "inherit" }}>{m.content}</pre>
+                </details>
+              );
+            }
+            if (m.role === "user") {
+              return (
+                <div key={i} style={{ alignSelf: "flex-end", maxWidth: "82%", background: "#111827", color: "#fff", padding: "10px 14px", borderRadius: 16, borderTopRightRadius: 4, fontSize: 13.5, lineHeight: 1.6, fontWeight: 500, wordBreak: "break-word" }}>
+                  <MathText text={String(m.content || "")} />
+                </div>
+              );
+            }
+            return (
+              <div key={i} style={{ alignSelf: "flex-start", maxWidth: "88%", background: m.isError ? "#FEF2F2" : "#fff", color: m.isError ? "#B91C1C" : "#0F172A", padding: "12px 14px", borderRadius: 16, borderTopLeftRadius: 4, fontSize: 13.5, lineHeight: 1.7, border: "1px solid " + (m.isError ? "#FECACA" : "#F1F5F9"), wordBreak: "break-word" }}>
+                <MathText text={String(m.content || "")} />
+              </div>
+            );
+          })}
+          {busy && (
+            <div style={{ alignSelf: "flex-start", fontSize: 12, color: "#94A3B8", fontStyle: "italic", padding: "4px 10px" }}>AI 正在思考…</div>
+          )}
+          {error && !busy && (
+            <div style={{ alignSelf: "stretch", fontSize: 12, color: "#B91C1C", padding: "8px 12px", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10 }}>{error}</div>
+          )}
+          <div ref={endRef} />
+        </div>
+
+        {/* 输入栏 */}
+        <div style={{ padding: "12px 16px 16px", borderTop: "1px solid #F1F5F9", background: "#fff" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+              }}
+              placeholder="说出你的思路 / 回答 AI 的问题…（Enter 发送，Shift+Enter 换行）"
+              rows={2}
+              style={{
+                flex: 1, padding: "10px 12px", borderRadius: 12, border: "1px solid #E2E8F0",
+                fontSize: 13.5, fontFamily: "inherit", resize: "none", outline: "none",
+                lineHeight: 1.5, color: "#0F172A", background: "#FAFAFC",
+              }}
+            />
+            <button onClick={handleSend} disabled={busy || !input.trim()}
+              style={{ padding: "10px 16px", borderRadius: 12, border: "none",
+                background: busy || !input.trim() ? "#E2E8F0" : "#111827",
+                color: busy || !input.trim() ? "#94A3B8" : "#fff",
+                fontSize: 13, fontWeight: 700, cursor: busy || !input.trim() ? "not-allowed" : "pointer", fontFamily: "inherit",
+                whiteSpace: "nowrap",
+              }}>
+              发送
+            </button>
+          </div>
+          <div style={{ fontSize: 10.5, color: "#94A3B8", marginTop: 6, letterSpacing: "0.02em" }}>
+            💡 AI 不会直接给答案，它会问你问题；当你真的推不下去时，告诉它「给我一个提示」。
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // —— 错题本筛选下拉 ——
 function WPFilterSelect({ label, value, options, onChange }) {
@@ -11499,7 +11866,7 @@ export default function App() {
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
     if (page === "技能树") return <SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
-    if (page === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} />;
+    if (page === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} setChapterFilter={setChapterFilter} />;
     if (page === "教师管理") return <TeacherPage setPage={handleSetPage} profile={profile} />;
     return null;
   };
