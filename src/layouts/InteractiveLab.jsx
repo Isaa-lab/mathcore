@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import katex from "katex";
 import { useMathStore } from "../store/useMathStore";
+import { sanitizeLatexText } from "../utils/latex";
 
 const pageTransition = { type: "spring", stiffness: 260, damping: 26 };
 
@@ -367,7 +368,11 @@ function TreeNode({ node, depth, accent, path }) {
 // 全部被丢弃，详情页就显得空。这个 helper 让 narrative / insight 里的内联 LaTeX 也能直接渲染。
 function renderInlineKatex(text) {
   if (text == null) return null;
-  const str = String(text);
+  // 三件套：
+  //   1) revive：把 "♦rac" 这类 JSON 吞反斜杠造成的控制字符恢复成 \frac；
+  //   2) normalize：\(…\) / \[…\] → $…$ / $$…$$；
+  //   3) autoWrap：裸 LaTeX 命令（无 $ 包裹）自动补 $。
+  const str = sanitizeLatexText(String(text));
   const parts = str.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g);
   return parts.map((part, i) => {
     if (!part) return null;
@@ -394,7 +399,8 @@ function renderInlineKatex(text) {
 // 不清洗就直接喂给 KaTeX，会触发"公式以原始代码形式显示在红框里"的现象。
 // 规则：math.latex 约定为**纯 LaTeX 源码**，这里兜底剥掉任何包装符号。
 function stripLatexWrapping(src) {
-  let s = String(src ?? "").trim();
+  // 同样要 revive 控制字符 —— math.latex 字段里也会出现 \f → form-feed 的 bug
+  let s = sanitizeLatexText(String(src ?? "")).trim();
   if (!s) return "";
   // 代码块围栏（可能带语言标签）
   s = s.replace(/^```(?:latex|math|tex)?\s*/i, "").replace(/```\s*$/, "");

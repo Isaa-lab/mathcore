@@ -16,6 +16,7 @@ import { recordWrongAnswer, recordCorrectAnswer, getWrongItems as getWrongItemsF
 import { storage } from "./utils/storage";
 import { getUserChapters } from "./utils/chapters";
 import { generateDailyPlans, dayKey as planDayKey, markTaskCompleted, rolloverIncompleteTasks, importBacklogToToday, dismissBacklog, getTodayBacklog, priorityWeight } from "./utils/planGenerator";
+import { sanitizeLatexText, reviveLatexControlChars, normalizeLatexDelimiters, autoWrapBareLatex } from "./utils/latex";
 import "katex/dist/katex.min.css";
 
 // Inject global CSS animations
@@ -9787,7 +9788,19 @@ function userFriendlyVizError(reason) {
 
 function rescueQuizMath(input) {
   if (!input) return "";
-  const parts = String(input).split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g);
+  // 0a) 先把 JSON 反斜杠被吃变成的控制字符（form-feed / backspace / …）还原回 \frac \b \v …
+  //     典型症状：页面里出现 "♦rac{1}{s-a}" —— \f 被吃了。
+  // 0b) 再把 \( \) / \[ \] 归一成 $…$ / $$…$$
+  input = normalizeLatexDelimiters(reviveLatexControlChars(String(input)));
+  // 0c) AI 偶尔混用 Unicode 数学符号(∫/∑/∏/∮) 和半吊子 $...$：
+  //     "∫^∞_0 e^{-st}$e^{at}$\,dt$=1/(s-a)$"
+  //     结果下游规则在第一个 $ 就断裂，整段泄漏成原文。把 ∫/∑/… 与紧随 d<letter>
+  //     之间的错位 $ 吸收掉，恢复成可被规则 #5/#6 完整命中的一段。
+  input = input.replace(
+    /([∫∮∑∏])([^。\n]{0,120}?)\s?d([A-Za-z])\b/g,
+    (_m, op, body, dv) => op + body.replace(/\$/g, "") + " d" + dv
+  );
+  const parts = input.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g);
   const GREEK_MAP = { α:"alpha",β:"beta",γ:"gamma",δ:"delta",ε:"epsilon",ζ:"zeta",η:"eta",θ:"theta",ι:"iota",κ:"kappa",λ:"lambda",μ:"mu",ν:"nu",ξ:"xi",π:"pi",ρ:"rho",σ:"sigma",τ:"tau",υ:"upsilon",φ:"phi",χ:"chi",ψ:"psi",ω:"omega",Γ:"Gamma",Δ:"Delta",Θ:"Theta",Λ:"Lambda",Ξ:"Xi",Π:"Pi",Σ:"Sigma",Υ:"Upsilon",Φ:"Phi",Ψ:"Psi",Ω:"Omega" };
   const GREEK_RE = /[αβγδεζηθικλμνξοπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩ]/;
   const g2tex = (ch) => (GREEK_MAP[ch] ? "\\" + GREEK_MAP[ch] : ch);
@@ -9840,6 +9853,11 @@ function rescueQuizMath(input) {
       /\\(?:int|iint|iiint|oint|sum|prod|frac|dfrac|tfrac|binom|sqrt|partial|nabla|infty|cdot|times|to|Rightarrow|leftarrow|rightarrow|leq|geq|neq|approx|equiv|mapsto|circ|left|right|mathbb|mathcal|mathrm|boldsymbol|vec|hat|bar|tilde|dot|ddot|alpha|beta|gamma|delta|epsilon|varepsilon|zeta|eta|theta|vartheta|iota|kappa|lambda|mu|nu|xi|omicron|pi|varpi|rho|varrho|sigma|varsigma|tau|upsilon|phi|varphi|chi|psi|omega|Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Upsilon|Phi|Psi|Omega|quad|qquad|[,;:!])/.test(out)
     ) {
       out = "$" + out + "$";
+    } else if (/\\[a-zA-Z]/.test(out) && !/\$/.test(out)) {
+      // 长串且含中文的兜底：用保守的 auto-wrap，只把连续 LaTeX 命令段包 $
+      //   例："结论：\mathcal{L}\{e^{at}\} = \frac{1}{s-a}，这是关键" →
+      //        "结论：$\mathcal{L}\{e^{at}\} = \frac{1}{s-a}$，这是关键"
+      out = autoWrapBareLatex(out);
     }
     return out;
   }).join("");
