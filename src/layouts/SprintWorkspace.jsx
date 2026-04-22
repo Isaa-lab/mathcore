@@ -46,7 +46,7 @@ function VerticalMiniCalendar({ examPlan, onDayClick, selectedDayKey }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {/* 月切换 + 距考徽章 合并一行 */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <button onClick={prevMonth} style={navBtn} aria-label="上一月">‹</button>
@@ -682,7 +682,7 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
   return (
     <div style={{ display: "flex", flex: 1, padding: 24, gap: 24, overflow: "hidden", boxSizing: "border-box" }}>
       <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: 24 }}>
-        <div className="premium-card" style={{ flex: "1 1 auto", padding: 16, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div className="premium-card" style={{ flex: "1 1 auto", padding: 16, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexShrink: 0 }}>
             <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>冲刺日历</h3>
             <button onClick={() => setSetupOpen(true)} title={hasPlan ? "修改考试计划" : "设置考试日期"}
@@ -696,29 +696,33 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
             </button>
           </div>
 
-          {!hasPlan && (
+          {!hasPlan ? (
+            // 未设置：整个区域给 CTA 居中，不显示空日历
             <div style={{
+              flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
               background: "linear-gradient(135deg,#EEF2FF,#F0F9FF)",
               border: "2px dashed #C7D2FE", borderRadius: 12,
-              padding: "16px 14px", textAlign: "center", marginBottom: 14,
+              padding: "24px 18px", textAlign: "center", minHeight: 0,
             }}>
-              <div style={{ fontSize: 28, marginBottom: 4 }}>🎯</div>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#111", marginBottom: 3 }}>还没有考试计划</div>
-              <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 10, lineHeight: 1.5 }}>
-                告诉系统考试哪天、复习哪几章、每天学多久
+              <div style={{ fontSize: 40, marginBottom: 10 }}>🎯</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#111", marginBottom: 6 }}>还没有考试计划</div>
+              <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16, lineHeight: 1.6, maxWidth: 220 }}>
+                告诉系统考试哪天、复习哪几章、每天学多久，系统会自动生成每日任务
               </div>
               <button onClick={() => setSetupOpen(true)}
-                style={{ padding: "7px 16px", background: "#4F46E5", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 3px 10px rgba(79,70,229,0.3)" }}>
+                style={{ padding: "10px 20px", background: "#4F46E5", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 12px rgba(79,70,229,0.3)" }}>
                 设置考试日期
               </button>
             </div>
+          ) : (
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+              <VerticalMiniCalendar
+                examPlan={examPlan}
+                selectedDayKey={selectedDayKey}
+                onDayClick={setSelectedDayKey}
+              />
+            </div>
           )}
-
-          <VerticalMiniCalendar
-            examPlan={examPlan}
-            selectedDayKey={selectedDayKey}
-            onDayClick={setSelectedDayKey}
-          />
         </div>
 
         <div className="premium-card" style={{ flex: "0 0 auto", padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
