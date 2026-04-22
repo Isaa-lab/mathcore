@@ -1621,6 +1621,34 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
     } catch (e) {}
   }
 
+  // Step 5b: Persist AI topics into material_topics so KnowledgePage can surface them.
+  //   RLS: sql/material_uploader_write_rls.sql allows owner to insert topics of own material.
+  //   Table missing / RLS mis-config / dup-run are all tolerated (silent fallback).
+  let topicsLinked = 0;
+  if (!apiQuotaExceeded && topics.length > 0) {
+    try {
+      const topicRows = topics
+        .filter(t => t && t.name && String(t.name).trim())
+        .map(t => ({
+          material_id: materialId,
+          name: String(t.name).trim().slice(0, 120),
+          summary: t.summary ? String(t.summary).slice(0, 800) : null,
+          chapter: chapter || null,
+        }));
+      if (topicRows.length > 0) {
+        const { error: et } = await supabase.from("material_topics").insert(topicRows);
+        if (!et) topicsLinked = topicRows.length;
+        else {
+          // Common causes: relation does not exist (42P01), column missing, RLS blocked.
+          // Log for diagnostics, do not fail the whole upload.
+          console.warn("[material_topics] insert failed:", et.message || et.code);
+        }
+      }
+    } catch (e) {
+      console.warn("[material_topics] insert exception:", e?.message);
+    }
+  }
+
   // Build diagnostic info for the UI
   const textLen = text.trim().length;
   const englishRatio = textLen > 0
@@ -1638,7 +1666,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
   };
 
   return {
-    topics, questions, insertedCount, materialLinked,
+    topics, questions, insertedCount, materialLinked, topicsLinked,
     hasText, usedApi, pdfLikelyScanned: !hasText,
     textDiag,
     apiQuotaExceeded,
@@ -4209,18 +4237,32 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
       return list.length > 0 ? list[0].id : null;
     });
 
-    const tRes = await supabase.from("questions") /* material_topics stub */.select("*").order("created_at", { ascending: false }).limit(500);
-    setAiTopics(tRes.data || []);
+    // Real AI-extracted topics (material_topics schema from sql/learning_mvp_schema.sql)
+    // Silent fallback if table missing / RLS blocks — KnowledgePage still shows hardcoded CHAPTERS.
+    try {
+      const tRes = await supabase
+        .from("material_topics")
+        .select("id,material_id,name,summary,chapter,created_at")
+        .order("created_at", { ascending: false })
+        .limit(800);
+      setAiTopics(Array.isArray(tRes.data) ? tRes.data : []);
+    } catch (e) {
+      setAiTopics([]);
+    }
 
     const uid = (await supabase.auth.getUser())?.data?.user?.id;
     if (!uid) return;
-    const { data: mdata } = await supabase
-      .from("questions" /* topic_mastery removed */)
-      .select("topic_id,status,correct_count,wrong_count")
-      .eq("user_id", uid);
-    const map = {};
-    (mdata || []).forEach((r) => { map[r.topic_id] = r; });
-    setTopicMastery(map);
+    try {
+      const { data: mdata } = await supabase
+        .from("topic_mastery")
+        .select("topic_id,status,correct_count,wrong_count")
+        .eq("user_id", uid);
+      const map = {};
+      (mdata || []).forEach((r) => { map[r.topic_id] = r; });
+      setTopicMastery(map);
+    } catch (e) {
+      setTopicMastery({});
+    }
   }, []);
 
   useEffect(() => {
@@ -4235,12 +4277,20 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const markTopicMastery = async (topic, status) => {
     const uid = (await supabase.auth.getUser())?.data?.user?.id;
     if (!uid || !topic?.id) return;
-    await supabase.from("questions") /* topic_mastery stub */.upsert({
-      user_id: uid,
-      topic_id: topic.id,
-      status,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "user_id,topic_id" });
+    // Only AI topics have real UUID ids that live in material_topics; hardcoded
+    // CHAPTERS topics use synthetic string ids like "Ch.3__分离变量法" and cannot
+    // be written to topic_mastery (UUID column). Fail silently for those.
+    const looksLikeUuid = typeof topic.id === "string" && /^[0-9a-f-]{36}$/i.test(topic.id);
+    if (looksLikeUuid) {
+      try {
+        await supabase.from("topic_mastery").upsert({
+          user_id: uid,
+          topic_id: topic.id,
+          status,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: "user_id,topic_id" });
+      } catch (e) {}
+    }
     setTopicMastery((prev) => {
       const next = { ...prev, [topic.id]: { ...(prev[topic.id] || {}), status } };
       const toast = document.createElement('div');
@@ -4350,8 +4400,76 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
             </div>
           </div>
 
+          {/* ── AI extracted topics (material_topics) for this material ── */}
+          {aiTopicsForMaterial.length > 0 && (
+            <div style={{ marginBottom: 28 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <span style={{ background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 800, letterSpacing: "0.06em" }}>🤖 AI 抽取</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>本资料 AI 提取的核心知识点</span>
+                <span style={{ fontSize: 12, color: "#9ca3af" }}>{aiTopicsForMaterial.length} 个</span>
+                <div style={{ flex: 1, height: 1, background: "#f3f4f6" }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
+                {aiTopicsForMaterial.map(t => {
+                  const mastery = topicMastery[t.id]?.status || "todo";
+                  return (
+                    <div
+                      key={t.id}
+                      style={{ border: `1.5px solid ${mastery === "done" ? G.teal + "55" : "#ede9fe"}`, borderRadius: 14, padding: "16px", background: mastery === "done" ? "#f0fdf4" : "linear-gradient(180deg,#faf5ff 0%,#ffffff 80%)", display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease" }}
+                      onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 6px 20px rgba(124,58,237,0.15)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", lineHeight: 1.45, flex: 1 }}>{t.name}</div>
+                        {mastery === "done" && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: G.tealDark, background: G.tealLight, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap", marginTop: 2 }}>已掌握 ✓</span>}
+                      </div>
+                      <div style={{ fontSize: 12.5, color: "#4b5563", lineHeight: 1.65, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 40 }}>
+                        {t.summary || "（AI 未给出摘要）"}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 10, color: "#7c3aed", background: "#ede9fe", padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>🤖 AI 生成</span>
+                        {t.chapter && <span style={{ fontSize: 10, color: G.blue, background: G.blueLight, padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>{t.chapter}</span>}
+                      </div>
+                      <div style={{ display: "flex", gap: 7, marginTop: 2 }}>
+                        <button
+                          onClick={() => {
+                            // 按资料 + topic 出题：跳到该资料的专属题池
+                            if (typeof setQuizIntent === "function") {
+                              setQuizIntent({ source: "ai_topic", materialId: selectedMaterialId, topicName: t.name, count: 5 });
+                            }
+                            if (selectedMaterial) {
+                              setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
+                            }
+                          }}
+                          style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
+                        >
+                          ✏️ 按此知识点做题
+                        </button>
+                        <button
+                          onClick={() => markTopicMastery(t, mastery === "done" ? "todo" : "done")}
+                          title={mastery === "done" ? "取消掌握" : "标记已掌握"}
+                          style={{ padding: "7px 10px", fontSize: 15, background: mastery === "done" ? G.tealLight : "#f9fafb", border: `1.5px solid ${mastery === "done" ? G.teal : "#e5e7eb"}`, borderRadius: 8, cursor: "pointer", lineHeight: 1 }}
+                        >
+                          {mastery === "done" ? "✅" : "☆"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Knowledge topic cards grouped by chapter */}
-          {courseTopics.length > 0 ? (
+          {courseTopics.length === 0 && aiTopicsForMaterial.length === 0 ? (
+            <div style={{ padding: "3rem 2rem", textAlign: "center", border: "2px dashed #e5e7eb", borderRadius: 16 }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>📚</div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
+                {selectedMaterial ? `「${selectedMaterial.course}」课程暂无配置知识点` : "请在左侧选择资料"}
+              </div>
+              <div style={{ fontSize: 13, color: "#9ca3af" }}>上传资料后 AI 会自动抽取知识点；也可进入该资料练习直接出题</div>
+            </div>
+          ) : courseTopics.length > 0 ? (
             CHAPTERS.filter(ch => ch.course === selectedMaterial?.course).map(ch => {
               const chTopics = courseTopics.filter(t => t.chapterNum === ch.num);
               if (chTopics.length === 0) return null;
@@ -4429,15 +4547,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                 </div>
               );
             })
-          ) : (
-            <div style={{ padding: "3rem 2rem", textAlign: "center", border: "2px dashed #e5e7eb", borderRadius: 16 }}>
-              <div style={{ fontSize: 32, marginBottom: 12 }}>📚</div>
-              <div style={{ fontSize: 15, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
-                {selectedMaterial ? `「${selectedMaterial.course}」课程暂无配置知识点` : "请在左侧选择资料"}
-              </div>
-              <div style={{ fontSize: 13, color: "#9ca3af" }}>选择左侧资料开始学习</div>
-            </div>
-          )}
+          ) : null}
         </div>
       </div>
     </>
@@ -4637,7 +4747,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   useEffect(() => {
     // 同一个 intent 只触发一次；intent 换了（比如冲刺计划切到下一个任务）就重置
     const intentKey = autoStartIntent
-      ? `${autoStartIntent.taskId || ""}|${autoStartIntent.chapter || ""}|${autoStartIntent.source || ""}|${autoStartIntent.count || ""}`
+      ? `${autoStartIntent.taskId || ""}|${autoStartIntent.chapter || ""}|${autoStartIntent.source || ""}|${autoStartIntent.topicName || ""}|${autoStartIntent.materialId || ""}|${autoStartIntent.count || ""}`
       : null;
     if (intentKey !== lastIntentKeyRef.current) {
       autoStartFiredRef.current = false;
@@ -4649,17 +4759,28 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     if (quizMode) return; // 已经在做题中
     if (!allQuestions || allQuestions.length === 0) return;
     autoStartFiredRef.current = true;
-    const { chapter, count } = autoStartIntent;
+    const { chapter, count, topicName } = autoStartIntent;
     const parseOf = (c) => QUIZ_parseChapter(c) || null;
     const targetParsed = parseOf(chapter);
-    const pool = allQuestions.filter(q => {
+    // 先按 chapter 过滤
+    let pool = allQuestions.filter(q => {
       if (!chapter) return true;
       if (q.chapter === chapter) return true;
       const qp = parseOf(q.chapter);
       if (targetParsed && qp && qp.num === targetParsed.num && qp.course === targetParsed.course) return true;
       return false;
     });
-    if (pool.length === 0) return; // 没题就留在 setup 页，让用户知道
+    // 按 topicName 再过滤（在题干/解析里出现 topic 名）
+    if (topicName) {
+      const key = String(topicName).toLowerCase();
+      const narrowed = pool.filter(q => {
+        const s = (String(q.question || "") + " " + String(q.explanation || "")).toLowerCase();
+        return s.includes(key);
+      });
+      if (narrowed.length >= 1) pool = narrowed;
+      // 如果 topic 过滤后没剩题，就用原 pool（至少不让用户卡住）
+    }
+    if (pool.length === 0) return;
     startWithPool(pool, count || Math.min(5, pool.length));
   }, [autoStartIntent, loading, allQuestions, quizMode]);
 
@@ -7193,107 +7314,351 @@ function UploadPage({ setPage, profile }) {
   const [success, setSuccess] = useState("");
   const pdfRef = useRef();
 
+  // 诊断 & 我的资料快照
+  const [myMaterials, setMyMaterials] = useState([]);
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diagReport, setDiagReport] = useState(null);
+
+  // 批量上传面板
+  const [batchFiles, setBatchFiles] = useState([]); // [{file, title, course, isPublic, status: "pending"|"running"|"done"|"error", msg, progress}]
+  const [batchRunning, setBatchRunning] = useState(false);
+  const batchInputRef = useRef();
+
   const CHAPTERS = ["全部", ...Array.from({ length: 12 }, (_, i) => `Ch.${i + 1}`)];
   const getExt = (name = "") => {
     const idx = name.lastIndexOf(".");
     return idx >= 0 ? name.slice(idx).toLowerCase() : "";
   };
+
+  // 猜课程：从文件名/路径/title 中识别学科
+  const guessCourse = (name = "") => {
+    const s = String(name).toLowerCase();
+    if (/(ode|ordinary.*diff|常微分|微分方程)/i.test(s)) return "ODE";
+    if (/(probab|概率|probability)/i.test(s)) return "概率论";
+    if (/(stat|统计)/i.test(s)) return "数理统计";
+    if (/(linear.*algebra|线性代数|matrix)/i.test(s)) return "线性代数";
+    if (/(numerical|数值|sauer)/i.test(s)) return "数值分析";
+    if (/(optim|最优化)/i.test(s)) return "最优化";
+    if (/(calculus|高等数学|微积分)/i.test(s)) return "高等数学";
+    return course;
+  };
+
   const buildUploadError = (err) => {
     const msg = String(err?.message || "未知错误");
+    const code = String(err?.code || "");
     if (/row-level security|permission denied|42501/i.test(msg)) {
-      if (profile?.role === "student") {
-        return "当前数据库策略仅允许教师直接发布资料。学生上传需走“待审核”流程（你现在的 SQL 还未开启该策略）。";
-      }
-      return "权限不足：请检查 Supabase RLS 策略（materials 表 / storage bucket）的 insert 与 upload 权限。";
+      if (!profile?.id) return "当前未登录（session 丢失），请刷新后重新登录再上传。";
+      if (!profile?.role) return "当前账号 profiles.role 为空，RLS 会拒绝上传。请到 Supabase profiles 表把自己 role 设为 'student' 或 'teacher'。";
+      return `权限不足 (${code || "42501"})：未跑 sql/materials_review_workflow.sql 或 storage bucket 'materials' 策略缺失。原始消息：${msg}`;
     }
-    return msg;
+    if (/bucket|storage/i.test(msg) && /not.*found|does not exist/i.test(msg)) {
+      return `存储桶 'materials' 不存在。请在 Supabase Storage 创建公开桶 materials，或执行 sql/materials_review_workflow.sql 末尾的 bucket 初始化。原始消息：${msg}`;
+    }
+    return msg + (code ? `（code: ${code}）` : "");
+  };
+
+  const loadMyMaterials = async () => {
+    if (!profile?.id) { setMyMaterials([]); return; }
+    const { data } = await supabase.from("materials")
+      .select("id,title,course,chapter,status,is_public,created_at,file_data")
+      .eq("uploaded_by", profile.id)
+      .order("created_at", { ascending: false })
+      .limit(40);
+    setMyMaterials(Array.isArray(data) ? data : []);
+  };
+  useEffect(() => { loadMyMaterials(); /* eslint-disable-next-line */ }, [profile?.id]);
+
+  // 一键诊断：逐项检查 session / role / bucket / materials insert
+  const runDiagnostics = async () => {
+    setDiagOpen(true);
+    setDiagReport({ running: true });
+    const report = { ts: Date.now(), items: [] };
+    const addItem = (label, ok, detail = "") => report.items.push({ label, ok, detail });
+
+    const sess = await supabase.auth.getSession();
+    const uid = sess?.data?.session?.user?.id;
+    addItem("Supabase 会话", !!uid, uid ? `user.id = ${uid}` : "未登录");
+    addItem("profiles.role", !!profile?.role, profile?.role ? `role = ${profile.role}` : "role 为空 → RLS 会拒绝");
+
+    try {
+      const { data, error } = await supabase.from("materials")
+        .select("id", { count: "exact", head: true })
+        .limit(1);
+      addItem("materials 表可读", !error, error ? error.message : "ok");
+    } catch (e) { addItem("materials 表可读", false, e?.message); }
+
+    try {
+      const { data: mine } = await supabase.from("materials").select("id").eq("uploaded_by", profile?.id || "___").limit(1);
+      addItem("我上传过的资料", Array.isArray(mine), `共 ${Array.isArray(mine) ? mine.length : 0} 条（此页已列出详细列表）`);
+    } catch (e) { addItem("我上传过的资料", false, e?.message); }
+
+    // Probe storage bucket existence by trying to list (allowed for public bucket usually)
+    try {
+      const r = await supabase.storage.from("materials").list("", { limit: 1 });
+      addItem("存储桶 materials", !r.error, r.error ? r.error.message : "ok");
+    } catch (e) { addItem("存储桶 materials", false, e?.message); }
+
+    try {
+      const r = await supabase.from("material_topics").select("id", { head: true, count: "exact" });
+      addItem("material_topics 表", !r.error, r.error ? r.error.message : "ok（AI 知识点会写这里）");
+    } catch (e) { addItem("material_topics 表", false, e?.message); }
+
+    setDiagReport({ running: false, ...report });
+  };
+
+  // 核心：上传 + 解析 + AI + 入库 topics/questions
+  const uploadOne = async ({ title: tTitle, file: tFile, course: tCourse, chapter: tChapter, isPublic: tPub, desc: tDesc, onStep }) => {
+    const ext = getExt(tFile.name);
+    if (!MATERIAL_ALLOWED_EXTS.includes(ext)) throw new Error(`仅支持 PDF/PPT/DOC，当前扩展名：${ext}`);
+    if (tFile.size > 50 * 1024 * 1024) throw new Error("文件超过 50MB");
+
+    onStep && onStep("上传到存储…");
+    const filePath = `${profile?.id || "anon"}/${Date.now()}_${tFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const { error: storageErr } = await supabase.storage.from("materials").upload(filePath, tFile, { upsert: false });
+    if (storageErr) throw storageErr;
+    const { data: { publicUrl } } = supabase.storage.from("materials").getPublicUrl(filePath);
+
+    onStep && onStep("写入资料库…");
+    const basePayload = {
+      title: String(tTitle || tFile.name).trim(),
+      course: tCourse || guessCourse(tFile.name) || "数学",
+      chapter: (!tChapter || tChapter === "全部") ? null : tChapter,
+      description: tDesc ? String(tDesc).trim() : null,
+      file_name: tFile.name,
+      file_size: tFile.size > 1024 * 1024 ? (tFile.size / 1024 / 1024).toFixed(1) + " MB" : (tFile.size / 1024).toFixed(0) + " KB",
+      file_data: publicUrl,
+      uploader_name: profile?.name || "用户",
+      uploaded_by: profile?.id || null,
+      is_public: tPub !== false,
+    };
+    // 策略：
+    //   - teacher → approved
+    //   - student → pending（走 sql/materials_review_workflow.sql RLS）
+    //   - 无 role → 直接尝试 approved，不行再 pending，最后退化到无 status
+    const roleKnown = profile?.role === "teacher" || profile?.role === "student";
+    const primaryStatus = profile?.role === "teacher" ? "approved" : "pending";
+
+    let insertedMaterial = null;
+    let dbErr = null;
+    {
+      const r = await supabase.from("materials").insert({ ...basePayload, status: primaryStatus }).select().single();
+      insertedMaterial = r.data; dbErr = r.error;
+    }
+    if (dbErr && isMissingMaterialsStatusColumn(dbErr)) {
+      const r = await supabase.from("materials").insert(basePayload).select().single();
+      insertedMaterial = r.data; dbErr = r.error;
+    }
+    // 如果是 RLS 拒绝，且 role 未知，再尝试另一个 status
+    if (dbErr && !roleKnown && /row-level security|42501|permission/i.test(String(dbErr.message || ""))) {
+      const alt = primaryStatus === "approved" ? "pending" : "approved";
+      const r = await supabase.from("materials").insert({ ...basePayload, status: alt }).select().single();
+      insertedMaterial = r.data; dbErr = r.error;
+    }
+    if (dbErr) throw dbErr;
+
+    // 关键变化：不管 teacher 还是 student，上传成功后都立刻本地抽文本 + AI 抽知识点 + 入库
+    // 这样学生上传自己的私有资料后也能马上用 AI 知识点 / 按知识点出题
+    onStep && onStep("PDF 解析 + AI 抽知识点…");
+    let aiResult = null;
+    try {
+      aiResult = await processMaterialWithAI({
+        material: insertedMaterial,
+        file: tFile,
+        genCount: 10,
+        actorName: profile?.name || "用户",
+      });
+    } catch (e) {
+      // 解析失败不回滚上传，保障资料至少入库
+      aiResult = { topics: [], questions: [], insertedCount: 0, topicsLinked: 0, apiErrorMsg: e?.message };
+    }
+
+    return { material: insertedMaterial, aiResult };
   };
 
   const handleUpload = async () => {
     if (!title.trim()) { setError("请填写资料名称"); return; }
     if (!file) { setError("请选择 PDF / PPT / DOC 文件"); return; }
-    const ext = getExt(file.name);
-    if (!MATERIAL_ALLOWED_EXTS.includes(ext)) {
-      setError("仅支持 PDF / PPT / DOC 文件（.pdf .ppt .pptx .doc .docx）");
-      return;
-    }
-    if (file.size > 50 * 1024 * 1024) { setError("文件超过 50MB，请压缩后再上传"); return; }
     setUploading(true); setError(""); setSuccess("");
     try {
-      // Upload file to Supabase Storage
-      setStep("上传文件到存储空间…");
-      const filePath = `${profile?.id || "anon"}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-      const { data: storageData, error: storageErr } = await supabase.storage
-        .from("materials")
-        .upload(filePath, file, { upsert: false });
-      if (storageErr) throw new Error("存储失败: " + storageErr.message + (storageErr.code ? ` (code: ${storageErr.code})` : ""));
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage.from("materials").getPublicUrl(filePath);
-
-      // Save metadata to DB
-      setStep("保存到资料库…");
-      const basePayload = {
-        title: title.trim(),
-        course,
-        chapter: chapter === "全部" ? null : chapter,
-        description: desc.trim() || null,
-        file_name: file.name,
-        file_size: file.size > 1024 * 1024
-          ? (file.size / 1024 / 1024).toFixed(1) + " MB"
-          : (file.size / 1024).toFixed(0) + " KB",
-        file_data: publicUrl,
-        uploader_name: profile?.name || "用户",
-        uploaded_by: profile?.id || null,
-        is_public: isPublic,
-      };
-      const statusValue = profile?.role === "teacher" ? "approved" : "pending";
-      let { data: insertedMaterial, error: dbErr } = await supabase.from("materials").insert({
-        ...basePayload,
-        status: statusValue,
-      }).select().single();
-      // Backward compatible: older schema may not have status column yet (incl. PGRST204).
-      if (dbErr && isMissingMaterialsStatusColumn(dbErr)) {
-        const retry = await supabase.from("materials").insert(basePayload).select().single();
-        dbErr = retry.error;
-        insertedMaterial = retry.data || null;
-      }
-      if (dbErr) throw new Error(dbErr.message + (dbErr.code ? ` (code: ${dbErr.code})` : ""));
-      if (insertedMaterial && statusValue === "approved") {
-        setStep("解析资料并生成知识点与题目…");
-        try {
-          const result = await processMaterialWithAI({
-            material: insertedMaterial,
-            file,
-            fallbackText: `${title} ${desc}`,
-            genCount: 10,
-            actorName: profile?.name || "用户",
-          });
-          if (result.apiQuotaExceeded) {
-            setSuccess(`上传成功！资料已保存。⚠️ ${result.apiErrorMsg || "Gemini API 配额暂时用完，请在资料库点击「补题」重试出题。"}`);
-          } else {
-            const linkedHint = result.materialLinked ? "" : "（题目已入库，可在题库正常练习）";
-            const diagHint = result?.textDiag?.hint ? ` 📊 ${result.textDiag.hint}` : (result.parseHint ? ` ${result.parseHint}` : "");
-            setSuccess(`上传成功！已提取 ${result.topics.length} 个知识点，入库 ${result.insertedCount ?? result.questions.length} 道题目。${linkedHint}${diagHint}`);
-          }
-        } catch (e) {
-          setSuccess("上传成功！资料已发布，AI 解析稍后可在教师端重试。");
-        }
-      } else {
-        setSuccess(profile?.role === "teacher" ? "上传成功！资料已发布到资料库。" : "上传成功！资料已提交，等待教师审核后发布。");
-      }
+      const { material, aiResult } = await uploadOne({
+        title, file, course, chapter, isPublic, desc,
+        onStep: setStep,
+      });
+      const topicsMsg = aiResult.topicsLinked > 0 ? `已抽 ${aiResult.topicsLinked} 个知识点` : (aiResult?.apiQuotaExceeded ? "AI 配额暂满，稍后可补题" : "知识点抽取 0 条");
+      const qMsg = aiResult.insertedCount > 0 ? `${aiResult.insertedCount} 道题入库` : "未入库题目";
+      setSuccess(`上传成功！${topicsMsg}，${qMsg}。${material?.status === "pending" ? "（待审核状态，你自己随时可见）" : ""}`);
       setTitle(""); setDesc(""); setFile(null); setChapter("全部");
+      loadMyMaterials();
     } catch (e) {
       setError("上传失败：" + buildUploadError(e));
     }
     setUploading(false); setStep("");
   };
 
+  // 批量上传：每个文件独立状态
+  const runBatch = async () => {
+    if (batchFiles.length === 0) return;
+    setBatchRunning(true);
+    for (let i = 0; i < batchFiles.length; i++) {
+      const item = batchFiles[i];
+      if (item.status === "done") continue;
+      setBatchFiles(prev => prev.map((it, idx) => idx === i ? { ...it, status: "running", msg: "排队中" } : it));
+      try {
+        const { aiResult } = await uploadOne({
+          title: item.title || item.file.name.replace(/\.[^.]+$/, ""),
+          file: item.file,
+          course: item.course,
+          chapter: "全部",
+          isPublic: item.isPublic !== false,
+          desc: "",
+          onStep: (s) => setBatchFiles(prev => prev.map((it, idx) => idx === i ? { ...it, msg: s } : it)),
+        });
+        const ok = `✓ 知识点 ${aiResult.topicsLinked || 0} · 题目 ${aiResult.insertedCount || 0}`;
+        setBatchFiles(prev => prev.map((it, idx) => idx === i ? { ...it, status: "done", msg: ok } : it));
+      } catch (e) {
+        setBatchFiles(prev => prev.map((it, idx) => idx === i ? { ...it, status: "error", msg: buildUploadError(e) } : it));
+      }
+    }
+    setBatchRunning(false);
+    loadMyMaterials();
+  };
+
+  const addBatchFiles = (fileList) => {
+    const picked = Array.from(fileList || []).filter(f => MATERIAL_ALLOWED_EXTS.includes(getExt(f.name)) && f.size <= 50 * 1024 * 1024);
+    if (picked.length === 0) return;
+    setBatchFiles(prev => [
+      ...prev,
+      ...picked.map(f => ({
+        file: f,
+        title: f.name.replace(/\.[^.]+$/, ""),
+        course: guessCourse(f.name),
+        isPublic: true,
+        status: "pending",
+        msg: "",
+      })),
+    ]);
+  };
+
   return (
-    <div style={{ padding: "0 0 18px", maxWidth: 760, margin: "0 auto" }}>
-      <PageHeader title="上传资料" subtitle="上传后可自动解析知识点并生成题目。" onBack={() => setPage("资料库")} backText="资料库" />
+    <div style={{ padding: "0 0 18px", maxWidth: 900, margin: "0 auto" }}>
+      <PageHeader
+        title="上传资料"
+        subtitle="上传后自动用 AI 抽取知识点并入库，出现在「知识点」区域。"
+        onBack={() => setPage("资料库")}
+        backText="资料库"
+        actions={<Btn size="sm" onClick={runDiagnostics}>🔍 诊断上传环境</Btn>}
+      />
+
+      {/* 诊断信息 */}
+      <div style={{ ...s.card, padding: "14px 18px", marginBottom: 16, background: "#f8fafc" }}>
+        <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center", fontSize: 13, color: "#374151" }}>
+          <span><b>当前用户：</b>{profile?.name || "(未设置昵称)"} · <code style={{ background: "#eef2ff", padding: "1px 6px", borderRadius: 4 }}>{profile?.id ? String(profile.id).slice(0, 8) + "…" : "未登录"}</code></span>
+          <span><b>角色：</b>{profile?.role ? profile.role : <span style={{ color: G.red }}>⚠ 未设置（RLS 会拒绝）</span>}</span>
+          <span><b>我已上传：</b>{myMaterials.length} 份</span>
+          <span style={{ color: "#6b7280" }}>Supabase：kadjwgslbp…</span>
+        </div>
+        {!profile?.role && (
+          <div style={{ marginTop: 10, fontSize: 12, color: G.red, background: G.redLight, padding: "8px 12px", borderRadius: 8 }}>
+            ⚠ 你的账号 <code>profiles.role</code> 为空。请在 Supabase 把 <code>profiles</code> 表里你的 role 设为 <code>student</code> 或 <code>teacher</code>，否则 RLS 会静默拒绝上传。点「🔍 诊断上传环境」查看详情。
+          </div>
+        )}
+      </div>
+
+      {/* 诊断结果弹层 */}
+      {diagOpen && diagReport && (
+        <div style={{ ...s.card, padding: "14px 18px", marginBottom: 16, border: `1px solid ${G.blue}44`, background: G.blueLight }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: G.blue }}>🔍 诊断报告</div>
+            <button onClick={() => setDiagOpen(false)} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 16, color: "#6b7280" }}>✕</button>
+          </div>
+          {diagReport.running ? <div style={{ fontSize: 13, color: "#6b7280" }}>诊断中…</div> : (
+            <div>
+              {(diagReport.items || []).map((it, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "6px 0", borderBottom: i < (diagReport.items.length - 1) ? "1px dashed #dbeafe" : "none", fontSize: 13 }}>
+                  <span style={{ minWidth: 22 }}>{it.ok ? "✅" : "❌"}</span>
+                  <span style={{ fontWeight: 600, minWidth: 160, color: "#111827" }}>{it.label}</span>
+                  <span style={{ color: it.ok ? "#065f46" : G.red, flex: 1 }}>{it.detail}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 我已上传的资料 */}
+      {myMaterials.length > 0 && (
+        <div style={{ ...s.card, padding: "14px 18px", marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10, color: "#111827" }}>📂 我已上传的资料（{myMaterials.length}）</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 8 }}>
+            {myMaterials.map(m => (
+              <div key={m.id} style={{ padding: "8px 10px", border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.title}</div>
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <span>{m.course || "未分类"}</span>
+                  {m.status && m.status !== "approved" && <span style={{ color: G.amber, fontWeight: 600 }}>· {m.status}</span>}
+                  {m.is_public === false && <span style={{ color: G.blue }}>· 🔒</span>}
+                  <span>· {new Date(m.created_at).toLocaleDateString("zh-CN")}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>
+            看不到想找的资料？点上方「🔍 诊断」排查；或者你当前登录的账号可能不是之前上传的账号。
+          </div>
+        </div>
+      )}
+
+      {/* 批量上传面板 */}
+      <div style={{ ...s.card, padding: "1.2rem 1.5rem", marginBottom: 16, border: `1.5px dashed ${G.purple}55`, background: "linear-gradient(180deg,#faf5ff 0%,#ffffff 70%)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: G.purple }}>📦 批量上传（推荐：把本地 PDF 一次拖进来）</div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 3 }}>自动识别学科；逐个上传并 AI 抽取知识点、生成题目</div>
+          </div>
+          <button onClick={() => batchInputRef.current?.click()} style={{ padding: "8px 14px", background: G.purple, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
+            + 选择多个文件
+          </button>
+          <input ref={batchInputRef} type="file" multiple accept=".pdf,.ppt,.pptx,.doc,.docx" style={{ display: "none" }} onChange={e => { addBatchFiles(e.target.files); e.target.value = ""; }} />
+        </div>
+        {batchFiles.length === 0 ? (
+          <div style={{ padding: "20px 0", fontSize: 13, color: "#9ca3af", textAlign: "center" }}>
+            还没添加文件。点「+ 选择多个文件」或把 PDF 从桌面拖到这里。
+          </div>
+        ) : (
+          <div>
+            {batchFiles.map((it, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: i < batchFiles.length - 1 ? "1px dashed #ede9fe" : "none" }}>
+                <span style={{ fontSize: 18 }}>{it.status === "done" ? "✅" : it.status === "error" ? "❌" : it.status === "running" ? "⏳" : "⏸️"}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title}</div>
+                  <div style={{ fontSize: 11, color: it.status === "error" ? G.red : "#6b7280", marginTop: 2 }}>{it.course} · {it.isPublic ? "🌐 公开" : "🔒 仅自己"} · {it.msg || "待上传"}</div>
+                </div>
+                <select value={it.course} disabled={it.status !== "pending"} onChange={e => setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, course: e.target.value } : x))} style={{ padding: "4px 6px", fontSize: 12, borderRadius: 6, border: "1px solid #e5e7eb" }}>
+                  {courses.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <button onClick={() => setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, isPublic: !x.isPublic } : x))} disabled={it.status !== "pending"} title="切换可见范围" style={{ padding: "4px 8px", fontSize: 11, borderRadius: 6, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer" }}>
+                  {it.isPublic ? "🌐" : "🔒"}
+                </button>
+                {it.status === "pending" && (
+                  <button onClick={() => setBatchFiles(prev => prev.filter((_, idx) => idx !== i))} style={{ padding: "4px 8px", fontSize: 11, borderRadius: 6, border: "1px solid #fecaca", background: "#fff", cursor: "pointer", color: G.red }}>移除</button>
+                )}
+              </div>
+            ))}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
+              <span style={{ fontSize: 12, color: "#6b7280" }}>{batchFiles.filter(x => x.status === "done").length} / {batchFiles.length} 已完成</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setBatchFiles([])} disabled={batchRunning} style={{ padding: "8px 14px", fontSize: 13, background: "#fff", color: "#6b7280", border: "1px solid #e5e7eb", borderRadius: 8, cursor: "pointer" }}>清空</button>
+                <button onClick={runBatch} disabled={batchRunning || batchFiles.length === 0} style={{ padding: "8px 18px", fontSize: 13, fontWeight: 700, background: batchRunning ? "#ccc" : G.purple, color: "#fff", border: "none", borderRadius: 8, cursor: batchRunning ? "not-allowed" : "pointer" }}>
+                  {batchRunning ? "上传中…" : "🚀 全部上传"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div style={{ ...s.card, padding: "2rem" }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#6b7280", marginBottom: 14, paddingBottom: 10, borderBottom: "1px solid #f3f4f6" }}>或者逐个精细上传 ↓</div>
         {/* 资料名称 */}
         <div style={{ marginBottom: 20 }}>
           <label style={{ ...s.label }}>资料名称 *</label>
@@ -8711,6 +9076,8 @@ function MaterialsPage({ setPage, profile }) {
   const [filter, setFilter] = useState("全部");
   const [search, setSearch] = useState("");
   const [deletingId, setDeletingId] = useState(null);
+  // 新增：作用域分段 —— 我的 / 公开 / 全部（教师视角）
+  const [scope, setScope] = useState("all"); // "all" | "mine" | "public"
   const loadMaterials = async () => {
     let query = supabase.from("materials").select("*").order("created_at", { ascending: false });
     let dataRows = [];
@@ -8727,12 +9094,12 @@ function MaterialsPage({ setPage, profile }) {
       const fallback = await supabase.from("materials").select("*").order("created_at", { ascending: false });
       dataRows = fallback.data || [];
     }
+    // 可见性：教师看全部；学生看"自己的任何资料 + 已审核且公开"
     const visible = profile?.role === "teacher"
       ? dataRows
       : dataRows.filter(m => {
           const approved = (m.status || "approved") === "approved";
           const isOwner = m.uploaded_by === profile?.id;
-          // is_public 字段不存在时（旧数据）默认视为公开
           const pub = m.is_public !== false;
           return isOwner || (approved && pub);
         });
@@ -8769,8 +9136,16 @@ function MaterialsPage({ setPage, profile }) {
     setSavingNote(false);
   };
 
-  const courses = ["全部", ...new Set(materials.map(m => m.course))];
-  const filtered = materials.filter(m => (filter === "全部" || m.course === filter) && (!search.trim() || [m.title, m.course, m.description].some(s => s && s.toLowerCase().includes(search.toLowerCase()))));
+  // Apply scope filter first
+  const scoped = materials.filter(m => {
+    if (scope === "mine") return m.uploaded_by === profile?.id;
+    if (scope === "public") return m.is_public !== false && (m.status || "approved") === "approved";
+    return true;
+  });
+  const courses = ["全部", ...Array.from(new Set(scoped.map(m => m.course).filter(Boolean)))];
+  const filtered = scoped.filter(m => (filter === "全部" || m.course === filter) && (!search.trim() || [m.title, m.course, m.description].some(s => s && s.toLowerCase().includes(search.toLowerCase()))));
+  const myCount = materials.filter(m => m.uploaded_by === profile?.id).length;
+  const publicCount = materials.filter(m => m.is_public !== false && (m.status || "approved") === "approved").length;
 
   if (selected) return (
     <div style={{ padding: "0 0 18px", maxWidth: 1140, margin: "0 auto" }}>
@@ -8877,6 +9252,29 @@ function MaterialsPage({ setPage, profile }) {
       </div>
 
       <div style={{ marginBottom: 16 }}>
+        {/* 作用域分段 */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          {[
+            { id: "all", label: `全部可见（${materials.length}）` },
+            { id: "mine", label: `📂 我的资料（${myCount}）` },
+            { id: "public", label: `🌐 仅公开（${publicCount}）` },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => { setScope(tab.id); setFilter("全部"); }}
+              style={{
+                fontSize: 13, padding: "7px 16px", borderRadius: 20,
+                border: scope === tab.id ? `2px solid ${G.teal}` : "2px solid #E5E7EB",
+                background: scope === tab.id ? G.tealLight : "#fff",
+                color: scope === tab.id ? G.tealDark : "#6B7280",
+                fontWeight: scope === tab.id ? 700 : 500,
+                cursor: "pointer", fontFamily: "inherit",
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 搜索资料名称、课程或简介…" style={{ width: "100%", fontSize: 15, padding: "12px 16px", border: "1px solid #E5E7EB", borderRadius: 12, fontFamily: "inherit", color: "#111", boxSizing: "border-box", marginBottom: 12, background: "#F9FAFB", outline: "none" }} />
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {courses.map(c => (
@@ -8890,8 +9288,17 @@ function MaterialsPage({ setPage, profile }) {
       {!loading && filtered.length === 0 && (
         <div style={{ textAlign: "center", padding: "4rem", border: "2px dashed #E5E7EB", borderRadius: 16 }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>📭</div>
-          <div style={{ fontSize: 18, fontWeight: 600, color: "#333", marginBottom: 8 }}>暂无资料</div>
-          <div style={{ fontSize: 15, color: "#888" }}>{profile?.role === "teacher" ? "点击右上角上传第一份教材" : "请等待教师上传教材"}</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: "#333", marginBottom: 8 }}>
+            {scope === "mine" ? "你还没上传过资料" : scope === "public" ? "暂无公开资料" : "暂无资料"}
+          </div>
+          <div style={{ fontSize: 15, color: "#888", marginBottom: 14 }}>
+            {scope === "mine"
+              ? "点「+ 上传资料」把你的 PDF 传上来；可以批量上传，AI 会自动抽取知识点。"
+              : scope === "public"
+              ? "尝试切到「我的资料」看看你自己上传的私人资料。"
+              : (profile?.role === "teacher" ? "点击右上角上传第一份教材" : "请等待教师上传教材，或点上传传自己的")}
+          </div>
+          <Btn variant="primary" onClick={() => setPage("上传资料")}>+ 上传资料</Btn>
         </div>
       )}
 
@@ -11853,7 +12260,7 @@ export default function App() {
     if (page === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
     if (page === "上传资料") return <UploadPage setPage={handleSetPage} profile={profile} />;
     if (page === "资料对话") return <MaterialChatPage setPage={handleSetPage} profile={profile} />;
-    if (page === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} />;
+    if (page === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} setQuizIntent={setQuizIntent} sessionAnswers={sessionAnswers} />;
     if (page === "题库练习" || page.startsWith("quiz_material_")) {
       let matId = null, matTitle = null;
       if (page.startsWith("quiz_material_")) {
