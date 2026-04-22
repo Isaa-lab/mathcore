@@ -10,6 +10,7 @@ import InteractiveMathChart from "./components/InteractiveMathChart";
 import StudyWorkspace from "./layouts/StudyWorkspace";
 import SprintWorkspace from "./layouts/SprintWorkspace";
 import { isEditableFocused } from "./utils/keyboard";
+import { detectVizIntent, logVizIntent } from "./utils/vizIntent";
 import "katex/dist/katex.min.css";
 
 // Inject global CSS animations
@@ -4714,11 +4715,19 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   }, [aiMessages, showAIHelp]);
   // —— 统一的对话发送逻辑：追加用户消息 + AI 占位 → 发请求 → 用真实回复替换占位 ——
   // historyOverride 可用于在首轮对话时显式传入空历史，避免 state 异步读不到最新值
-  const sendChatMessage = async (userText, historyOverride) => {
+  const sendChatMessage = async (userText, historyOverride, options = {}) => {
     if (!q) return;
     const text = String(userText || "").trim();
     if (!text) return;
     setLastAskInput(text);
+
+    // —— 可视化意图分流（问题 2 的主防线）——
+    // forceViz: 由"💡 你可能想"按钮等主动入口传入，等同于用户明确请求画图；
+    // 否则用关键词检测推断。默认纯文字，用户不说"画图"就不画。
+    const intent = options.forceViz
+      ? { wantsViz: true, reason: "button_click" }
+      : detectVizIntent(text);
+    logVizIntent(text, intent);
 
     const userId = "u_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
     const aiId = "a_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
@@ -4749,6 +4758,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           mode: "socratic",
           question: text,
           conversationHistory: history,
+          // 可视化意图信号：后端据此切换 prompt 分流（默认禁止 [VIZ:...]）+ 做兜底剥离
+          vizIntent: {
+            wantsViz: !!intent.wantsViz,
+            reason: intent.reason,
+          },
           questionContext: {
             stem: q.question,
             options: q.options || null,
@@ -4876,6 +4890,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           mode: "socratic",
           question: "（自动重试：请重画失败的可视化）",
           conversationHistory: retryHistory,
+          // 这是可视化失败后的"自动重画"——本轮必然是要图的
+          vizIntent: { wantsViz: true, reason: "auto_retry_viz" },
           questionContext: {
             stem: q.question,
             options: q.options || null,
@@ -6040,19 +6056,22 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                             </div>
                           )
                         ))}
-                        {/* 快捷追问 —— 只对最后一条完成态的 AI 消息显示，把能力暴露给用户 */}
+                        {/* 快捷追问 —— 只对最后一条完成态的 AI 消息显示，把能力暴露给用户。
+                            forceViz 决策逻辑：
+                              · 画图/分步/对比 → 本身就是可视化请求，强制开闸
+                              · 举例 → 例子是叙述性的，纯文字反而更清楚 */}
                         {isLastAssistant && (
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12, paddingTop: 10, borderTop: "1px dashed rgba(0,0,0,0.08)" }}>
                             <span style={{ fontSize: 11, color: "#6B7280", marginRight: 2, alignSelf: "center" }}>💡 你可能想:</span>
                             {[
-                              { label: "🎨 画一张图", text: "能给我画一张可视化图吗？用最直观的结构把关键逻辑画出来。" },
-                              { label: "📐 分步推导", text: "能把这个知识点分步骤推导一下吗？" },
-                              { label: "📊 对比相关概念", text: "能把相关的概念放在一起做一次对比吗？" },
-                              { label: "🔍 举个例子", text: "能举一个具体的例子说明吗？" },
+                              { label: "🎨 画一张图", text: "能给我画一张可视化图吗？用最直观的结构把关键逻辑画出来。", forceViz: true },
+                              { label: "📐 分步推导", text: "能把这个知识点分步骤推导一下吗？", forceViz: true },
+                              { label: "📊 对比相关概念", text: "能把相关的概念放在一起做一次对比吗？", forceViz: true },
+                              { label: "🔍 举个例子", text: "能举一个具体的例子说明吗？", forceViz: false },
                             ].map((chip, ci) => (
                               <button
                                 key={ci}
-                                onClick={() => { if (!aiIsBusy) sendChatMessage(chip.text); }}
+                                onClick={() => { if (!aiIsBusy) sendChatMessage(chip.text, undefined, { forceViz: chip.forceViz }); }}
                                 disabled={aiIsBusy}
                                 style={{
                                   fontSize: 11.5, padding: "4px 10px", borderRadius: 999,

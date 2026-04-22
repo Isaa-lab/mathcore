@@ -1,3 +1,48 @@
+// ────────────────────────────────────────────────────────────────────────────
+// 后端兜底：剥离响应中的 [VIZ:{...}] 指令（保留 [GRAPH_REF:...]）。
+// 用于 socratic 模式下"用户未要求可视化"时，即便模型违规画图也不会污染 UI。
+// 用 bracket counting 而不是 `/\[VIZ:[\s\S]*?\]/` 正则，因为 JSON 里 LaTeX
+// 的 `\\frac{...}` 会让 non-greedy 在第一个 `}` 处提前截断。
+// ────────────────────────────────────────────────────────────────────────────
+function stripVizMarkers(text) {
+  const src = String(text || "");
+  let out = "";
+  let i = 0;
+  while (i < src.length) {
+    const vizStart = src.indexOf("[VIZ:", i);
+    if (vizStart === -1) { out += src.slice(i); break; }
+    out += src.slice(i, vizStart);
+
+    // 从 [VIZ: 之后找第一个 { —— 中间可能有空白
+    let j = vizStart + 5;
+    while (j < src.length && /\s/.test(src[j])) j++;
+    if (src[j] !== "{") {
+      // 非预期格式：保守保留 "[VIZ:"，跳过 5 个字符继续扫
+      out += "[VIZ:";
+      i = vizStart + 5;
+      continue;
+    }
+    // bracket counting（跳过字符串里的 {}）
+    let depth = 0, k = j, inStr = false, esc = false;
+    for (; k < src.length; k++) {
+      const ch = src[k];
+      if (esc) { esc = false; continue; }
+      if (ch === "\\") { esc = true; continue; }
+      if (ch === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === "{") depth++;
+      else if (ch === "}") { depth--; if (depth === 0) { k++; break; } }
+    }
+    // 跳过紧随其后的 "]"（允许空白）
+    while (k < src.length && /\s/.test(src[k])) k++;
+    if (src[k] === "]") k++;
+    // 清理多余换行（保证剥掉后不留孤零的"如图：\n\n"段）
+    while (k < src.length && (src[k] === "\n" || src[k] === " ")) k++;
+    i = k;
+  }
+  return out.trim();
+}
+
 // ── 顶层 try/catch 守卫 ────────────────────────────────────────────────────
 // 关键：任何同步/异步异常都必须返回合法 JSON，绝不能让 Vercel 返回 HTML
 // ("FUNCTION_INVOCATION_FAILED") —— 那会让前端完全丢失定位信息。
@@ -29,6 +74,7 @@ async function runHandler(req, res) {
     mode, question: chatQuestion, materialTitle, materialContext,
     conversationHistory,
     questionContext, // { stem, options, correctAnswer, userSelection, isCorrect, misconception, knowledgePoints }
+    vizIntent,       // { wantsViz: bool, reason: string } —— 前端已做关键词检测，后端据此分流 prompt
     userProvider, userKey, userCustomUrl,
   } = body;
 
@@ -123,6 +169,16 @@ async function runHandler(req, res) {
   const isSocraticMode = mode === "socratic" && chatQuestion;
   // socratic 走 chat 管线（流式对话、纯文本输出），不进入出题分支
   const isChatMode = isSocraticMode || ((mode === "chat" || mode === "tutor") && chatQuestion);
+
+  // —— 可视化开关（提升到外层：prompt 构建段和响应兜底段都要用） ——
+  // 两个正向信号，取并：
+  //   · 前端 detectVizIntent 已判定（精细正则 + "💡你可能想"按钮 forceViz）
+  //   · 后端兜底扫一次用户原文（防止旧前端 / 重试链路没传 vizIntent）
+  const __userAskedForViz = typeof chatQuestion === "string" &&
+    /可视化|画图|画一张|画出|图解|示意图|直观|展示|给我看|visuali[sz]e|diagram|chart|graph/i.test(chatQuestion);
+  const __frontendWantsViz = !!(vizIntent && vizIntent.wantsViz);
+  // socratic 模式才有"按需触发"概念；普通 tutor/chat 默认允许 viz（保持旧行为）
+  const allowViz = isSocraticMode ? (__frontendWantsViz || __userAskedForViz) : true;
 
   // ── 可视化决策心法（四层决策树 + VIZ 协议） ─────────────────────────────
   // AI 必须先完成四层判断，再决定是否下发可视化指令，避免"不管什么都画流程图"
@@ -423,35 +479,11 @@ ${vizProfile.extraConstraint ? "\n━━━ 本轮模型专属约束（必须遵
     // ✅ render_visualization（annotation / hierarchy / process / comparison / concept；允许 parametric 但极少用）
     // ❌ generate_practice_question（避免复盘时又出新题）
     // ❌ reveal_answer（绝不直接报答案）
-    const userAskedForViz = typeof chatQuestion === "string" &&
-      /可视化|画图|画一张|画出|图解|示意图|直观|展示|给我看|visuali[sz]e|diagram|chart|graph/i.test(chatQuestion);
 
-    // 精简版 socratic prompt —— 只保留硬约束，去掉大量冗余和反模式举例
-    // （原版 2000+ tokens，精简后 ~600 tokens，配合 llama-3.1-8b-instant 能稳定 < 3s 返回）
-    systemPrompt = `你是数学老师，在帮学生复盘 TA 刚做完的题。苏格拉底式引导，多问少讲。
-
-【学生状态】${wrong ? "答错" : userPick ? "答对" : "未作答"}${wrong ? "——引导 TA 自己发现错误，不报答案" : userPick ? "——帮 TA 把直觉升级成推理链" : "——从已知条件迈出第一步"}
-
-【能力】
-1. 文字对话（默认）
-2. 画图：输出一行 [VIZ:{...}] 即可生成可视化；学生明确要求"画图/可视化/直观"时必须用
-3. 分步推导：用 [VIZ:{structure:"process",...}]
-
-【硬禁止】
-❌ 不能直接说正确答案${correct ? `（本题答案是「${correct}」，你知道但不许告诉学生）` : ""}
-❌ 不能出新题、不能说"我们再做一道"
-❌ 不能用【题目/选项/答案】这类结构化标签
-❌ 不能"说有图却不画"——写了"如图所示/让我们想象一下/下面这张图"就必须紧跟 [VIZ:...]
-❌ 不能用 ASCII 树枝 (├──│└──) 或 Markdown 表格冒充可视化
-
-【必做】
-✅ 公式用 LaTeX：行内 $...$，块级 $$...$$
-✅ 文字回复 ≤150 字；一次只抛 1 个问题
-✅ 开场接住情绪（"嗯，你选了 X，我们一起想想..."）
-
-【VIZ 协议】一行合法 JSON：
-[VIZ:{"structure":"<type>","interactionLevel":"L0|L1","title":"标题","description":"一句话","data":{...}}]
-
+    // 分流后的可视化段：开闸 vs 禁止
+    const vizSection = allowViz
+      ? `【可视化（本轮已开启）】
+用户这轮明确想看图，必须在文字讲解之后输出 **1 个** [VIZ:...]。
 structure 对号入座（本轮可用：${vizProfile.preferredStructures.join(" / ")}）：
 - "什么是X/定义/代表" → annotation（公式拆解）
 - "有哪几种/分类" → hierarchy（层级树）
@@ -459,22 +491,54 @@ structure 对号入座（本轮可用：${vizProfile.preferredStructures.join(" 
 - "怎么推/证明/步骤" → process（分步）
 - "关系/之间/知识图谱/脉络" → 输出引用标记 **[GRAPH_REF:<slug>|<中文名>]**（不要内联 concept JSON；独立管道会异步生成 10-15 节点的高质量图谱并缓存）
 
+【VIZ 协议】一行合法 JSON：
+[VIZ:{"structure":"<type>","interactionLevel":"L0|L1","title":"标题","description":"一句话","data":{...}}]
+
 data 骨架（选 structure 对应的那一种即可）：
 · annotation: {"formula":"\\\\frac{dy}{dx}+P(x)y=Q(x)","parts":[{"tex":"\\\\frac{dy}{dx}","label":"导数","tone":"indigo"}, ...]}
 · hierarchy: {"root":{"name":"根","children":[...]}}
-· process: {"steps":[{"title":"第1步","desc":"...","formula":"可选 LaTeX"}]}
+· process: {"steps":[{"title":"第1步","narrative":"...","math":{"latex":"P(x)=\\\\sum y_i L_i(x)","explanation":"..."},"insight":"..."}]}
 · comparison: {"columns":[{"title":"A","points":[{"text":"优势","tone":"pro"}]}]}
 · concept：本版本改为**引用标记** [GRAPH_REF:<slug>|<中文名>]。例：[GRAPH_REF:lagrange_interpolation|Lagrange 插值多项式]
-  · 不要再在本次回复里输出 {"structure":"concept", ...} 的内联 JSON
-  · slug 规则：小写英文 + 下划线，同一概念 slug 必须稳定
-  · 前端会异步拉取 10-15 节点的高质量图谱并缓存
 
-⚠️ JSON 逃逸铁律：LaTeX 的 \\ 必须双写（\\\\frac 而非 \\frac）。合法转义只有 \\" \\\\ \\/ \\b \\f \\n \\r \\t \\uXXXX，其它都要双写。不要尾逗号、不要智能引号、不要代码块围栏，必须完整闭合。本轮最多 ${vizProfile.maxVizPerReply} 个 [VIZ:...]。
-${vizProfile.extraConstraint ? "\n" + vizProfile.extraConstraint + "\n" : ""}
+⚠️ **LaTeX 字段规范（关键，避免公式以原始代码显示在红框里）**：
+  · math.latex 必须是**纯 LaTeX 源码**，例："L_i(x) = \\\\prod_{j \\\\ne i} \\\\frac{x-x_j}{x_i-x_j}"
+  · **禁止**用 $...$ 或 $$...$$ 包裹 math.latex 的内容
+  · **禁止**用 \`\`\`...\`\`\` 代码块包裹 math.latex 的内容
+  · title/narrative/insight 等文本字段里的 **行内公式** 仍然用 $...$ 包裹（正常 markdown 写法）
+
+⚠️ JSON 逃逸铁律：LaTeX 的 \\ 必须双写（\\\\frac 而非 \\frac）。合法转义只有 \\" \\\\ \\/ \\b \\f \\n \\r \\t \\uXXXX。不要尾逗号、不要智能引号、不要代码块围栏，必须完整闭合。本轮最多 ${vizProfile.maxVizPerReply} 个 [VIZ:...]。
+${vizProfile.extraConstraint ? "\n" + vizProfile.extraConstraint + "\n" : ""}`
+      : `【可视化（本轮已关闭）】
+⛔ 本轮**禁止**输出 [VIZ:{...}] —— 用户没有明确要求画图，文字 + LaTeX 讲清即可。
+⛔ 也不要说"下面我给你画一张..."、"如图所示..." 这种假装有图的话。
+✅ 如果你判断一张图确实能帮助理解，**只能在回复末尾用一句自然语言提示一下**：
+   例："如果想看一张图帮助理解，告诉我'帮我画一张'就好。"
+   （不要多提，偶尔点一下即可；更多场景由 UI 上的"💡 你可能想"按钮兜底）
+✅ [GRAPH_REF:<slug>|<中文名>] 这种**轻量引用标记**依然可以用（它不会立刻画图，用户点开才展开缓存的概念图谱）。`;
+
+    // 精简版 socratic prompt —— 只保留硬约束，去掉大量冗余和反模式举例
+    // （原版 2000+ tokens，精简后 ~600 tokens，配合 llama-3.1-8b-instant 能稳定 < 3s 返回）
+    systemPrompt = `你是数学老师，在帮学生复盘 TA 刚做完的题。苏格拉底式引导，多问少讲。
+
+【学生状态】${wrong ? "答错" : userPick ? "答对" : "未作答"}${wrong ? "——引导 TA 自己发现错误，不报答案" : userPick ? "——帮 TA 把直觉升级成推理链" : "——从已知条件迈出第一步"}
+
+【硬禁止】
+❌ 不能直接说正确答案${correct ? `（本题答案是「${correct}」，你知道但不许告诉学生）` : ""}
+❌ 不能出新题、不能说"我们再做一道"
+❌ 不能用【题目/选项/答案】这类结构化标签
+❌ 不能用 ASCII 树枝 (├──│└──) 或 Markdown 表格冒充可视化
+
+【必做】
+✅ 公式用 LaTeX：行内 $...$，块级 $$...$$
+✅ 文字回复 ≤150 字；一次只抛 1 个问题
+✅ 开场接住情绪（"嗯，你选了 X，我们一起想想..."）
+
+${vizSection}
+
 【这道题的背景】
 题目：${stem || "（未提供）"}
 ${optLines ? `选项：\n${optLines}` : ""}${kps ? `\n知识点：${kps}` : ""}${userPick ? `\n学生选：${userPick}` : ""}${miscon ? `\n错项对应的误解：${miscon}` : ""}
-${userAskedForViz ? "\n⚠️ 学生本轮明确要求可视化——回复必须含一个合法的 [VIZ:{...}]，不得只用文字。" : ""}
 
 现在根据学生的提问开始引导。第一句温和不打击。`;
   } else if (isChatMode) {
@@ -829,7 +893,19 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   }
 
   if (isChatMode) {
-    return res.status(200).json({ answer: responseText.trim() });
+    let finalAnswer = responseText.trim();
+
+    // —— 可视化按需触发：后端兜底剥离 ——
+    // 若本轮不允许 [VIZ:...]（socratic 模式且用户没要求），把 AI 偷偷塞进来的可视化指令删掉。
+    // 这是对 prompt 分流的第二道防线：即使模型不守规矩硬画，UI 也看不到意外卡片。
+    // 注意：
+    //   · 保留 [GRAPH_REF:slug|name]（轻量引用，用户点了才展开）
+    //   · 用 bracket counting 而不是纯正则，避免 LaTeX 里的 "}" 提前截断
+    if (isSocraticMode && !allowViz) {
+      finalAnswer = stripVizMarkers(finalAnswer);
+    }
+
+    return res.status(200).json({ answer: finalAnswer });
   }
 
   const clean = responseText.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();

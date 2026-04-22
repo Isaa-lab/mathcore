@@ -135,8 +135,8 @@ function InteractiveLabShell({ intent: raw, onClose }) {
             <IconArrowLeft size={18} color="#111827" />
           </motion.button>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <h1 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#111827", letterSpacing: "-0.015em" }}>{intent.title}</h1>
-            <span style={{ fontSize: 12.5, fontWeight: 500, color: "#6B7280" }}>{intent.description || accent.label}</span>
+            <h1 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#111827", letterSpacing: "-0.015em" }}>{renderInlineKatex(intent.title)}</h1>
+            <span style={{ fontSize: 12.5, fontWeight: 500, color: "#6B7280" }}>{renderInlineKatex(intent.description || accent.label)}</span>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -387,13 +387,45 @@ function renderInlineKatex(text) {
   });
 }
 
+// AI 偶尔会在 math.latex 字段里**错加包装**——最常见的是：
+//   "$L_i(x) = \\frac{...}{...}$"   ← 多了 $ 包裹
+//   "$$y = ax + b$$"                ← 多了 $$ 包裹
+//   "```L_i(x)```"                  ← 套了代码块围栏
+// 不清洗就直接喂给 KaTeX，会触发"公式以原始代码形式显示在红框里"的现象。
+// 规则：math.latex 约定为**纯 LaTeX 源码**，这里兜底剥掉任何包装符号。
+function stripLatexWrapping(src) {
+  let s = String(src ?? "").trim();
+  if (!s) return "";
+  // 代码块围栏（可能带语言标签）
+  s = s.replace(/^```(?:latex|math|tex)?\s*/i, "").replace(/```\s*$/, "");
+  s = s.trim();
+  // 块级公式 $$...$$
+  if (s.startsWith("$$") && s.endsWith("$$") && s.length >= 4) {
+    s = s.slice(2, -2).trim();
+  }
+  // 行内公式 $...$（允许前后还有空白）
+  if (s.startsWith("$") && s.endsWith("$") && s.length >= 2) {
+    s = s.slice(1, -1).trim();
+  }
+  // 再洗一次代码块围栏（如果模型套了双层包装）
+  s = s.replace(/^```(?:latex|math|tex)?\s*/i, "").replace(/```\s*$/, "").trim();
+  return s;
+}
+
 function renderBlockKatex(latex) {
-  if (!latex) return null;
+  const cleaned = stripLatexWrapping(latex);
+  if (!cleaned) return null;
   try {
-    const html = katex.renderToString(String(latex), { throwOnError: false, displayMode: true });
+    const html = katex.renderToString(cleaned, { throwOnError: false, displayMode: true });
     return <span style={{ display: "block", overflowX: "auto" }} dangerouslySetInnerHTML={{ __html: html }} />;
   } catch {
-    return <code style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13 }}>{String(latex)}</code>;
+    // 降级：展开一个 <details> 让用户能看到原始 LaTeX 源，不做哑巴式失败
+    return (
+      <details style={{ fontSize: 12, color: "#F87171" }}>
+        <summary style={{ cursor: "pointer", fontWeight: 600 }}>⚠️ 公式渲染失败（点击查看原始 LaTeX）</summary>
+        <code style={{ display: "block", marginTop: 6, padding: 8, background: "rgba(248,113,113,0.1)", borderRadius: 6, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, wordBreak: "break-all" }}>{cleaned}</code>
+      </details>
+    );
   }
 }
 
@@ -475,8 +507,10 @@ function ProcessStage({ intent, accent }) {
                   {isPast ? <IconCheck size={14} color={accent.accent} /> : i + 1}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 800, color: isActive ? accent.fg : "#111827", letterSpacing: "-0.01em", lineHeight: 1.35 }}>{step.title}</div>
-                  {step.narrative && <div style={{ marginTop: 3, fontSize: 12, color: "#6B7280", lineHeight: 1.55, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{step.narrative}</div>}
+                  {/* 左侧步骤导航的 title / narrative 之前是字面量渲染，如果包含 $...$ 会字面显示，
+                      例如 "分析基函数 $L_i(x)$ 的次数" 的美元符号会裸露在 UI 上。这里统一走 renderInlineKatex。 */}
+                  <div style={{ fontSize: 13.5, fontWeight: 800, color: isActive ? accent.fg : "#111827", letterSpacing: "-0.01em", lineHeight: 1.35 }}>{renderInlineKatex(step.title)}</div>
+                  {step.narrative && <div style={{ marginTop: 3, fontSize: 12, color: "#6B7280", lineHeight: 1.55, overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{renderInlineKatex(step.narrative)}</div>}
                 </div>
               </motion.button>
             );
