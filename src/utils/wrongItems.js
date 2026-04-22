@@ -216,6 +216,23 @@ export function incrementVariantsGenerated(questionIds, delta = 1) {
   ), []);
 }
 
+/**
+ * 保存 AI 归因诊断结果（持久化到卡片）
+ * @param {string|number} questionId
+ * @param {string} reasoning - AI 生成的错因文字
+ * @param {string[]} tags - AI 建议的错因标签（可选，非空则覆盖现有）
+ */
+export function saveAiReasoning(questionId, reasoning, tags) {
+  storage.update(KEY, (items) => (items || []).map((w) => {
+    if (w.id !== String(questionId)) return w;
+    const next = { ...w, ai_reasoning: reasoning || "", ai_reasoning_at: Date.now() };
+    if (Array.isArray(tags) && tags.length > 0) {
+      next.error_tags = Array.from(new Set([...(w.error_tags || []), ...tags]));
+    }
+    return next;
+  }), []);
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // 错因标签定义（单源真实，前后端/UI 都从这里取）
 // ────────────────────────────────────────────────────────────────────────────

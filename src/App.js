@@ -12,7 +12,7 @@ import SprintWorkspace from "./layouts/SprintWorkspace";
 import { isEditableFocused } from "./utils/keyboard";
 import { detectVizIntent, logVizIntent } from "./utils/vizIntent";
 import { resolveDialogueMode, deriveQuizState, DIALOGUE_MODE_LABELS } from "./utils/dialogueMode";
-import { recordWrongAnswer, recordCorrectAnswer, getWrongItems as getWrongItemsFromStore, getDueWrongItems, markMastered, suspendItem, tagWrongItem, incrementVariantsGenerated, ERROR_TAGS, getChapterMistakeStats } from "./utils/wrongItems";
+import { recordWrongAnswer, recordCorrectAnswer, getWrongItems as getWrongItemsFromStore, getDueWrongItems, markMastered, suspendItem, tagWrongItem, incrementVariantsGenerated, saveAiReasoning, ERROR_TAGS, getChapterMistakeStats } from "./utils/wrongItems";
 import { storage } from "./utils/storage";
 import { getUserChapters } from "./utils/chapters";
 import { generateDailyPlans, dayKey as planDayKey, markTaskCompleted, rolloverIncompleteTasks, importBacklogToToday, dismissBacklog, getTodayBacklog, priorityWeight } from "./utils/planGenerator";
@@ -7620,157 +7620,477 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion }) {
       .slice(0, 6);
   }, [items]);
 
+  // —— 流式诊断卡片：三态（全部/待复习/已掌握）+ 网格 + AI 归因 ——
+  const statusTab = filter.status === "active" ? "review" : filter.status === "mastered" ? "mastered" : "all";
+  function switchTab(tab) {
+    setFilter({ ...filter, status: tab === "review" ? "active" : tab === "mastered" ? "mastered" : "all" });
+  }
+
+  // 单题 AI 带练：基于这一道错题生成一批变式并进入 drill
+  async function startAIPractice(item) {
+    setRegenLoading(true);
+    setRegenMsg("");
+    try {
+      const aiCfg = getAIConfig();
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chapter: item.chapter_label || item.chapter,
+          type: item.type || "单选题",
+          count: 5,
+          userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+        }),
+      });
+      const data = await res.json();
+      if (data?.error) throw new Error(data.error);
+      const rows = (data.questions || []).map((q, idx2) => ({
+        id: "ai_wrong_" + Date.now() + "_" + idx2,
+        chapter: item.chapter_label || item.chapter,
+        type: q.type || "单选题",
+        question: q.question,
+        options: q.options || null,
+        answer: q.answer,
+        explanation: q.explanation || "",
+      }));
+      if (rows.length === 0) throw new Error("AI 未返回题目，请检查 API Key 配置");
+      incrementVariantsGenerated([item.id], rows.length);
+      refresh();
+      setDrillQueue(rows);
+      setDrillKind("variant");
+    } catch (err) {
+      setRegenMsg("❌ AI 带练生成失败：" + (err?.message || "请检查 API 设置"));
+    }
+    setRegenLoading(false);
+  }
+
+  const hasAnyItems = items.length > 0;
+
   return (
-    <div style={{ padding: "0 0 18px", maxWidth: 960, margin: "0 auto" }}>
-      <PageHeader
-        title="错题本与薄弱分析"
-        subtitle="所有错题自动持久化 · 按 SM2 间隔重复推荐复习"
-        onBack={() => setPage("首页")}
-        actions={<>
-          <Badge color="red">{activeCount} 待复习</Badge>
-          {dueCount > 0 && <Badge color="amber">⏰ {dueCount} 今日到期</Badge>}
-          {masteredCount > 0 && <Badge color="teal">已掌握 {masteredCount}</Badge>}
-        </>}
-      />
-
-      {items.length === 0 && (
-        <div style={{ ...s.card, textAlign: "center", padding: "3rem 1rem" }}>
-          <div style={{ fontSize: 40, marginBottom: 10 }}>📚</div>
-          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>错题本还是空的</div>
-          <div style={{ fontSize: 14, color: "#888", marginBottom: 18 }}>去题库做几道题吧——答错的会自动进这里</div>
-          <Btn variant="primary" onClick={() => setPage("题库练习")}>✏️ 去刷题</Btn>
-        </div>
-      )}
-
-      {/* 薄弱章节（从持久化错题聚合） */}
-      {chapterStats.length > 0 && (
-        <div style={{ ...s.card, marginBottom: 16 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>📊 薄弱章节（持久化累计）</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10 }}>
-            {chapterStats.map((c) => (
-              <div key={c.chapter} style={{ background: G.redLight, borderRadius: 12, padding: "14px", border: "1px solid "+G.red+"22", cursor: "pointer" }} onClick={() => setFilter((f) => ({ ...f, chapter: c.chapter }))}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: G.red, marginBottom: 4 }}>{c.label}</div>
-                <div style={{ fontSize: 26, fontWeight: 800, color: G.red, marginBottom: 4 }}>{c.active}</div>
-                <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>待复习 · 已掌握 {c.mastered}</div>
-                <div style={{ fontSize: 11, color: G.red, fontWeight: 600 }}>点击筛选本章错题 →</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 筛选栏 */}
-      {items.length > 0 && (
-        <div style={{ ...s.card, marginBottom: 12, padding: "14px 18px" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
-            <WPFilterSelect
-              label="章节"
-              value={filter.chapter}
-              options={[{ value: "all", label: `全部 (${items.length})` }, ...chapterOptions.map((c) => ({ value: c.slug, label: `${c.label} (${c.count})` }))]}
-              onChange={(v) => setFilter({ ...filter, chapter: v })}
-            />
-            <WPFilterSelect
-              label="状态"
-              value={filter.status}
-              options={[
-                { value: "active", label: `待复习 (${activeCount})` },
-                { value: "mastered", label: `已掌握 (${masteredCount})` },
-                { value: "all", label: `全部 (${items.length})` },
-              ]}
-              onChange={(v) => setFilter({ ...filter, status: v })}
-            />
-            <WPFilterSelect
-              label="错因"
-              value={filter.errorTag}
-              options={[
-                { value: "all", label: "全部错因" },
-                ...ERROR_TAGS.map((t) => ({ value: t.id, label: t.label })),
-                { value: "unknown", label: "未分类" },
-              ]}
-              onChange={(v) => setFilter({ ...filter, errorTag: v })}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* 批量操作栏 */}
-      {selectedIds.size > 0 && (
-        <div style={{ ...s.card, marginBottom: 12, padding: "12px 18px", display: "flex", alignItems: "center", gap: 12, background: "#EEF2FF", borderLeft: "4px solid "+G.blue }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#4338CA" }}>已选 {selectedIds.size} 道</span>
-          <div style={{ flex: 1 }} />
-          <Btn size="sm" onClick={() => startDrill(Array.from(selectedIds), "original")}>🔄 原题重做</Btn>
-          <button onClick={generateVariantsForSelected} disabled={regenLoading} style={{ padding: "8px 14px", background: G.blue, color: "#fff", border: "none", borderRadius: 10, cursor: regenLoading ? "wait" : "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
-            {regenLoading ? "AI 生成中…" : "🤖 AI 变式出题"}
+    <div style={{ maxWidth: 1280, margin: "0 auto", padding: "0 8px 32px", minHeight: "100%" }}>
+      {/* 顶栏：标题 + 统计 widget */}
+      <header style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 20, padding: "8px 4px 22px 4px" }}>
+        <div>
+          <button onClick={() => setPage("首页")} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: 13, color: "#6B7280", fontFamily: "inherit", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+            ← 返回
           </button>
-          <Btn size="sm" onClick={clearSelection}>取消</Btn>
+          <h1 style={{ fontSize: 26, margin: 0, fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", marginBottom: 4 }}>错题靶向训练中心</h1>
+          <p style={{ fontSize: 13.5, color: "#6B7280", margin: 0, fontWeight: 500 }}>
+            每张卡片都是一个"知识胶囊"——AI 归因 + 定向带练，把错题变成真正掌握的知识
+          </p>
+        </div>
+
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <StatWidget icon="🎯" color="#F59E0B" bg="#FFFBEB" value={activeCount} label="待攻克漏洞" sub={dueCount > 0 ? `其中 ${dueCount} 道今日到期` : null} />
+          <StatWidget icon="✓" color="#10B981" bg="#ECFDF5" value={masteredCount} label="已彻底掌握" />
+        </div>
+      </header>
+
+      {/* 空状态 */}
+      {!hasAnyItems && (
+        <div style={{ background: "#fff", borderRadius: 20, padding: "48px 24px", textAlign: "center", border: "1px solid #F3F4F6" }}>
+          <div style={{ fontSize: 44, marginBottom: 12 }}>📚</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: "#111", marginBottom: 6 }}>错题本还是空的</div>
+          <div style={{ fontSize: 13, color: "#888", marginBottom: 20 }}>去题库做几道题吧——答错的会自动进这里</div>
+          <button onClick={() => setPage("题库练习")} style={{ padding: "10px 22px", background: "#111827", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>
+            ✏️ 去刷题
+          </button>
         </div>
       )}
-      {regenMsg && <div style={{ padding: "10px 14px", borderRadius: 10, background: G.blueLight, color: G.blue, marginBottom: 12, fontSize: 13 }}>{regenMsg}</div>}
 
-      {/* 错题列表 */}
-      {items.length > 0 && (
-        <div style={{ ...s.card }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 14, borderBottom: "1px solid #f0f0f0" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#555" }}>
-                <input type="checkbox" checked={filteredItems.length > 0 && selectedIds.size === filteredItems.length} onChange={(e) => e.target.checked ? selectAllVisible() : clearSelection()} />
-                全选可见
-              </label>
-              <span style={{ fontSize: 14, color: "#888" }}>共 {filteredItems.length} 道</span>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
+      {hasAnyItems && (
+        <>
+          {/* 工具栏：segmented control + 章节/错因筛选 */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+            <Segmented
+              options={[
+                { id: "all", label: `全部 ${items.length}` },
+                { id: "review", label: `待复习 ${activeCount}` },
+                { id: "mastered", label: `已掌握 ${masteredCount}` },
+              ]}
+              value={statusTab}
+              onChange={switchTab}
+            />
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <SoftSelect
+                value={filter.chapter}
+                onChange={(v) => setFilter({ ...filter, chapter: v })}
+                options={[{ value: "all", label: "全部章节" }, ...chapterOptions.map((c) => ({ value: c.slug, label: `${c.label} (${c.count})` }))]}
+              />
+              <SoftSelect
+                value={filter.errorTag}
+                onChange={(v) => setFilter({ ...filter, errorTag: v })}
+                options={[
+                  { value: "all", label: "全部错因" },
+                  ...ERROR_TAGS.map((t) => ({ value: t.id, label: t.label })),
+                  { value: "unknown", label: "未分类" },
+                ]}
+              />
               {dueCount > 0 && (
                 <button onClick={() => startDrill(items.filter((w) => w.status === "active" && w.sm2.due_at <= Date.now()).map((w) => w.id), "original")}
-                  style={{ padding: "8px 14px", background: G.amberLight || "#FFFBEB", color: "#B45309", border: "1px solid #F59E0B", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
-                  ⏰ 复习今日到期 {dueCount} 道
-                </button>
-              )}
-              {filteredItems.length > 0 && (
-                <button onClick={() => startDrill(filteredItems.map((w) => w.id), "original")}
-                  style={{ padding: "8px 18px", background: G.teal, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
-                  🔄 全部重做（筛选后）
+                  style={{ padding: "8px 14px", background: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A", borderRadius: 10, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", whiteSpace: "nowrap" }}>
+                  ⏰ 复习今日到期 {dueCount}
                 </button>
               )}
             </div>
           </div>
 
+          {/* 批量条 */}
+          {selectedIds.size > 0 && (
+            <div style={{ marginBottom: 16, padding: "12px 18px", borderRadius: 14, background: "#EEF2FF", border: "1px solid #C7D2FE", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13.5, fontWeight: 700, color: "#4338CA" }}>已选 {selectedIds.size} 道</span>
+              <div style={{ flex: 1 }} />
+              <button onClick={() => startDrill(Array.from(selectedIds), "original")} style={miniChip()}>🔄 原题重做</button>
+              <button onClick={generateVariantsForSelected} disabled={regenLoading} style={miniChip(true, regenLoading)}>
+                {regenLoading ? "AI 生成中…" : "🤖 批量 AI 带练"}
+              </button>
+              <button onClick={clearSelection} style={miniChip()}>取消选中</button>
+            </div>
+          )}
+          {regenMsg && (
+            <div style={{ padding: "10px 14px", borderRadius: 10, background: regenMsg.startsWith("❌") ? "#FEF2F2" : "#ECFDF5", color: regenMsg.startsWith("❌") ? "#991B1B" : "#047857", marginBottom: 16, fontSize: 13, border: "1px solid " + (regenMsg.startsWith("❌") ? "#FECACA" : "#A7F3D0") }}>
+              {regenMsg}
+            </div>
+          )}
+
+          {/* 卡片网格 */}
           {filteredItems.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "2.5rem", color: "#888" }}>
-              <div style={{ fontSize: 36, marginBottom: 10 }}>🎉</div>
-              <div style={{ fontSize: 16, fontWeight: 600 }}>当前筛选下没有错题</div>
-              <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>
-                {filter.status === "mastered" ? "切到'待复习'看看未掌握的" : "换个章节/错因试试"}
+            <div style={{ textAlign: "center", padding: "60px 20px", background: "#fff", borderRadius: 20, border: "1px solid #F3F4F6" }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>{statusTab === "mastered" ? "🏆" : "🎉"}</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#111", marginBottom: 4 }}>
+                {statusTab === "mastered" ? "还没有攻克的错题" : "当前筛选下没有错题"}
+              </div>
+              <div style={{ fontSize: 13, color: "#9CA3AF" }}>
+                {statusTab === "mastered" ? "连对 3 次且间隔 ≥ 14 天后，错题会自动升级到这里" : "换个章节或错因试试"}
               </div>
             </div>
           ) : (
-            filteredItems.map((item) => (
-              <WrongItemRow
-                key={item.id}
-                item={item}
-                question={resolveQuestion(item)}
-                selected={selectedIds.has(item.id)}
-                onToggleSelect={() => toggleSelect(item.id)}
-                onMarkMastered={() => { markMastered(item.id); refresh(); }}
-                onSuspend={() => { suspendItem(item.id); refresh(); }}
-                onTagsChange={(tags) => { tagWrongItem(item.id, tags); refresh(); }}
-                onRetry={() => startDrill([item.id], "original")}
-                onAskAI={() => {
-                  const q = resolveQuestion(item);
-                  if (!q) return;
-                  if (typeof onAskAIAboutQuestion === "function") {
-                    onAskAIAboutQuestion(q);
-                  } else {
-                    setPage("资料对话");
-                  }
-                }}
-              />
-            ))
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 18 }}>
+              {filteredItems.map((item) => (
+                <MistakeCard
+                  key={item.id}
+                  item={item}
+                  question={resolveQuestion(item)}
+                  selected={selectedIds.has(item.id)}
+                  onToggleSelect={() => toggleSelect(item.id)}
+                  onMarkMastered={() => { markMastered(item.id); refresh(); }}
+                  onSuspend={() => { suspendItem(item.id); refresh(); }}
+                  onRetry={() => startDrill([item.id], "original")}
+                  onAiPractice={() => startAIPractice(item)}
+                  onAiDiagnosed={(reasoning, tags) => { saveAiReasoning(item.id, reasoning, tags); refresh(); }}
+                  onTagsChange={(tags) => { tagWrongItem(item.id, tags); refresh(); }}
+                  onAskAI={() => {
+                    const q = resolveQuestion(item);
+                    if (!q) return;
+                    if (typeof onAskAIAboutQuestion === "function") onAskAIAboutQuestion(q);
+                    else setPage("资料对话");
+                  }}
+                />
+              ))}
+            </div>
           )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ———————— 顶部统计小部件 ————————
+function StatWidget({ icon, color, bg, value, label, sub }) {
+  return (
+    <div style={{
+      background: "#fff", border: "1px solid #F3F4F6", borderRadius: 16,
+      padding: "12px 18px", display: "flex", alignItems: "center", gap: 12,
+      boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
+      minWidth: 180,
+    }}>
+      <div style={{ width: 42, height: 42, borderRadius: 12, background: bg, color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 800 }}>{icon}</div>
+      <div>
+        <div style={{ fontSize: 22, fontWeight: 800, color: "#111", lineHeight: 1, marginBottom: 4 }}>{value}</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#9CA3AF", letterSpacing: "0.06em" }}>{label}</div>
+        {sub && <div style={{ fontSize: 10.5, color: "#B45309", marginTop: 2, fontWeight: 600 }}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+// ———————— iOS 风 Segmented Control ————————
+function Segmented({ options, value, onChange }) {
+  return (
+    <div style={{
+      display: "inline-flex", padding: 4, background: "#fff",
+      borderRadius: 12, border: "1px solid #F3F4F6",
+      boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
+    }}>
+      {options.map((o) => {
+        const active = value === o.id;
+        return (
+          <button key={o.id} onClick={() => onChange(o.id)} style={{
+            padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer",
+            background: active ? "#111827" : "transparent",
+            color: active ? "#fff" : "#6B7280",
+            fontSize: 12.5, fontWeight: 700, fontFamily: "inherit",
+            transition: "all 0.15s",
+          }}>
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SoftSelect({ value, options, onChange }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}
+      style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid #F3F4F6", background: "#fff", fontSize: 12.5, fontFamily: "inherit", cursor: "pointer", color: "#374151", fontWeight: 600 }}>
+      {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
+function miniChip(primary, loading) {
+  return {
+    padding: "7px 13px",
+    background: primary ? "#4F46E5" : "#fff",
+    color: primary ? "#fff" : "#4338CA",
+    border: primary ? "none" : "1px solid #C7D2FE",
+    borderRadius: 10,
+    cursor: loading ? "wait" : "pointer",
+    fontSize: 12.5,
+    fontWeight: 700,
+    fontFamily: "inherit",
+    whiteSpace: "nowrap",
+    opacity: loading ? 0.6 : 1,
+  };
+}
+
+// ———————— 错题胶囊卡片 ————————
+function MistakeCard({ item, question, selected, onToggleSelect, onMarkMastered, onSuspend, onRetry, onAiPractice, onAiDiagnosed, onTagsChange, onAskAI }) {
+  const [hover, setHover] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState(null);
+
+  if (!question) {
+    return (
+      <div style={{ background: "#FAFAFC", border: "1px dashed #E5E7EB", borderRadius: 20, padding: 18, fontSize: 12.5, color: "#9CA3AF" }}>
+        题目 #{item.id} 已从题库移除
+        <button onClick={onSuspend} style={{ marginLeft: 10, padding: "3px 10px", fontSize: 11, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 6, cursor: "pointer", fontFamily: "inherit" }}>隐藏</button>
+      </div>
+    );
+  }
+
+  const dayStr = new Date(item.last_wrong_at || item.first_wrong_at || Date.now()).toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
+  const chapterLabel = item.chapter_label || item.chapter || "未分类";
+  const reps = item.sm2?.repetitions || 0;
+
+  // 状态映射
+  let statusKey, statusLabel, statusColor;
+  if (item.status === "mastered") {
+    statusKey = "mastered"; statusLabel = "已攻克"; statusColor = "#10B981";
+  } else if (reps >= 1) {
+    statusKey = "progress"; statusLabel = "攻坚中"; statusColor = "#3B82F6";
+  } else {
+    statusKey = "review"; statusLabel = "需重练"; statusColor = "#F59E0B";
+  }
+
+  // AI 归因诊断
+  async function askAI() {
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const lastAttempt = (item.attempts || []).filter((a) => !a.correct).slice(-1)[0];
+      const aiCfg = getAIConfig();
+      const resp = await fetch("/api/analyze-error", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question_stem: question.question,
+          options: question.options,
+          correct_answer: question.answer,
+          user_answer: lastAttempt?.user_answer || "",
+          chapter: chapterLabel,
+          userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+        }),
+      });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      onAiDiagnosed(data.reasoning || "", data.tags || []);
+    } catch (e) {
+      setAiError(e.message || "未知错误");
+    }
+    setAiLoading(false);
+  }
+
+  const tagLabel = (id) => (ERROR_TAGS.find((t) => t.id === id) || { label: id === "unknown" ? "未分类" : id }).label;
+  const tagColor = (id) => (ERROR_TAGS.find((t) => t.id === id) || { color: "#6B7280", bg: "#F9FAFB" });
+  const hasReasoning = !!item.ai_reasoning;
+  const activeTags = item.error_tags || [];
+
+  return (
+    <div
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => { setHover(false); setMenuOpen(false); }}
+      style={{
+        background: "#fff",
+        borderRadius: 20,
+        padding: 20,
+        border: "1px solid " + (selected ? "#4F46E5" : "#F3F4F6"),
+        boxShadow: hover ? "0 12px 32px rgba(0,0,0,0.06)" : "0 2px 8px rgba(0,0,0,0.02)",
+        transition: "all .18s ease",
+        transform: hover ? "translateY(-2px)" : "none",
+        display: "flex", flexDirection: "column", gap: 14,
+        position: "relative",
+      }}
+    >
+      {/* 顶部：章节 chip + 日期 + "⋯" 菜单 */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
+          <span style={{ padding: "3px 9px", borderRadius: 7, background: "#FEF2F2", color: "#DC2626", fontSize: 10.5, fontWeight: 800, letterSpacing: "0.04em", whiteSpace: "nowrap" }}>
+            {chapterLabel}
+          </span>
+          <span style={{ padding: "3px 9px", borderRadius: 7, background: "#F9FAFB", color: "#9CA3AF", fontSize: 10.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+            {dayStr}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input type="checkbox" checked={selected} onChange={onToggleSelect} onClick={(e) => e.stopPropagation()}
+            style={{ cursor: "pointer", width: 15, height: 15, accentColor: "#4F46E5" }}
+            title="加入批量选择" />
+          <div style={{ position: "relative" }}>
+            <button onClick={() => setMenuOpen((v) => !v)} style={{ width: 26, height: 26, padding: 0, border: "none", background: "transparent", cursor: "pointer", color: "#9CA3AF", borderRadius: 6, fontSize: 18, lineHeight: 1 }}>⋯</button>
+            {menuOpen && (
+              <div style={{ position: "absolute", top: 28, right: 0, background: "#fff", borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.12)", border: "1px solid #F3F4F6", minWidth: 160, zIndex: 20, padding: 4 }} onClick={(e) => e.stopPropagation()}>
+                {item.status !== "mastered" && (
+                  <button onClick={() => { onMarkMastered(); setMenuOpen(false); }} style={menuItem}>✓ 标记为已掌握</button>
+                )}
+                <button onClick={() => { onRetry(); setMenuOpen(false); }} style={menuItem}>🔄 原题重做</button>
+                <button onClick={() => { onAskAI(); setMenuOpen(false); }} style={menuItem}>💬 问 AI 助教</button>
+                <button onClick={() => { if (window.confirm("从错题本隐藏这道题？")) { onSuspend(); setMenuOpen(false); } }} style={{ ...menuItem, color: "#DC2626" }}>🗑 隐藏</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 题干摘要（3 行截断） */}
+      <h3 style={{
+        margin: 0, fontSize: 14.5, fontWeight: 700, color: "#111827",
+        lineHeight: 1.55,
+        display: "-webkit-box",
+        WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
+        overflow: "hidden", textOverflow: "ellipsis",
+        wordBreak: "break-word",
+      }}>
+        {question.question}
+      </h3>
+
+      {/* AI 归因诊断框 —— 卡片核心 */}
+      <div style={{
+        background: hasReasoning ? "#FAFAFC" : "#FDFDFD",
+        border: "1px solid " + (hasReasoning ? "#E0E7FF" : "#F3F4F6"),
+        borderRadius: 12, padding: "10px 12px",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: hasReasoning || aiError ? 6 : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 13 }}>✨</span>
+            <span style={{ fontSize: 11.5, fontWeight: 800, color: hasReasoning ? "#4338CA" : "#6B7280", letterSpacing: "0.04em" }}>AI 归因诊断</span>
+          </div>
+          {!hasReasoning && !aiLoading && (
+            <button onClick={askAI} style={{ padding: "3px 10px", background: "#EEF2FF", color: "#4338CA", border: "1px solid #C7D2FE", borderRadius: 999, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+              让 AI 猜
+            </button>
+          )}
+          {hasReasoning && (
+            <button onClick={askAI} disabled={aiLoading} title="重新分析" style={{ padding: 0, width: 22, height: 22, background: "transparent", border: "none", cursor: aiLoading ? "wait" : "pointer", color: "#9CA3AF", fontSize: 12 }}>
+              {aiLoading ? "…" : "⟳"}
+            </button>
+          )}
+        </div>
+        {aiLoading && <div style={{ fontSize: 12, color: "#6B7280", fontStyle: "italic" }}>分析中…</div>}
+        {aiError && (
+          <div style={{ fontSize: 11.5, color: "#DC2626" }}>
+            分析失败：{aiError}
+            <button onClick={askAI} style={{ marginLeft: 6, padding: "2px 8px", background: "#FEF2F2", color: "#DC2626", border: "1px solid #FECACA", borderRadius: 6, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>重试</button>
+          </div>
+        )}
+        {hasReasoning && (
+          <p style={{ fontSize: 12.5, color: "#4B5563", margin: 0, lineHeight: 1.55, fontWeight: 500 }}>
+            {item.ai_reasoning}
+          </p>
+        )}
+        {!hasReasoning && !aiLoading && !aiError && (
+          <div style={{ fontSize: 11.5, color: "#9CA3AF", marginTop: 4 }}>
+            点右上"让 AI 猜"，获得这道题的错因分析
+          </div>
+        )}
+        {activeTags.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
+            {activeTags.map((t) => {
+              const tc = tagColor(t);
+              return (
+                <span key={t} style={{ padding: "2px 8px", background: tc.bg, color: tc.color, borderRadius: 999, fontSize: 10.5, fontWeight: 700, border: "1px solid " + tc.color + "33" }}>
+                  {tagLabel(t)}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 底部：状态 + hover 出现的 AI 带练按钮 */}
+      <div style={{ marginTop: "auto", paddingTop: 6, borderTop: "1px solid #F9FAFB", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: statusColor, display: "inline-block" }} />
+          <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 600 }}>{statusLabel}</span>
+          {reps > 0 && item.status !== "mastered" && (
+            <span style={{ fontSize: 11, color: "#9CA3AF" }}>· 连对 {reps}/3</span>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 6, opacity: hover ? 1 : 0, transform: hover ? "translateX(0)" : "translateX(4px)", transition: "all .15s ease" }}>
+          <button onClick={onRetry} title="原题重做" style={{ padding: "6px 11px", background: "#fff", color: "#374151", border: "1px solid #E5E7EB", borderRadius: 9, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>重做</button>
+          <button onClick={onAiPractice} style={{ padding: "6px 14px", background: "#111827", color: "#fff", border: "none", borderRadius: 9, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            AI 带练 →
+          </button>
+        </div>
+      </div>
+
+      {/* 错因调整（始终显示，便于用户自标/补齐） */}
+      {hover && (
+        <div style={{ borderTop: "1px solid #F9FAFB", marginTop: -4, paddingTop: 8 }}>
+          <div style={{ fontSize: 10.5, color: "#9CA3AF", fontWeight: 700, marginBottom: 4, letterSpacing: "0.04em" }}>点按调整错因</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {ERROR_TAGS.map((tag) => {
+              const active = activeTags.includes(tag.id);
+              return (
+                <button key={tag.id} onClick={() => {
+                  const next = active ? activeTags.filter((x) => x !== tag.id) : [...activeTags, tag.id];
+                  onTagsChange(next);
+                }} style={{
+                  padding: "2px 8px", borderRadius: 999, cursor: "pointer",
+                  fontSize: 10.5, fontWeight: 700, fontFamily: "inherit",
+                  background: active ? tag.color : "#fff",
+                  color: active ? "#fff" : tag.color,
+                  border: "1px solid " + tag.color + (active ? "" : "55"),
+                }}>
+                  {tag.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
   );
 }
+
+const menuItem = {
+  display: "block", width: "100%", textAlign: "left",
+  padding: "8px 12px", background: "transparent", border: "none",
+  cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "#374151",
+  borderRadius: 7, fontFamily: "inherit",
+};
 
 // —— 错题本筛选下拉 ——
 function WPFilterSelect({ label, value, options, onChange }) {
