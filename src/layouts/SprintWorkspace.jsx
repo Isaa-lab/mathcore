@@ -263,7 +263,7 @@ function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete 
             </label>
           </div>
 
-          {/* 章节 —— 按学科分组 */}
+          {/* 章节 —— 按学科分组，列表式 disclosure row */}
           <div style={{ marginBottom: 14 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <span style={fieldLabel}>
@@ -278,12 +278,6 @@ function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete 
                     style={miniBtn}>全选</button>
                   <button onClick={() => setSelectedChapters(new Set())}
                     style={miniBtn}>清空</button>
-                  <button onClick={() => {
-                    if (collapsedGroups.size === chapterGroups.length) setCollapsedGroups(new Set());
-                    else setCollapsedGroups(new Set(chapterGroups.map((g) => g.subject)));
-                  }} style={miniBtn}>
-                    {collapsedGroups.size === chapterGroups.length ? "全展开" : "全折叠"}
-                  </button>
                 </div>
               )}
             </div>
@@ -292,65 +286,81 @@ function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete 
                 还没有章节数据。先去上传资料或答几道题，章节会自动出现
               </div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 260, overflowY: "auto", padding: 2 }}>
-                {chapterGroups.map((group) => {
+              <div style={{
+                maxHeight: "min(360px, 48vh)", overflowY: "auto",
+                border: "1px solid #E5E7EB", borderRadius: 10,
+                background: "#fff",
+              }}>
+                {chapterGroups.map((group, idx) => {
                   const selInGroup = group.chapters.filter((c) => selectedChapters.has(c.slug)).length;
                   const total = group.chapters.length;
                   const allSel = selInGroup === total && total > 0;
                   const noneSel = selInGroup === 0;
                   const collapsed = collapsedGroups.has(group.subject);
+                  const isLast = idx === chapterGroups.length - 1;
                   return (
-                    <div key={group.subject} style={{
-                      border: "1px solid #E5E7EB", borderRadius: 10,
-                      background: allSel ? "#F5F3FF" : "#fff",
-                      borderColor: allSel ? "#DDD6FE" : "#E5E7EB",
-                      overflow: "hidden", transition: "background .15s",
-                    }}>
-                      {/* 组头 */}
-                      <div style={{ display: "flex", alignItems: "center", padding: "8px 10px", gap: 8 }}>
-                        <button onClick={() => toggleGroup(group.subject)} aria-label={collapsed ? "展开" : "折叠"}
-                          style={{ width: 20, height: 20, padding: 0, border: "none", background: "transparent", cursor: "pointer", color: "#6B7280", fontSize: 11, transition: "transform .15s", transform: collapsed ? "rotate(-90deg)" : "rotate(0)" }}>
-                          ▼
-                        </button>
-                        <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: "#111" }}>{group.subject}</span>
-                          <span style={{ fontSize: 11, color: "#9CA3AF" }}>{selInGroup}/{total}</span>
-                          {group.totalWrong > 0 && (
-                            <span style={{ fontSize: 10, background: "#FEE2E2", color: "#991B1B", padding: "1px 7px", borderRadius: 999, fontWeight: 700 }}>
-                              {group.totalWrong} 错
-                            </span>
-                          )}
-                        </div>
-                        <button onClick={() => toggleGroupSelect(group)}
+                    <div key={group.subject} style={{ borderBottom: isLast ? "none" : "1px solid #F3F4F6" }}>
+                      {/* 组头：整行可点击折叠 */}
+                      <div
+                        onClick={() => toggleGroup(group.subject)}
+                        role="button" tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleGroup(group.subject); } }}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8,
+                          padding: "10px 12px", cursor: "pointer",
+                          background: "transparent", userSelect: "none",
+                          transition: "background .12s",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "#FAFAFA"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <span style={{
+                          width: 14, display: "inline-block", fontSize: 10, color: "#9CA3AF",
+                          transition: "transform .15s",
+                          transform: collapsed ? "rotate(-90deg)" : "rotate(0)",
+                        }}>▼</span>
+                        <span style={{ fontSize: 13.5, fontWeight: 700, color: "#111" }}>{group.subject}</span>
+                        <span style={{
+                          fontSize: 11, fontWeight: 600,
+                          color: allSel ? "#4F46E5" : noneSel ? "#9CA3AF" : "#6B7280",
+                        }}>{selInGroup}/{total}</span>
+                        {group.totalWrong > 0 && (
+                          <span style={{ fontSize: 10, background: "#FEE2E2", color: "#991B1B", padding: "1px 7px", borderRadius: 999, fontWeight: 700 }}>
+                            {group.totalWrong} 错
+                          </span>
+                        )}
+                        <span style={{ flex: 1 }} />
+                        <button onClick={(e) => { e.stopPropagation(); toggleGroupSelect(group); }}
                           style={{
-                            fontSize: 11, padding: "3px 10px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit", fontWeight: 600,
+                            fontSize: 11, padding: "3px 10px", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontWeight: 600,
                             border: "1px solid " + (allSel ? "#4F46E5" : "#E5E7EB"),
                             background: allSel ? "#4F46E5" : "#fff",
                             color: allSel ? "#fff" : (noneSel ? "#6B7280" : "#4F46E5"),
+                            whiteSpace: "nowrap",
                           }}>
                           {allSel ? "✓ 全选" : noneSel ? "选本组" : "补齐"}
                         </button>
                       </div>
                       {/* 组内 chip 列表 */}
                       {!collapsed && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, padding: "0 10px 10px 30px" }}>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "0 14px 12px 34px" }}>
                           {group.chapters.map((ch) => {
                             const sel = selectedChapters.has(ch.slug);
                             return (
                               <button key={ch.slug} onClick={() => toggleChapter(ch.slug)}
                                 style={{
-                                  padding: "4px 10px", borderRadius: 8,
+                                  padding: "5px 11px", borderRadius: 7,
                                   border: "1.5px solid " + (sel ? "#4F46E5" : "#E5E7EB"),
                                   background: sel ? "#4F46E5" : "#fff",
                                   color: sel ? "#fff" : "#374151",
-                                  fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-                                  display: "inline-flex", alignItems: "center", gap: 4,
-                                  lineHeight: 1.4,
+                                  fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                                  display: "inline-flex", alignItems: "center", gap: 5,
+                                  lineHeight: 1.3, transition: "all .1s",
                                 }}
                                 title={ch.label}>
                                 {ch.short}
                                 {ch.wrong_count > 0 && (
-                                  <span style={{ fontSize: 9.5, background: sel ? "rgba(255,255,255,0.25)" : "#FEE2E2", color: sel ? "#fff" : "#991B1B", padding: "0 5px", borderRadius: 10, fontWeight: 700 }}>
+                                  <span style={{ fontSize: 9.5, background: sel ? "rgba(255,255,255,0.22)" : "#FEE2E2", color: sel ? "#fff" : "#991B1B", padding: "0 5px", borderRadius: 10, fontWeight: 700 }}>
                                     {ch.wrong_count}
                                   </span>
                                 )}
