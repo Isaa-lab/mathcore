@@ -11907,48 +11907,75 @@ export default function App() {
             exit={{ opacity: 0, y: -15, filter: "blur(4px)" }}
             transition={springNav}
           >
-            {/* 64px Header */}
+            {/* 64px Header —— 错题本 overlay 时隐藏 tab 胶囊，改为返回提示 */}
             <header style={{ height: 64, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", borderBottom: "1px solid #E5E7EB", background: "#FFFFFF" }}>
               <h1 style={{ fontSize: 18, fontWeight: "bold", color: "#111827", margin: 0 }}>MathCore 学习操作系统</h1>
-              <div style={{ display: "flex", background: "#F3F4F6", padding: 4, borderRadius: 9999, position: "relative" }}>
-                {[{ id: "study", label: "学习模式" }, { id: "sprint", label: "考前冲刺模式" }].map(({ id, label }) => (
-                  <button
-                    key={id}
-                    onClick={() => setWorkspaceMode(id)}
-                    style={{ padding: "6px 20px", position: "relative", zIndex: 10, background: "transparent", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, color: workspaceMode === id ? "#111827" : "#6B7280", fontFamily: "inherit" }}
-                  >
-                    {label}
-                    {workspaceMode === id && (
-                      <motion.div layoutId="modePill" style={{ position: "absolute", inset: 0, background: "#FFFFFF", borderRadius: 9999, boxShadow: "0 2px 8px rgba(0,0,0,0.08)", zIndex: -1 }} transition={{ type: "spring", stiffness: 300, damping: 25 }} />
-                    )}
-                  </button>
-                ))}
-              </div>
+              {page === "错题本" ? (
+                <button
+                  onClick={() => handleSetPage("首页")}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 9999, background: "#F3F4F6", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13.5, fontWeight: 700, color: "#111827" }}
+                  title={`返回${workspaceMode === "sprint" ? "考前冲刺" : "学习"}模式`}
+                >
+                  ← 返回{workspaceMode === "sprint" ? "考前冲刺" : "学习"}模式
+                </button>
+              ) : (
+                <div style={{ display: "flex", background: "#F3F4F6", padding: 4, borderRadius: 9999, position: "relative" }}>
+                  {[{ id: "study", label: "学习模式" }, { id: "sprint", label: "考前冲刺模式" }].map(({ id, label }) => (
+                    <button
+                      key={id}
+                      onClick={() => setWorkspaceMode(id)}
+                      style={{ padding: "6px 20px", position: "relative", zIndex: 10, background: "transparent", border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, color: workspaceMode === id ? "#111827" : "#6B7280", fontFamily: "inherit" }}
+                    >
+                      {label}
+                      {workspaceMode === id && (
+                        <motion.div layoutId="modePill" style={{ position: "absolute", inset: 0, background: "#FFFFFF", borderRadius: 9999, boxShadow: "0 2px 8px rgba(0,0,0,0.08)", zIndex: -1 }} transition={{ type: "spring", stiffness: 300, damping: 25 }} />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
               <UserAvatarMenu profile={profile} />
             </header>
 
-            {/* Workspace area */}
-            <AnimatePresence mode="wait">
-              {workspaceMode === "study" ? (
-                <motion.div key="study" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.25 }}>
-                  <StudyWorkspace renderTab={renderStudyTab} activeTab={studyTab} setActiveTab={setStudyTab} />
-                </motion.div>
-              ) : (
-                <motion.div key="sprint" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25 }}>
-                  <SprintWorkspace
-                    chatPage={<MaterialChatPage setPage={handleSetPage} profile={profile} />}
-                    quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} isSprint autoStartIntent={quizIntent} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
-                    onViewWrong={() => { setWorkspaceMode("study"); handleSetPage("错题本"); }}
-                    allQuestions={ALL_QUESTIONS}
-                    onAutoStartQuiz={(intent) => {
-                      if (intent && intent.chapter && setChapterFilter) setChapterFilter([intent.chapter]);
-                      setQuizIntent(intent || null);
-                    }}
-                    onResetQuizIntent={() => setQuizIntent(null)}
+            {/* Workspace area —— 错题本作为全屏 overlay，不改变 workspaceMode */}
+            {page === "错题本" ? (
+              <motion.div
+                key="wrong-overlay"
+                style={{ flex: 1, overflowY: "auto", background: "#FAFAFC" }}
+                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.2 }}
+              >
+                <div style={{ padding: "20px 0" }}>
+                  <WrongPage
+                    setPage={handleSetPage}
+                    sessionAnswers={sessionAnswers}
+                    setChapterFilter={setChapterFilter}
                   />
-                </motion.div>
-              )}
-            </AnimatePresence>
+                </div>
+              </motion.div>
+            ) : (
+              <AnimatePresence mode="wait">
+                {workspaceMode === "study" ? (
+                  <motion.div key="study" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.25 }}>
+                    <StudyWorkspace renderTab={renderStudyTab} activeTab={studyTab} setActiveTab={setStudyTab} />
+                  </motion.div>
+                ) : (
+                  <motion.div key="sprint" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25 }}>
+                    <SprintWorkspace
+                      chatPage={<MaterialChatPage setPage={handleSetPage} profile={profile} />}
+                      quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} isSprint autoStartIntent={quizIntent} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
+                      onViewWrong={() => handleSetPage("错题本")}
+                      allQuestions={ALL_QUESTIONS}
+                      onAutoStartQuiz={(intent) => {
+                        if (intent && intent.chapter && setChapterFilter) setChapterFilter([intent.chapter]);
+                        setQuizIntent(intent || null);
+                      }}
+                      onResetQuizIntent={() => setQuizIntent(null)}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
