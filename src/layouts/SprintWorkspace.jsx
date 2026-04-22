@@ -1,159 +1,666 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import InteractiveLab from "./InteractiveLab";
+import { storage } from "../utils/storage";
+import { getUserChapters } from "../utils/chapters";
+import {
+  generateDailyPlans,
+  dayKey as planDayKey,
+  markTaskCompleted,
+  rolloverIncompleteTasks,
+} from "../utils/planGenerator";
 
-function VerticalMiniCalendar() {
-  const [selectedDate, setSelectedDate] = useState(new Date().getDate());
+// =============================================================================
+// 冲刺日历 —— 月视图，支持考试日标记 + 有任务的日期标小圆点 + 点击打开抽屉
+// =============================================================================
+function VerticalMiniCalendar({ examPlan, onDayClick, selectedDayKey }) {
   const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const firstDow = new Date(year, month, 1).getDay();
-  const monthName = `${year} 年 ${month + 1} 月`;
+  const [viewYear, setViewYear] = useState(now.getFullYear());
+  const [viewMonth, setViewMonth] = useState(now.getMonth());
 
-  const examDateStr = typeof localStorage !== "undefined" ? localStorage.getItem("mc_exam_date") : null;
-  const examDay = useMemo(() => {
-    if (!examDateStr) return null;
-    const d = new Date(examDateStr);
-    if (d.getFullYear() === year && d.getMonth() === month) return d.getDate();
-    return null;
-  }, [examDateStr, year, month]);
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const firstDow = new Date(viewYear, viewMonth, 1).getDay();
+  const monthLabel = `${viewYear} 年 ${viewMonth + 1} 月`;
+  const todayKey = planDayKey(new Date());
 
+  const examDateStr = examPlan && examPlan.exam_date;
   const daysUntilExam = useMemo(() => {
     if (!examDateStr) return null;
-    return Math.ceil((new Date(examDateStr) - new Date()) / 86400000);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const exam = new Date(examDateStr + "T00:00:00");
+    return Math.ceil((exam - today) / 86400000);
   }, [examDateStr]);
 
   const cells = [];
   for (let i = 0; i < firstDow; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
+  function prevMonth() {
+    if (viewMonth === 0) { setViewYear((y) => y - 1); setViewMonth(11); }
+    else setViewMonth((m) => m - 1);
+  }
+  function nextMonth() {
+    if (viewMonth === 11) { setViewYear((y) => y + 1); setViewMonth(0); }
+    else setViewMonth((m) => m + 1);
+  }
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", textAlign: "center" }}>{monthName}</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <button onClick={prevMonth} style={navBtn}>‹</button>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{monthLabel}</div>
+        <button onClick={nextMonth} style={navBtn}>›</button>
+      </div>
+
       {daysUntilExam !== null && (
-        <div style={{ padding: "8px 12px", background: "#FEF3C7", borderRadius: 10, fontSize: 12, fontWeight: 600, color: "#92400E", textAlign: "center" }}>
-          距离考试还有 {daysUntilExam > 0 ? daysUntilExam : 0} 天
+        <div style={{
+          padding: "8px 12px",
+          background: daysUntilExam <= 3 ? "#FEE2E2" : daysUntilExam <= 7 ? "#FEF3C7" : "#EEF2FF",
+          borderRadius: 10, fontSize: 12, fontWeight: 700,
+          color: daysUntilExam <= 3 ? "#991B1B" : daysUntilExam <= 7 ? "#92400E" : "#4338CA",
+          textAlign: "center",
+        }}>
+          {daysUntilExam > 0 ? `距考试还有 ${daysUntilExam} 天` : daysUntilExam === 0 ? "🎓 今天就是考试日" : "考试已结束"}
         </div>
       )}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, textAlign: "center" }}>
         {["日", "一", "二", "三", "四", "五", "六"].map((d) => (
           <div key={d} style={{ fontSize: 10, fontWeight: 600, color: "#9CA3AF", padding: 4 }}>{d}</div>
         ))}
         {cells.map((day, i) => {
           if (day === null) return <div key={`e${i}`} />;
-          const isToday = day === now.getDate();
-          const isExam = day === examDay;
-          const isSelected = day === selectedDate;
+          const date = new Date(viewYear, viewMonth, day);
+          const dk = planDayKey(date);
+          const isToday = dk === todayKey;
+          const isExam = examDateStr === dk;
+          const isSelected = selectedDayKey === dk;
+          const isPast = dk < todayKey;
+          const dayPlan = examPlan && examPlan.daily_plans && examPlan.daily_plans[dk];
+          const total = dayPlan ? dayPlan.tasks.length : 0;
+          const done = dayPlan ? dayPlan.tasks.filter((t) => t.completed).length : 0;
+          const progress = total > 0 ? done / total : 0;
+          const hasPlan = total > 0;
+          const isComplete = hasPlan && progress === 1;
+
           return (
-            <div
+            <button
               key={day}
-              onClick={() => setSelectedDate(day)}
+              onClick={() => onDayClick && onDayClick(dk)}
+              aria-label={`${viewMonth + 1}月${day}日${hasPlan ? `, ${done}/${total} 任务` : ""}${isExam ? ", 考试日" : ""}`}
               style={{
-                width: 32, height: 32, lineHeight: "32px",
-                borderRadius: "50%", fontSize: 12, fontWeight: isToday ? 700 : 500, cursor: "pointer",
-                margin: "0 auto",
-                background: isSelected ? "#111827" : isExam ? "#EF4444" : isToday ? "#E5E7EB" : "transparent",
-                color: isSelected || isExam ? "#FFF" : isToday ? "#111827" : "#374151",
-                transition: "background 0.12s",
+                width: 32, height: 32,
+                borderRadius: "50%",
+                fontSize: 12, fontWeight: isToday ? 700 : 500,
+                cursor: "pointer", margin: "0 auto",
+                border: isSelected ? "2px solid #4F46E5" : "2px solid transparent",
+                background: isExam ? "#EF4444" : isToday ? "#111827" : hasPlan ? "#EEF2FF" : "transparent",
+                color: isExam || isToday ? "#FFF" : hasPlan ? "#4338CA" : isPast ? "#D1D5DB" : "#374151",
+                padding: 0, fontFamily: "inherit", position: "relative",
+                transition: "background 0.12s, border-color 0.12s",
+                opacity: isPast && !hasPlan ? 0.5 : 1,
               }}
+              title={isExam ? "🎓 考试日" : hasPlan ? `${done}/${total} 任务${isComplete ? " · 已完成" : ""}` : ""}
             >
               {day}
-            </div>
+              {/* 任务状态小圆点 */}
+              {hasPlan && !isExam && (
+                <span style={{
+                  position: "absolute", bottom: -1, left: "50%", transform: "translateX(-50%)",
+                  width: 5, height: 5, borderRadius: "50%",
+                  background: isComplete ? "#10B981" : progress >= 0.5 ? "#3B82F6" : "#F59E0B",
+                }} />
+              )}
+            </button>
           );
         })}
       </div>
-      <div style={{ fontSize: 11, color: "#9CA3AF", textAlign: "center" }}>点击日期查看当天计划</div>
+
+      <div style={{ fontSize: 11, color: "#9CA3AF", textAlign: "center" }}>
+        {examDateStr ? "点击日期查看当天计划" : "还未设置考试日期"}
+      </div>
     </div>
   );
 }
 
-export default function SprintWorkspace({ chatPage, quizPage, onViewPlan, onViewWrong }) {
+const navBtn = {
+  width: 24, height: 24, border: "none", background: "transparent",
+  color: "#6B7280", cursor: "pointer", fontSize: 16, borderRadius: 6,
+  fontFamily: "inherit", padding: 0,
+};
+
+// =============================================================================
+// 设置考试日期的弹窗表单
+// =============================================================================
+function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete }) {
+  const [examDate, setExamDate] = useState(initial?.exam_date || "");
+  const [subject, setSubject] = useState(initial?.subject || "");
+  const [selectedChapters, setSelectedChapters] = useState(new Set(initial?.chapters_in_scope || []));
+  const [dailyMinutes, setDailyMinutes] = useState(initial?.daily_minutes_target || 60);
+  const [errors, setErrors] = useState({});
+
+  const todayKey = planDayKey(new Date());
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  function toggleChapter(slug) {
+    setSelectedChapters((prev) => {
+      const n = new Set(prev);
+      n.has(slug) ? n.delete(slug) : n.add(slug);
+      return n;
+    });
+  }
+  function validate() {
+    const e = {};
+    if (!examDate) e.examDate = "请选择考试日期";
+    else if (examDate < todayKey) e.examDate = "考试日期不能早于今天";
+    if (!subject.trim()) e.subject = "请填写科目";
+    if (selectedChapters.size === 0) e.chapters = "至少选一个章节";
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }
+  function handleSave() {
+    if (!validate()) return;
+    onSave({
+      exam_date: examDate,
+      subject: subject.trim(),
+      chapters_in_scope: Array.from(selectedChapters),
+      daily_minutes_target: dailyMinutes,
+    });
+  }
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 1050, animation: "mcFadeIn .15s" }} />
+      <div role="dialog" aria-label="设置考试日期"
+        style={{
+          position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+          width: "min(540px, 92vw)", maxHeight: "85vh",
+          background: "#fff", borderRadius: 16, zIndex: 1051,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+          display: "flex", flexDirection: "column",
+          animation: "mcPopIn .18s ease-out",
+        }}>
+        <header style={{ padding: "18px 22px", borderBottom: "1px solid #E5E7EB", display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "#111" }}>
+              {initial ? "修改考试计划" : "设置考试日期"}
+            </div>
+            {!initial && <div style={{ fontSize: 12, color: "#6B7280", marginTop: 3 }}>填完后系统会为你生成每日复习任务</div>}
+          </div>
+          <button onClick={onClose} aria-label="关闭" style={{ fontSize: 18, background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", padding: 4, lineHeight: 1 }}>✕</button>
+        </header>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px" }}>
+          {/* 日期 + 科目 */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+            <label style={{ display: "block" }}>
+              <span style={fieldLabel}>📅 考试日期</span>
+              <input type="date" value={examDate} min={todayKey} onChange={(e) => setExamDate(e.target.value)}
+                style={{ ...fieldInput, borderColor: errors.examDate ? "#EF4444" : "#E5E7EB" }} />
+              {errors.examDate && <div style={errMsg}>{errors.examDate}</div>}
+            </label>
+            <label style={{ display: "block" }}>
+              <span style={fieldLabel}>📚 科目名称</span>
+              <input type="text" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="如：数值分析期末"
+                style={{ ...fieldInput, borderColor: errors.subject ? "#EF4444" : "#E5E7EB" }} />
+              {errors.subject && <div style={errMsg}>{errors.subject}</div>}
+            </label>
+          </div>
+
+          {/* 章节 */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span style={fieldLabel}>
+                📖 考试范围
+                <span style={{ marginLeft: 6, color: "#9CA3AF", fontWeight: 500 }}>
+                  ({selectedChapters.size} / {availableChapters.length} 已选)
+                </span>
+              </span>
+              {availableChapters.length > 0 && (
+                <button onClick={() => {
+                  if (selectedChapters.size === availableChapters.length) setSelectedChapters(new Set());
+                  else setSelectedChapters(new Set(availableChapters.map((c) => c.slug)));
+                }} style={{ fontSize: 11.5, padding: "3px 10px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 999, cursor: "pointer", color: "#6B7280", fontFamily: "inherit" }}>
+                  {selectedChapters.size === availableChapters.length ? "全不选" : "全选"}
+                </button>
+              )}
+            </div>
+            {availableChapters.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: "#6B7280", padding: "16px 12px", background: "#F9FAFB", borderRadius: 10, textAlign: "center" }}>
+                还没有章节数据。先去上传资料或答几道题，章节会自动出现
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 180, overflowY: "auto", padding: 4 }}>
+                {availableChapters.map((ch) => {
+                  const sel = selectedChapters.has(ch.slug);
+                  return (
+                    <button key={ch.slug} onClick={() => toggleChapter(ch.slug)}
+                      style={{
+                        padding: "6px 12px", borderRadius: 999,
+                        border: "1.5px solid " + (sel ? "#4F46E5" : "#E5E7EB"),
+                        background: sel ? "#4F46E5" : "#fff",
+                        color: sel ? "#fff" : "#374151",
+                        fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                        display: "inline-flex", alignItems: "center", gap: 5,
+                      }}>
+                      {ch.label}
+                      {ch.wrong_count > 0 && (
+                        <span style={{ fontSize: 10, background: sel ? "rgba(255,255,255,0.22)" : "#FEE2E2", color: sel ? "#fff" : "#991B1B", padding: "0 6px", borderRadius: 10, fontWeight: 700 }}>
+                          {ch.wrong_count} 错
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {errors.chapters && <div style={errMsg}>{errors.chapters}</div>}
+          </div>
+
+          {/* 每日时长 */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <span style={fieldLabel}>⏱️ 每日学习时长</span>
+              <span style={{ fontSize: 14, fontWeight: 800, color: "#4F46E5" }}>{dailyMinutes} 分钟</span>
+            </div>
+            <input type="range" min="20" max="180" step="10" value={dailyMinutes}
+              onChange={(e) => setDailyMinutes(parseInt(e.target.value, 10))}
+              style={{ width: "100%", accentColor: "#4F46E5" }} />
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "#9CA3AF", marginTop: 4 }}>
+              <span>20 · 轻度</span><span>60 · 常规</span><span>120 · 高强</span><span>180 · 冲刺</span>
+            </div>
+            <div style={{ fontSize: 11.5, color: "#6B7280", marginTop: 6 }}>
+              上限内系统按优先级保留任务，超出部分会被自动精简
+            </div>
+          </div>
+        </div>
+
+        <footer style={{ padding: "14px 22px", borderTop: "1px solid #E5E7EB", display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          {initial && onDelete && (
+            <button onClick={() => { if (window.confirm("确定删除当前考试计划？已完成任务记录会清除")) onDelete(); }}
+              style={{ padding: "9px 14px", background: "#FEE2E2", color: "#991B1B", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginRight: "auto" }}>
+              删除计划
+            </button>
+          )}
+          <button onClick={onClose} style={{ padding: "9px 16px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>取消</button>
+          <button onClick={handleSave} style={{ padding: "9px 20px", background: "#4F46E5", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 12px rgba(79,70,229,0.3)" }}>
+            {initial ? "保存并重新生成" : "生成复习计划"}
+          </button>
+        </footer>
+      </div>
+      <SprintAnimations />
+    </>
+  );
+}
+
+const fieldLabel = { fontSize: 12, fontWeight: 700, color: "#374151", display: "inline-block", marginBottom: 5 };
+const fieldInput = { width: "100%", padding: "9px 12px", borderRadius: 9, border: "1.5px solid #E5E7EB", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", outline: "none" };
+const errMsg = { fontSize: 11, color: "#DC2626", marginTop: 4, fontWeight: 600 };
+
+// =============================================================================
+// 日详情抽屉 —— 点击日历任一日期打开
+// =============================================================================
+function DayDetailDrawer({ dayKey, examPlan, onClose, onRefresh, onStartTask }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const todayKey = planDayKey(new Date());
+  const isToday = dayKey === todayKey;
+  const isPast = dayKey < todayKey;
+  const isFuture = dayKey > todayKey;
+  const isExamDay = examPlan && examPlan.exam_date === dayKey;
+  const dayPlan = examPlan && examPlan.daily_plans && examPlan.daily_plans[dayKey];
+
+  const date = new Date(dayKey + "T00:00:00");
+  const weekday = ["日","一","二","三","四","五","六"][date.getDay()];
+  const daysFromToday = Math.round((date - new Date(todayKey + "T00:00:00")) / 86400000);
+
+  const phaseMeta = {
+    light:  { label: "铺垫期", desc: "打基础，不用太紧张", color: "#14B8A6", bg: "#D1FAE5" },
+    normal: { label: "常规期", desc: "按部就班推进",       color: "#10B981", bg: "#D1FAE5" },
+    high:   { label: "强化期", desc: "进入高强度练习",     color: "#3B82F6", bg: "#DBEAFE" },
+    sprint: { label: "冲刺期", desc: "错题 + 模拟为主",    color: "#DC2626", bg: "#FEE2E2" },
+  };
+
+  function handleTaskComplete(task) {
+    markTaskCompleted(dayKey, task.id, { attempted: task.target_count || 0, correct: task.target_count || 0 });
+    onRefresh && onRefresh();
+  }
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 1040, animation: "mcFadeIn .15s" }} />
+      <aside role="dialog" aria-label="当日计划详情"
+        style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: "min(460px, 100vw)", background: "#fff", boxShadow: "-6px 0 24px rgba(0,0,0,0.12)", zIndex: 1041, display: "flex", flexDirection: "column", animation: "mcSlideInRight .22s ease-out" }}>
+        <header style={{ padding: "18px 20px", borderBottom: "1px solid #E5E7EB", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#111" }}>{date.getMonth() + 1} 月 {date.getDate()} 日 · 周{weekday}</div>
+            <div style={{ fontSize: 12.5, color: "#6B7280", marginTop: 3 }}>
+              {isToday && <span style={{ color: "#4F46E5", fontWeight: 700 }}>今天</span>}
+              {isPast && `已过 ${Math.abs(daysFromToday)} 天`}
+              {isFuture && `${daysFromToday} 天后`}
+              {isExamDay && <span style={{ marginLeft: 8, color: "#92400E", fontWeight: 700 }}>🎓 考试日</span>}
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="关闭" style={{ fontSize: 18, background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", padding: 4, lineHeight: 1 }}>✕</button>
+        </header>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "18px 20px" }}>
+          {isExamDay ? (
+            <div style={{ textAlign: "center", padding: "40px 10px" }}>
+              <div style={{ fontSize: 48, marginBottom: 10 }}>🎓</div>
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>考试日</div>
+              <div style={{ fontSize: 13, color: "#6B7280" }}>今天不安排复习任务，祝你考试顺利！</div>
+            </div>
+          ) : !dayPlan ? (
+            <div style={{ textAlign: "center", padding: "40px 10px" }}>
+              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.6 }}>📅</div>
+              <div style={{ fontSize: 13, color: "#6B7280" }}>
+                {isPast ? "这一天没有计划任务" : isFuture ? "这一天的任务会在接近时生成" : "暂无任务"}
+              </div>
+            </div>
+          ) : (
+            <>
+              {(() => {
+                const ph = phaseMeta[dayPlan.phase] || phaseMeta.normal;
+                const total = dayPlan.tasks.length;
+                const done = dayPlan.tasks.filter((t) => t.completed).length;
+                const totalMin = dayPlan.tasks.reduce((s, t) => s + (t.target_minutes || 0), 0);
+                const doneMin = dayPlan.tasks.filter((t) => t.completed).reduce((s, t) => s + (t.target_minutes || 0), 0);
+                return (
+                  <section style={{ marginBottom: 18 }}>
+                    <div style={{ display: "inline-block", padding: "3px 10px", background: ph.bg, color: ph.color, borderRadius: 999, fontSize: 11.5, fontWeight: 700, marginBottom: 6 }}>{ph.label}</div>
+                    <div style={{ fontSize: 12.5, color: "#6B7280", marginBottom: 10 }}>{ph.desc}</div>
+                    <div style={{ height: 8, background: "#F3F4F6", borderRadius: 999, overflow: "hidden", marginBottom: 6 }}>
+                      <div style={{ height: "100%", width: total > 0 ? `${(done / total) * 100}%` : "0%", background: `linear-gradient(90deg, ${ph.color}, ${ph.color}dd)`, transition: "width .3s" }} />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#6B7280" }}>
+                      <span>{done}/{total} 任务</span>
+                      <span>{doneMin}/{totalMin} 分钟</span>
+                    </div>
+                  </section>
+                );
+              })()}
+
+              <section>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", marginBottom: 8, letterSpacing: "0.05em" }}>任务列表</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {dayPlan.tasks.map((task) => (
+                    <DrawerTaskItem key={task.id} task={task} isToday={isToday} isPast={isPast}
+                      onStart={() => onStartTask(task)} onComplete={() => handleTaskComplete(task)} />
+                  ))}
+                </div>
+              </section>
+
+              {dayPlan.dropped_count > 0 && (
+                <section style={{ marginTop: 14, padding: "8px 12px", background: "#F3F4F6", borderRadius: 8, fontSize: 11.5, color: "#6B7280" }}>
+                  💡 按当前时长上限，这一天省略了 {dayPlan.dropped_count} 个低优任务
+                </section>
+              )}
+            </>
+          )}
+        </div>
+      </aside>
+      <SprintAnimations />
+    </>
+  );
+}
+
+function DrawerTaskItem({ task, isToday, isPast, onStart, onComplete }) {
+  const icons = { sm2_due: "🔁", chapter_practice: "📝", concept_study: "📖", mock_exam: "⏱️", light_review: "🧘", wrong_review: "❌" };
+  const prioColor = task.priority === "high" ? "#DC2626" : task.priority === "low" ? "#94A3B8" : "#4F46E5";
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
+      background: task.completed ? "#F9FAFB" : "#fff",
+      border: "1px solid #E5E7EB",
+      borderLeft: `3px solid ${task.completed ? "#D1D5DB" : prioColor}`,
+      borderRadius: 10, opacity: task.completed ? 0.7 : 1,
+    }}>
+      <div style={{ fontSize: 20, flexShrink: 0 }}>{icons[task.type] || "•"}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: task.completed ? "#9CA3AF" : "#111", textDecoration: task.completed ? "line-through" : "none" }}>{task.title}</div>
+        {task.subtitle && <div style={{ fontSize: 11.5, color: "#888", marginTop: 2 }}>{task.subtitle}</div>}
+        <div style={{ fontSize: 11, color: "#aaa", marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span>⏱ {task.target_minutes || 0} 分钟</span>
+          {task.priority === "high" && <span style={{ color: "#DC2626", fontWeight: 700 }}>高优</span>}
+          {task._rolled_from && <span style={{ color: "#B45309", fontWeight: 700 }}>昨日顺延</span>}
+        </div>
+      </div>
+      {task.completed ? (
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#047857", background: "#D1FAE5", padding: "4px 10px", borderRadius: 8, flexShrink: 0 }}>✓ 已完成</span>
+      ) : isToday ? (
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <button onClick={onStart} style={{ padding: "6px 14px", background: "#4F46E5", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>开始</button>
+          <button onClick={onComplete} title="手动标记为已完成" style={{ padding: "6px 10px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>✓</button>
+        </div>
+      ) : isPast ? (
+        <span style={{ fontSize: 11.5, color: "#9CA3AF", background: "#F3F4F6", padding: "3px 10px", borderRadius: 8, flexShrink: 0 }}>未完成</span>
+      ) : (
+        <span style={{ fontSize: 11.5, color: "#6B7280", background: "#EEF2FF", padding: "3px 10px", borderRadius: 8, flexShrink: 0 }}>待开启</span>
+      )}
+    </div>
+  );
+}
+
+function SprintAnimations() {
+  useEffect(() => {
+    const id = "mc-sprint-anim-style";
+    if (document.getElementById(id)) return;
+    const style = document.createElement("style");
+    style.id = id;
+    style.textContent = `
+      @keyframes mcFadeIn { from { opacity: 0 } to { opacity: 1 } }
+      @keyframes mcSlideInRight { from { transform: translateX(100%) } to { transform: translateX(0) } }
+      @keyframes mcPopIn { from { transform: translate(-50%,-50%) scale(.92); opacity: 0 } to { transform: translate(-50%,-50%) scale(1); opacity: 1 } }
+    `;
+    document.head.appendChild(style);
+  }, []);
+  return null;
+}
+
+// =============================================================================
+// 主组件
+// =============================================================================
+export default function SprintWorkspace({ chatPage, quizPage, onViewPlan, onViewWrong, allQuestions = [], onStartTask }) {
   const [rightPanelMode, setRightPanelMode] = useState("chat");
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [selectedDayKey, setSelectedDayKey] = useState(null);
+  const [tick, setTick] = useState(0); // 驱动 re-read storage
+
+  void tick;
+  const examPlan = storage.get("exam_plan", null);
+
+  // 进入页面时跑一次顺延
+  useEffect(() => {
+    if (examPlan) rolloverIncompleteTasks();
+    setTick((v) => v + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const availableChapters = useMemo(() => getUserChapters(allQuestions), [allQuestions]);
+
+  function refresh() { setTick((v) => v + 1); }
+
+  function handleSave(values) {
+    // 写 localStorage（保持和 ReportPage 那边的读取逻辑一致）
+    localStorage.setItem("mc_exam_date", values.exam_date);
+    localStorage.setItem("mc_exam_subject", values.subject);
+    localStorage.setItem("mc_exam_chapters", JSON.stringify(values.chapters_in_scope));
+    localStorage.setItem("mc_daily_minutes", String(values.daily_minutes_target));
+
+    // 生成每日计划
+    const chaptersInScope = availableChapters.filter((c) => values.chapters_in_scope.includes(c.slug));
+    const oldPlan = storage.get("exam_plan", null);
+    const fresh = generateDailyPlans({
+      examDate: values.exam_date,
+      chaptersInScope,
+      dailyMinutesTarget: values.daily_minutes_target,
+    });
+    // 合并：保留旧计划里的已完成状态
+    const merged = {};
+    Object.keys(fresh).forEach((dk) => {
+      const freshDay = fresh[dk];
+      const oldDay = oldPlan && oldPlan.daily_plans && oldPlan.daily_plans[dk];
+      if (!oldDay) { merged[dk] = freshDay; return; }
+      const oldMap = new Map((oldDay.tasks || []).map((t) => [t.id, t]));
+      const tasks = (freshDay.tasks || []).map((t) => {
+        const old = oldMap.get(t.id);
+        if (old && old.completed) return { ...t, completed: true, completed_at: old.completed_at, actual_correct: old.actual_correct, actual_attempted: old.actual_attempted };
+        return t;
+      });
+      merged[dk] = {
+        ...freshDay, tasks,
+        summary: {
+          total_tasks: tasks.length,
+          completed_tasks: tasks.filter((t) => t.completed).length,
+          total_minutes: tasks.reduce((s, x) => s + (x.target_minutes || 0), 0),
+          completed_minutes: tasks.filter((t) => t.completed).reduce((s, x) => s + (x.target_minutes || 0), 0),
+        },
+      };
+    });
+
+    storage.set("exam_plan", {
+      exam_date: values.exam_date,
+      subject: values.subject,
+      chapters_in_scope: values.chapters_in_scope,
+      daily_minutes_target: values.daily_minutes_target,
+      daily_plans: merged,
+      plan_generated_at: Date.now(),
+      plan_version: 1,
+    });
+
+    setSetupOpen(false);
+    refresh();
+  }
+
+  function handleDelete() {
+    ["mc_exam_date","mc_exam_subject","mc_exam_chapters","mc_daily_minutes"].forEach((k) => localStorage.removeItem(k));
+    storage.remove("exam_plan");
+    setSetupOpen(false);
+    refresh();
+  }
+
+  function handleStartTaskInternal(task) {
+    if (!task) return;
+    onStartTask && onStartTask(task);
+    if (task.type === "concept_study") setRightPanelMode("chat");
+    else setRightPanelMode("quiz");
+    setSelectedDayKey(null);
+  }
+
+  const hasPlan = !!examPlan;
 
   return (
     <div style={{ display: "flex", flex: 1, padding: 24, gap: 24, overflow: "hidden", boxSizing: "border-box" }}>
       <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: 24 }}>
-        <div
-          className="premium-card"
-          style={{ flex: "1 1 50%", padding: 20, overflowY: "auto", display: "flex", flexDirection: "column" }}
-        >
-          <h3 style={{ margin: "0 0 16px 0", fontSize: 16, fontWeight: 700, color: "#111827" }}>冲刺日历</h3>
-          <VerticalMiniCalendar />
+        <div className="premium-card" style={{ flex: "1 1 50%", padding: 20, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>冲刺日历</h3>
+            <button onClick={() => setSetupOpen(true)} title={hasPlan ? "修改考试计划" : "设置考试日期"}
+              style={{
+                padding: "5px 10px", borderRadius: 8, border: "1px solid #E5E7EB",
+                background: hasPlan ? "#fff" : "#4F46E5", color: hasPlan ? "#374151" : "#fff",
+                fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                boxShadow: hasPlan ? "none" : "0 2px 8px rgba(79,70,229,0.3)",
+              }}>
+              {hasPlan ? "⚙️ 修改" : "⚙️ 设置"}
+            </button>
+          </div>
+
+          {!hasPlan && (
+            <div style={{
+              background: "linear-gradient(135deg,#EEF2FF,#F0F9FF)",
+              border: "2px dashed #C7D2FE", borderRadius: 12,
+              padding: "16px 14px", textAlign: "center", marginBottom: 14,
+            }}>
+              <div style={{ fontSize: 28, marginBottom: 4 }}>🎯</div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: "#111", marginBottom: 3 }}>还没有考试计划</div>
+              <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 10, lineHeight: 1.5 }}>
+                告诉系统考试哪天、复习哪几章、每天学多久
+              </div>
+              <button onClick={() => setSetupOpen(true)}
+                style={{ padding: "7px 16px", background: "#4F46E5", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 3px 10px rgba(79,70,229,0.3)" }}>
+                设置考试日期
+              </button>
+            </div>
+          )}
+
+          <VerticalMiniCalendar
+            examPlan={examPlan}
+            selectedDayKey={selectedDayKey}
+            onDayClick={setSelectedDayKey}
+          />
         </div>
 
-        <div
-          className="premium-card"
-          style={{ flex: "1 1 50%", padding: 20, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}
-        >
+        <div className="premium-card" style={{ flex: "1 1 50%", padding: 20, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12 }}>
           <h3 style={{ margin: "0 0 8px 0", fontSize: 16, fontWeight: 700, color: "#111827" }}>目标与错题</h3>
-          <button
-            onClick={() => setRightPanelMode("chat")}
+          <button onClick={() => setRightPanelMode("chat")}
             style={{
               padding: 12, textAlign: "center", borderRadius: 12, border: "none", cursor: "pointer",
               fontWeight: 600, fontSize: 14, fontFamily: "inherit", transition: "background 0.12s",
               background: rightPanelMode === "chat" ? "#111827" : "#F3F4F6",
               color: rightPanelMode === "chat" ? "#FFFFFF" : "#111827",
-            }}
-          >
+            }}>
             🤖 AI 复习对讲
           </button>
-          <button
-            onClick={() => setRightPanelMode("quiz")}
+          <button onClick={() => setRightPanelMode("quiz")}
             style={{
               padding: 12, textAlign: "center", borderRadius: 12, border: "none", cursor: "pointer",
               fontWeight: 600, fontSize: 14, fontFamily: "inherit", transition: "background 0.12s",
               background: rightPanelMode === "quiz" ? "#10B981" : "#F3F4F6",
               color: rightPanelMode === "quiz" ? "#FFFFFF" : "#111827",
-            }}
-          >
+            }}>
             🧩 AI 出题检测
           </button>
-          <button
-            onClick={onViewPlan}
-            style={{
-              padding: 12, textAlign: "center", background: "#F3F4F6", borderRadius: 12,
-              border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14,
-              color: "#111827", fontFamily: "inherit",
-            }}
-          >
+          <button onClick={onViewPlan}
+            style={{ padding: 12, textAlign: "center", background: "#F3F4F6", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, color: "#111827", fontFamily: "inherit" }}>
             📋 查看复习计划
           </button>
-          <button
-            onClick={onViewWrong}
-            style={{
-              padding: 12, textAlign: "center", background: "#F3F4F6", borderRadius: 12,
-              border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14,
-              color: "#111827", fontFamily: "inherit",
-            }}
-          >
+          <button onClick={onViewWrong}
+            style={{ padding: 12, textAlign: "center", background: "#F3F4F6", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, color: "#111827", fontFamily: "inherit" }}>
             📝 进入错题本
           </button>
 
           <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px solid #F3F4F6" }}>
             <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 6 }}>今日目标</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>完成 20 道练习题</div>
-            <div style={{ marginTop: 8, height: 6, borderRadius: 3, background: "#E5E7EB", overflow: "hidden" }}>
-              <div style={{ width: "35%", height: "100%", borderRadius: 3, background: "#10B981", transition: "width 0.3s" }} />
-            </div>
-            <div style={{ fontSize: 11, color: "#6B7280", marginTop: 4 }}>7 / 20 已完成</div>
+            {(() => {
+              const today = planDayKey(new Date());
+              const todayPlan = examPlan && examPlan.daily_plans && examPlan.daily_plans[today];
+              if (!todayPlan || todayPlan.tasks.length === 0) {
+                return <div style={{ fontSize: 13, color: "#9CA3AF" }}>暂无任务</div>;
+              }
+              const done = todayPlan.tasks.filter((t) => t.completed).length;
+              const total = todayPlan.tasks.length;
+              const pct = Math.round((done / total) * 100);
+              return (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>完成 {total} 项复习任务</div>
+                  <div style={{ marginTop: 8, height: 6, borderRadius: 3, background: "#E5E7EB", overflow: "hidden" }}>
+                    <div style={{ width: `${pct}%`, height: "100%", borderRadius: 3, background: pct >= 100 ? "#10B981" : "#4F46E5", transition: "width 0.3s" }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: "#6B7280", marginTop: 4 }}>{done} / {total} 已完成</div>
+                </>
+              );
+            })()}
           </div>
         </div>
       </div>
 
-      <div
-        className="premium-card"
-        style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 24 }}
-      >
+      <div className="premium-card" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 24 }}>
         <AnimatePresence mode="wait">
-          <motion.div
-            key={rightPanelMode}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
-            style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}
-          >
+          <motion.div key={rightPanelMode}
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}
+            style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
             {rightPanelMode === "chat" ? (
               chatPage
             ) : (
@@ -161,15 +668,33 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewPlan, onView
                 <div style={{ padding: "16px 24px", borderBottom: "1px solid #E5E7EB", display: "flex", alignItems: "center", flexShrink: 0 }}>
                   <h2 style={{ fontSize: 18, margin: 0, fontWeight: 700, color: "#111827" }}>AI 出题检测</h2>
                 </div>
-                <div style={{ flex: 1, overflowY: "auto" }}>
-                  {quizPage}
-                </div>
+                <div style={{ flex: 1, overflowY: "auto" }}>{quizPage}</div>
               </div>
             )}
           </motion.div>
         </AnimatePresence>
       </div>
       <InteractiveLab />
+
+      {/* Modal + Drawer */}
+      {setupOpen && (
+        <ExamSetupModal
+          availableChapters={availableChapters}
+          initial={examPlan}
+          onSave={handleSave}
+          onClose={() => setSetupOpen(false)}
+          onDelete={examPlan ? handleDelete : undefined}
+        />
+      )}
+      {selectedDayKey && (
+        <DayDetailDrawer
+          dayKey={selectedDayKey}
+          examPlan={examPlan}
+          onClose={() => setSelectedDayKey(null)}
+          onRefresh={refresh}
+          onStartTask={handleStartTaskInternal}
+        />
+      )}
     </div>
   );
 }

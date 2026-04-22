@@ -11234,6 +11234,8 @@ export default function App() {
                     quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} isSprint onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
                     onViewPlan={() => handleSetPage("学习报告")}
                     onViewWrong={() => handleSetPage("错题本")}
+                    allQuestions={ALL_QUESTIONS}
+                    onStartTask={(task) => { if (task && task.chapter && setChapterFilter) setChapterFilter([task.chapter]); }}
                   />
                 </motion.div>
               )}
