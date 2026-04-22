@@ -46,18 +46,19 @@ function VerticalMiniCalendar({ examPlan, onDayClick, selectedDayKey }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <button onClick={prevMonth} style={navBtn}>‹</button>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{monthLabel}</div>
-        <button onClick={nextMonth} style={navBtn}>›</button>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
+      {/* 月切换 + 距考徽章 合并一行 */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <button onClick={prevMonth} style={navBtn} aria-label="上一月">‹</button>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", flex: 1, textAlign: "center" }}>{monthLabel}</div>
+        <button onClick={nextMonth} style={navBtn} aria-label="下一月">›</button>
       </div>
 
       {daysUntilExam !== null && (
         <div style={{
-          padding: "8px 12px",
+          padding: "5px 10px",
           background: daysUntilExam <= 3 ? "#FEE2E2" : daysUntilExam <= 7 ? "#FEF3C7" : "#EEF2FF",
-          borderRadius: 10, fontSize: 12, fontWeight: 700,
+          borderRadius: 8, fontSize: 11.5, fontWeight: 700,
           color: daysUntilExam <= 3 ? "#991B1B" : daysUntilExam <= 7 ? "#92400E" : "#4338CA",
           textAlign: "center",
         }}>
@@ -65,12 +66,12 @@ function VerticalMiniCalendar({ examPlan, onDayClick, selectedDayKey }) {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, textAlign: "center" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, textAlign: "center" }}>
         {["日", "一", "二", "三", "四", "五", "六"].map((d) => (
-          <div key={d} style={{ fontSize: 10, fontWeight: 600, color: "#9CA3AF", padding: 4 }}>{d}</div>
+          <div key={d} style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF", padding: "4px 0" }}>{d}</div>
         ))}
         {cells.map((day, i) => {
-          if (day === null) return <div key={`e${i}`} />;
+          if (day === null) return <div key={`e${i}`} style={{ aspectRatio: "1" }} />;
           const date = new Date(viewYear, viewMonth, day);
           const dk = planDayKey(date);
           const isToday = dk === todayKey;
@@ -90,16 +91,17 @@ function VerticalMiniCalendar({ examPlan, onDayClick, selectedDayKey }) {
               onClick={() => onDayClick && onDayClick(dk)}
               aria-label={`${viewMonth + 1}月${day}日${hasPlan ? `, ${done}/${total} 任务` : ""}${isExam ? ", 考试日" : ""}`}
               style={{
-                width: 32, height: 32,
+                width: "100%", aspectRatio: "1",
                 borderRadius: "50%",
-                fontSize: 12, fontWeight: isToday ? 700 : 500,
-                cursor: "pointer", margin: "0 auto",
+                fontSize: 13, fontWeight: isToday ? 700 : 500,
+                cursor: "pointer",
                 border: isSelected ? "2px solid #4F46E5" : "2px solid transparent",
                 background: isExam ? "#EF4444" : isToday ? "#111827" : hasPlan ? "#EEF2FF" : "transparent",
                 color: isExam || isToday ? "#FFF" : hasPlan ? "#4338CA" : isPast ? "#D1D5DB" : "#374151",
                 padding: 0, fontFamily: "inherit", position: "relative",
                 transition: "background 0.12s, border-color 0.12s",
                 opacity: isPast && !hasPlan ? 0.5 : 1,
+                display: "flex", alignItems: "center", justifyContent: "center",
               }}
               title={isExam ? "🎓 考试日" : hasPlan ? `${done}/${total} 任务${isComplete ? " · 已完成" : ""}` : ""}
             >
@@ -107,7 +109,7 @@ function VerticalMiniCalendar({ examPlan, onDayClick, selectedDayKey }) {
               {/* 任务状态小圆点 */}
               {hasPlan && !isExam && (
                 <span style={{
-                  position: "absolute", bottom: -1, left: "50%", transform: "translateX(-50%)",
+                  position: "absolute", bottom: 3, left: "50%", transform: "translateX(-50%)",
                   width: 5, height: 5, borderRadius: "50%",
                   background: isComplete ? "#10B981" : progress >= 0.5 ? "#3B82F6" : "#F59E0B",
                 }} />
@@ -117,9 +119,11 @@ function VerticalMiniCalendar({ examPlan, onDayClick, selectedDayKey }) {
         })}
       </div>
 
-      <div style={{ fontSize: 11, color: "#9CA3AF", textAlign: "center" }}>
-        {examDateStr ? "点击日期查看当天计划" : "还未设置考试日期"}
-      </div>
+      {!examDateStr && (
+        <div style={{ fontSize: 11, color: "#9CA3AF", textAlign: "center", marginTop: 4 }}>
+          还未设置考试日期
+        </div>
+      )}
     </div>
   );
 }
@@ -678,8 +682,8 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
   return (
     <div style={{ display: "flex", flex: 1, padding: 24, gap: 24, overflow: "hidden", boxSizing: "border-box" }}>
       <div style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", gap: 24 }}>
-        <div className="premium-card" style={{ flex: "1 1 auto", padding: 20, overflowY: "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div className="premium-card" style={{ flex: "1 1 auto", padding: 16, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexShrink: 0 }}>
             <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#111827" }}>冲刺日历</h3>
             <button onClick={() => setSetupOpen(true)} title={hasPlan ? "修改考试计划" : "设置考试日期"}
               style={{
@@ -717,12 +721,12 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
           />
         </div>
 
-        <div className="premium-card" style={{ flex: "0 0 auto", padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-          <h3 style={{ margin: "0 0 8px 0", fontSize: 16, fontWeight: 700, color: "#111827" }}>目标与错题</h3>
+        <div className="premium-card" style={{ flex: "0 0 auto", padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+          <h3 style={{ margin: "0 0 2px 0", fontSize: 15, fontWeight: 700, color: "#111827" }}>目标与错题</h3>
           <button onClick={() => setRightPanelMode("chat")}
             style={{
-              padding: 12, textAlign: "center", borderRadius: 12, border: "none", cursor: "pointer",
-              fontWeight: 600, fontSize: 14, fontFamily: "inherit", transition: "background 0.12s",
+              padding: "9px 12px", textAlign: "center", borderRadius: 10, border: "none", cursor: "pointer",
+              fontWeight: 600, fontSize: 13, fontFamily: "inherit", transition: "background 0.12s",
               background: rightPanelMode === "chat" ? "#111827" : "#F3F4F6",
               color: rightPanelMode === "chat" ? "#FFFFFF" : "#111827",
             }}>
@@ -730,36 +734,42 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
           </button>
           <button onClick={() => setRightPanelMode("quiz")}
             style={{
-              padding: 12, textAlign: "center", borderRadius: 12, border: "none", cursor: "pointer",
-              fontWeight: 600, fontSize: 14, fontFamily: "inherit", transition: "background 0.12s",
+              padding: "9px 12px", textAlign: "center", borderRadius: 10, border: "none", cursor: "pointer",
+              fontWeight: 600, fontSize: 13, fontFamily: "inherit", transition: "background 0.12s",
               background: rightPanelMode === "quiz" ? "#10B981" : "#F3F4F6",
               color: rightPanelMode === "quiz" ? "#FFFFFF" : "#111827",
             }}>
             🧩 AI 出题检测
           </button>
           <button onClick={onViewWrong}
-            style={{ padding: 12, textAlign: "center", background: "#F3F4F6", borderRadius: 12, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, color: "#111827", fontFamily: "inherit" }}>
+            style={{ padding: "9px 12px", textAlign: "center", background: "#F3F4F6", borderRadius: 10, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13, color: "#111827", fontFamily: "inherit" }}>
             📝 进入错题本
           </button>
 
-          <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px solid #F3F4F6" }}>
-            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 6 }}>今日目标</div>
+          <div style={{ paddingTop: 8, marginTop: 2, borderTop: "1px solid #F3F4F6" }}>
             {(() => {
               const today = planDayKey(new Date());
               const todayPlan = examPlan && examPlan.daily_plans && examPlan.daily_plans[today];
               if (!todayPlan || todayPlan.tasks.length === 0) {
-                return <div style={{ fontSize: 13, color: "#9CA3AF" }}>暂无任务</div>;
+                return (
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 11.5, color: "#9CA3AF" }}>今日目标</span>
+                    <span style={{ fontSize: 12, color: "#9CA3AF" }}>暂无任务</span>
+                  </div>
+                );
               }
               const done = todayPlan.tasks.filter((t) => t.completed).length;
               const total = todayPlan.tasks.length;
               const pct = Math.round((done / total) * 100);
               return (
                 <>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>完成 {total} 项复习任务</div>
-                  <div style={{ marginTop: 8, height: 6, borderRadius: 3, background: "#E5E7EB", overflow: "hidden" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+                    <span style={{ fontSize: 11.5, color: "#6B7280", fontWeight: 600 }}>今日 · {done}/{total} 任务</span>
+                    <span style={{ fontSize: 11, color: pct >= 100 ? "#047857" : "#4F46E5", fontWeight: 700 }}>{pct}%</span>
+                  </div>
+                  <div style={{ height: 5, borderRadius: 3, background: "#E5E7EB", overflow: "hidden" }}>
                     <div style={{ width: `${pct}%`, height: "100%", borderRadius: 3, background: pct >= 100 ? "#10B981" : "#4F46E5", transition: "width 0.3s" }} />
                   </div>
-                  <div style={{ fontSize: 11, color: "#6B7280", marginTop: 4 }}>{done} / {total} 已完成</div>
                 </>
               );
             })()}
