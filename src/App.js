@@ -12,6 +12,10 @@ import SprintWorkspace from "./layouts/SprintWorkspace";
 import { isEditableFocused } from "./utils/keyboard";
 import { detectVizIntent, logVizIntent } from "./utils/vizIntent";
 import { resolveDialogueMode, deriveQuizState, DIALOGUE_MODE_LABELS } from "./utils/dialogueMode";
+import { recordWrongAnswer, recordCorrectAnswer, getWrongItems as getWrongItemsFromStore, getDueWrongItems, markMastered, suspendItem, tagWrongItem, incrementVariantsGenerated, ERROR_TAGS, getChapterMistakeStats } from "./utils/wrongItems";
+import { storage } from "./utils/storage";
+import { getUserChapters } from "./utils/chapters";
+import { generateDailyPlans, dayKey as planDayKey, markTaskCompleted, rolloverIncompleteTasks, countBacklog, priorityWeight } from "./utils/planGenerator";
 import "katex/dist/katex.min.css";
 
 // Inject global CSS animations
@@ -6325,7 +6329,13 @@ function FlashcardPage({ setPage }) {
 
 // ── Report Page ───────────────────────────────────────────────────────────────
 
-// ── ExamPlanSection: 考试倒计时 + 个性化复习日历 ─────────────────────────────
+// ── ExamPlanSection: 真实计划生成器 (L3b) ──────────────────────────────────
+// 改造点：
+//   · 章节选项从硬编码 8 章 → 从 ALL_QUESTIONS + 错题本聚合（getUserChapters）
+//   · 每日任务从"3 种硬编码模板"→ planGenerator 基于 SM2 到期 + 薄弱度动态生成
+//   · 新增 dailyMinutesTarget 硬上限设置
+//   · 日历格子显示完成进度（进度环 + N/M 任务）
+//   · 外部组件 <TodayPlanView /> 展示今日任务列表、支持勾选完成
 function ExamPlanSection({ weak, setPage, setChapterFilter }) {
   const [showForm, setShowForm] = useState(() => !localStorage.getItem("mc_exam_date"));
   const [examDate, setExamDate] = useState(() => localStorage.getItem("mc_exam_date") || "");
@@ -6333,67 +6343,100 @@ function ExamPlanSection({ weak, setPage, setChapterFilter }) {
   const [examChapters, setExamChapters] = useState(() => {
     try { return JSON.parse(localStorage.getItem("mc_exam_chapters") || "[]"); } catch { return []; }
   });
-  const allChaptersOpts = ["Ch.1 方程求解","Ch.2 线性方程组","Ch.3 插值","Ch.4 最小二乘","Ch.5 数值微积分","最优化 Ch.1","ODE 基础","概率论基础"];
+  const [dailyMinutesTarget, setDailyMinutesTarget] = useState(() => {
+    const raw = localStorage.getItem("mc_daily_minutes");
+    const n = raw ? parseInt(raw, 10) : 60;
+    return isNaN(n) ? 60 : n;
+  });
+  // 真实章节池 —— 从题库 + 错题本聚合（薄弱度已按错题数排序）
+  const availableChapters = useMemo(() => getUserChapters(ALL_QUESTIONS), []);
+  // 后备：题库全空时给个最小骨架（不应该发生，但防御一下）
+  const allChaptersOpts = availableChapters.length > 0
+    ? availableChapters.map((c) => ({ slug: c.slug, label: c.label, wrong: c.wrong_count, total: c.question_count }))
+    : [];
 
   const daysLeft = examDate ? Math.ceil((new Date(examDate) - new Date()) / 86400000) : null;
+
+  // 生成 / 更新计划 —— 每次考试日期/章节/时长变化时重新跑
+  // 已完成的任务通过 id 精确保留（不因重新生成被清空）
+  useEffect(() => {
+    if (!examDate) return;
+    const chaptersInScope = examChapters.length > 0
+      ? availableChapters.filter((c) => examChapters.includes(c.slug))
+      : availableChapters.filter((c) => c.wrong_count > 0).slice(0, 5); // 没选就用薄弱前 5
+    if (chaptersInScope.length === 0) return;
+
+    const oldPlan = storage.get("exam_plan", null);
+    const fresh = generateDailyPlans({ examDate, chaptersInScope, dailyMinutesTarget });
+
+    // 合并：保留旧计划里每个 task 的 completed 状态
+    const merged = {};
+    Object.keys(fresh).forEach((dk) => {
+      const freshDay = fresh[dk];
+      const oldDay = oldPlan && oldPlan.daily_plans && oldPlan.daily_plans[dk];
+      if (!oldDay) { merged[dk] = freshDay; return; }
+      const oldTaskMap = new Map((oldDay.tasks || []).map((t) => [t.id, t]));
+      const tasks = (freshDay.tasks || []).map((t) => {
+        const old = oldTaskMap.get(t.id);
+        if (old && old.completed) return { ...t, completed: true, completed_at: old.completed_at, actual_correct: old.actual_correct, actual_attempted: old.actual_attempted };
+        return t;
+      });
+      merged[dk] = { ...freshDay, tasks, summary: { total_tasks: tasks.length, completed_tasks: tasks.filter((t) => t.completed).length, total_minutes: tasks.reduce((s, x) => s + (x.target_minutes || 0), 0), completed_minutes: tasks.filter((t) => t.completed).reduce((s, x) => s + (x.target_minutes || 0), 0) } };
+    });
+
+    storage.set("exam_plan", {
+      exam_date: examDate,
+      subject: examSubject,
+      chapters_in_scope: chaptersInScope.map((c) => c.slug),
+      daily_minutes_target: dailyMinutesTarget,
+      daily_plans: merged,
+      plan_generated_at: Date.now(),
+      plan_version: 1,
+    });
+
+    // 昨日未完成 P0 自动顺延到今天（SM2 到期 + high 优先）
+    rolloverIncompleteTasks();
+  }, [examDate, examSubject, JSON.stringify(examChapters), dailyMinutesTarget, availableChapters]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveExam = () => {
     localStorage.setItem("mc_exam_date", examDate);
     localStorage.setItem("mc_exam_subject", examSubject);
     localStorage.setItem("mc_exam_chapters", JSON.stringify(examChapters));
+    localStorage.setItem("mc_daily_minutes", String(dailyMinutesTarget));
     setShowForm(false);
   };
 
-  const generatePlan = () => {
-    const scope = examChapters.length > 0 ? examChapters : (weak.length > 0 ? weak.map(w => w.name) : ["综合复习"]);
-    // Assign each day a primary chapter by evenly distributing chapters
-    const planLen = daysLeft !== null && daysLeft > 7 ? Math.min(daysLeft + 1, 14) : 7;
-    const dayChapter = Array.from({ length: planLen }, (_, di) => scope[di % scope.length]);
-    return Array.from({ length: planLen }, (_, di) => {
-      const date = new Date(Date.now() + di * 86400000);
-      const dayNames = ["日","一","二","三","四","五","六"];
-      const dLeft = daysLeft !== null ? daysLeft - di : null;
-      const isExamDay = daysLeft !== null && dLeft === 0;
-      const isPast = dLeft !== null && dLeft < 0;
-      const chap = dayChapter[di];
-      const chapShort = chap ? chap.split(" ").slice(0,2).join(" ") : "综合";
-      let tasks = [];
-      let chapter = "";
-      if (isExamDay) {
-        tasks = ["🎓 考试日！加油！", "相信自己，沉着作答"];
-      } else if (isPast) {
-        tasks = ["已过考试日"];
-      } else if (dLeft !== null && dLeft === 1) {
-        tasks = ["轻松回顾全部重点", "早睡！保持最佳状态"];
-        chapter = "冲刺";
-      } else if (dLeft !== null && dLeft <= 3) {
-        // Sprint: cycle chapters for last 3 days
-        const sprintChap = scope[(dLeft - 1) % scope.length];
-        const sprintShort = sprintChap ? sprintChap.split(" ").slice(0,2).join(" ") : "总复习";
-        tasks = ["🔥 " + sprintShort + " 冲刺复习", "重点公式快速过 · 错题再做一遍"];
-        chapter = sprintShort;
-      } else {
-        // Normal days: assign chapter, vary activity type
-        const pattern = di % 3;
-        if (pattern === 0) {
-          tasks = ["📖 精读 " + chapShort, "练习对应题目 8 道"];
-        } else if (pattern === 1) {
-          tasks = ["🃏 记忆卡片 15 张", "📝 " + chapShort + " 错题回顾"];
-        } else {
-          tasks = ["💬 " + chapShort + " AI 助教提问", "🔁 巩固薄弱知识点"];
-        }
-        chapter = chapShort;
-      }
-      const intensity = isExamDay ? "exam" : (dLeft !== null && dLeft <= 1) ? "light" : (dLeft !== null && dLeft <= 3 ? "sprint" : (di % 3 === 0 ? "high" : "normal"));
-      const bg = isExamDay ? "linear-gradient(135deg,#fef3c7,#fde68a)" : isPast ? "#f5f5f5" :
-                 intensity === "light" ? "#f0fdf8" : intensity === "sprint" ? "#fff1f2" :
-                 intensity === "high" ? "#eff6ff" : "#fafbff";
-      const border = isExamDay ? "#fcd34d" : isPast ? "#e5e5e5" :
-                     intensity === "sprint" ? "#fca5a5" : intensity === "high" ? G.blue+"66" : G.teal+"44";
-      return { date, dayName: dayNames[date.getDay()], tasks, bg, border, isExamDay, isPast, dLeft, chapter };
-    });
-  };
-  const plan = generatePlan();
+  // 从持久化 plan 读取日历数据（上面 useEffect 里刚写入）
+  const examPlan = storage.get("exam_plan", null);
+  const planLen = daysLeft !== null && daysLeft > 7 ? Math.min(daysLeft + 1, 14) : 7;
+  const dayNames = ["日","一","二","三","四","五","六"];
+  const calendarDays = Array.from({ length: planLen }, (_, di) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + di);
+    const dLeft = daysLeft !== null ? daysLeft - di : null;
+    const isExamDay = daysLeft !== null && dLeft === 0;
+    const isPast = dLeft !== null && dLeft < 0;
+    const dk = planDayKey(date);
+    const dayPlan = examPlan && examPlan.daily_plans && examPlan.daily_plans[dk];
+    const phase = dayPlan ? dayPlan.phase : (isExamDay ? "exam_day" : isPast ? "past" : "normal");
+    const summary = dayPlan ? dayPlan.summary : null;
+    const progress = summary && summary.total_tasks > 0 ? summary.completed_tasks / summary.total_tasks : 0;
+    // phase → 配色
+    const phaseColor = {
+      exam_day: { bg: "linear-gradient(135deg,#fef3c7,#fde68a)", border: "#fcd34d" },
+      past:     { bg: "#f5f5f5", border: "#e5e5e5" },
+      sprint:   { bg: "#fff1f2", border: "#fca5a5" },
+      high:     { bg: "#eff6ff", border: G.blue+"66" },
+      normal:   { bg: "#fafbff", border: G.teal+"44" },
+      light:    { bg: "#f0fdf8", border: G.teal+"33" },
+    }[phase] || { bg: "#fafbff", border: G.teal+"44" };
+    return {
+      date, dayKey: dk, dayName: dayNames[date.getDay()], dLeft, isExamDay, isPast,
+      phase, summary, progress, dayPlan,
+      bg: phaseColor.bg, border: phaseColor.border,
+    };
+  });
 
   return (
     <div style={{ ...s.card, marginTop: 0, marginBottom: 24 }}>
@@ -6424,55 +6467,219 @@ function ExamPlanSection({ weak, setPage, setChapterFilter }) {
             </div>
           </div>
           <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>📖 考试范围（点击选择章节，留空则自动按薄弱章节安排）{examChapters.length > 0 && <span style={{ marginLeft:8, background:G.blue, color:"#fff", padding:"1px 8px", borderRadius:20, fontSize:11 }}>{examChapters.length} 章已选</span>}</label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {allChaptersOpts.map(ch => (
-                <button key={ch} onClick={() => setExamChapters(prev => prev.includes(ch) ? prev.filter(x => x !== ch) : [...prev, ch])}
-                  style={{ padding: "6px 12px", borderRadius: 20, border: "1.5px solid " + (examChapters.includes(ch) ? G.blue : "#ddd"), background: examChapters.includes(ch) ? G.blue : "#fff", color: examChapters.includes(ch) ? "#fff" : "#555", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
-                  {ch}
-                </button>
-              ))}
-            </div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>📖 考试范围（点击选择章节，留空则按薄弱章节自动安排）{examChapters.length > 0 && <span style={{ marginLeft:8, background:G.blue, color:"#fff", padding:"1px 8px", borderRadius:20, fontSize:11 }}>{examChapters.length} 章已选</span>}</label>
+            {allChaptersOpts.length === 0 ? (
+              <div style={{ fontSize: 12, color: "#aaa", padding: "8px 0" }}>题库暂无章节，可先去"题库练习"答几道题</div>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {allChaptersOpts.map((ch) => {
+                  const selected = examChapters.includes(ch.slug);
+                  return (
+                    <button key={ch.slug} onClick={() => setExamChapters((prev) => prev.includes(ch.slug) ? prev.filter((x) => x !== ch.slug) : [...prev, ch.slug])}
+                      style={{ padding: "6px 12px", borderRadius: 20, border: "1.5px solid " + (selected ? G.blue : "#ddd"), background: selected ? G.blue : "#fff", color: selected ? "#fff" : "#555", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                      {ch.label}
+                      {ch.wrong > 0 && <span style={{ fontSize: 10, background: selected ? "rgba(255,255,255,0.3)" : G.redLight, color: selected ? "#fff" : G.red, padding: "0 6px", borderRadius: 10, fontWeight: 700 }}>{ch.wrong} 错</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 10 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#555" }}>⏱️ 每天目标时长</label>
+            <input type="range" min="20" max="180" step="10" value={dailyMinutesTarget} onChange={(e) => setDailyMinutesTarget(parseInt(e.target.value, 10))} style={{ flex: 1 }} />
+            <span style={{ fontSize: 13, fontWeight: 700, color: G.blue, minWidth: 56, textAlign: "right" }}>{dailyMinutesTarget} 分钟</span>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={saveExam} style={{ flex: 1, padding: "10px 0", background: G.teal, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 700, fontFamily: "inherit" }}>✓ 保存计划</button>
-            {examDate && <button onClick={() => { localStorage.removeItem("mc_exam_date"); localStorage.removeItem("mc_exam_subject"); localStorage.removeItem("mc_exam_chapters"); setExamDate(""); setExamSubject(""); setExamChapters([]); setShowForm(false); }} style={{ padding: "10px 16px", background: G.redLight, color: G.red, border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>删除</button>}
+            {examDate && <button onClick={() => { localStorage.removeItem("mc_exam_date"); localStorage.removeItem("mc_exam_subject"); localStorage.removeItem("mc_exam_chapters"); localStorage.removeItem("mc_daily_minutes"); storage.remove("exam_plan"); setExamDate(""); setExamSubject(""); setExamChapters([]); setShowForm(false); }} style={{ padding: "10px 16px", background: G.redLight, color: G.red, border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>删除</button>}
           </div>
         </div>
       )}
 
       <div style={{ overflowX: "auto", margin: "0 -4px", paddingBottom: 4 }}>
-      <div style={{ display: "flex", gap: 8, minWidth: plan.length * 132 + "px" }}>
-        {plan.map(({ date, dayName, tasks, bg, border, isExamDay, isPast, dLeft, chapter }, di) => (
-          <div key={di} style={{ background: bg, border: "2px solid " + border, borderRadius: 16, padding: "14px 8px", textAlign: "center", opacity: isPast ? 0.45 : 1, transition: "transform .15s", cursor: "default", minWidth: 120, flex: "0 0 auto" }}>
-            <div style={{ fontSize: 12, color: "#999", fontWeight: 600, marginBottom: 4, letterSpacing: "0.05em" }}>{"周" + dayName}</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: isExamDay ? "#92400e" : di === 0 ? G.teal : "#222", lineHeight: 1, marginBottom: 4 }}>
-              {date.getDate()}
-              {di === 0 && <span style={{ fontSize: 10, marginLeft: 3, background: G.blue, color: "#fff", padding: "1px 5px", borderRadius: 6, fontWeight: 700, verticalAlign: "middle" }}>今</span>}
-            </div>
-            {dLeft !== null && dLeft > 0 && !isExamDay && (
-              <div style={{ fontSize: 11, color: isExamDay ? "#92400e" : "#aaa", marginBottom: 6, fontWeight: 600 }}>剩 {dLeft} 天</div>
-            )}
-            {chapter && !isPast && !isExamDay && (
-              <div style={{ fontSize: 11, background: "rgba(29,158,117,0.12)", color: G.teal, borderRadius: 20, padding: "2px 8px", marginBottom: 6, fontWeight: 700, display: "inline-block" }}>{chapter}</div>
-            )}
-            {tasks.map((t, ti) => (
-              <div key={ti} style={{ fontSize: 12, color: isExamDay ? "#92400e" : "#444", lineHeight: 1.55, background: "rgba(255,255,255,0.75)", borderRadius: 8, padding: "4px 6px", marginBottom: 4, wordBreak: "keep-all" }}>{t}</div>
-            ))}
-          </div>
-        ))}
-      </div></div>
+        <div style={{ display: "flex", gap: 8, minWidth: calendarDays.length * 132 + "px" }}>
+          {calendarDays.map((d, di) => (
+            <CalendarDayCell key={di} day={d} isToday={di === 0} />
+          ))}
+        </div>
+      </div>
+
+      {/* 今日任务列表（实时） */}
+      {examDate && <TodayPlanView setPage={setPage} setChapterFilter={setChapterFilter} />}
+
       <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 12, color: "#aaa" }}>
-          {daysLeft !== null ? "📅 根据考试倒计时自动安排 · " : ""}{examChapters.length > 0 ? "已选 " + examChapters.length + " 个章节" : "建议设置考试范围"} · 每天 20-30 分钟
+          {daysLeft !== null ? "📅 基于 SM2 到期 + 薄弱章节自动生成 · " : ""}{examChapters.length > 0 ? "已选 " + examChapters.length + " 个章节" : "建议设置考试范围"} · 每天 {dailyMinutesTarget} 分钟
         </div>
         {setPage && (
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => setPage("资料对话")} style={{ padding:"6px 14px", background:G.purpleLight, color:G.purple, border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit" }}>🤖 AI 助教复习</button>
-            <button onClick={() => { if (setChapterFilter) setChapterFilter(scope.length > 0 ? scope : null); setPage("题库练习"); }} style={{ padding:"6px 14px", background:G.tealLight, color:G.teal, border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit" }}>✏️ 开始练习</button>
+            <button onClick={() => { if (setChapterFilter) setChapterFilter(examChapters.length > 0 ? examChapters : null); setPage("题库练习"); }} style={{ padding:"6px 14px", background:G.tealLight, color:G.teal, border:"none", borderRadius:8, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"inherit" }}>✏️ 开始练习</button>
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// —— 日历格子：进度环 + 任务数 + phase 徽章 ——
+function CalendarDayCell({ day, isToday }) {
+  const { date, dayName, dLeft, isExamDay, isPast, phase, summary, progress, bg, border } = day;
+  const tasks = (day.dayPlan && day.dayPlan.tasks) || [];
+  const totalTasks = summary ? summary.total_tasks : 0;
+  const doneTasks = summary ? summary.completed_tasks : 0;
+  const phaseBadge = {
+    sprint:   { label: "冲刺", color: "#DC2626" },
+    high:     { label: "高强", color: G.blue },
+    normal:   { label: "常规", color: G.teal },
+    light:    { label: "铺垫", color: "#14B8A6" },
+  }[phase];
+  return (
+    <div style={{ background: bg, border: "2px solid " + border, borderRadius: 16, padding: "12px 8px", textAlign: "center", opacity: isPast ? 0.45 : 1, minWidth: 120, flex: "0 0 auto", position: "relative" }}>
+      <div style={{ fontSize: 11, color: "#999", fontWeight: 600, marginBottom: 3, letterSpacing: "0.05em" }}>{"周" + dayName}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: isExamDay ? "#92400e" : isToday ? G.teal : "#222", lineHeight: 1, marginBottom: 4 }}>
+        {date.getDate()}
+        {isToday && <span style={{ fontSize: 10, marginLeft: 3, background: G.blue, color: "#fff", padding: "1px 5px", borderRadius: 6, fontWeight: 700, verticalAlign: "middle" }}>今</span>}
+      </div>
+      {dLeft !== null && dLeft > 0 && !isExamDay && (
+        <div style={{ fontSize: 10.5, color: "#aaa", marginBottom: 6, fontWeight: 600 }}>剩 {dLeft} 天</div>
+      )}
+      {phaseBadge && !isPast && !isExamDay && (
+        <div style={{ fontSize: 10, background: phaseBadge.color + "22", color: phaseBadge.color, borderRadius: 20, padding: "1px 8px", marginBottom: 6, fontWeight: 700, display: "inline-block" }}>{phaseBadge.label}</div>
+      )}
+
+      {/* 进度环（有任务时） */}
+      {totalTasks > 0 && !isExamDay && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+          <ProgressRing progress={progress} />
+          <div style={{ fontSize: 11, color: progress === 1 ? G.tealDark : "#666", fontWeight: 700 }}>
+            {progress === 1 ? "✓ 已完成" : `${doneTasks}/${totalTasks} 任务`}
+          </div>
+        </div>
+      )}
+      {isExamDay && (
+        <div style={{ fontSize: 12, color: "#92400e", fontWeight: 700, background: "rgba(255,255,255,0.75)", borderRadius: 8, padding: "6px", marginTop: 4 }}>🎓 考试日</div>
+      )}
+      {/* 前两条任务标题预览 */}
+      {!isExamDay && tasks.slice(0, 2).map((t, ti) => (
+        <div key={ti} style={{ fontSize: 10.5, color: t.completed ? "#aaa" : "#444", lineHeight: 1.5, background: "rgba(255,255,255,0.75)", borderRadius: 6, padding: "3px 5px", marginTop: 4, textDecoration: t.completed ? "line-through" : "none", wordBreak: "keep-all" }}>{t.title}</div>
+      ))}
+      {tasks.length > 2 && <div style={{ fontSize: 10, color: "#aaa", marginTop: 3 }}>+{tasks.length - 2}</div>}
+    </div>
+  );
+}
+
+function ProgressRing({ progress }) {
+  const r = 14;
+  const circ = 2 * Math.PI * r;
+  const offset = circ * (1 - Math.min(Math.max(progress, 0), 1));
+  const color = progress >= 1 ? G.teal : progress >= 0.5 ? G.blue : "#F59E0B";
+  return (
+    <svg width="36" height="36" viewBox="0 0 36 36">
+      <circle cx="18" cy="18" r={r} stroke="#E5E7EB" strokeWidth="3" fill="none" />
+      <circle cx="18" cy="18" r={r} stroke={color} strokeWidth="3" fill="none"
+        strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
+        style={{ transform: "rotate(-90deg)", transformOrigin: "center", transition: "stroke-dashoffset .4s" }} />
+      {progress >= 1 && <text x="18" y="23" textAnchor="middle" fontSize="14" fill={G.teal} fontWeight="700">✓</text>}
+    </svg>
+  );
+}
+
+// —— 今日任务视图：从 exam_plan 读取 today，支持"开始/完成" ——
+function TodayPlanView({ setPage, setChapterFilter }) {
+  const [plan, setPlan] = useState(() => storage.get("exam_plan", null));
+  const [tick, setTick] = useState(0); // 强制刷新
+  const today = planDayKey(new Date());
+  const dayPlan = plan && plan.daily_plans && plan.daily_plans[today];
+
+  // 首次挂载顺延昨天未完成的 P0
+  useEffect(() => {
+    rolloverIncompleteTasks();
+    setPlan(storage.get("exam_plan", null));
+  }, []);
+
+  const backlog = useMemo(() => countBacklog(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!dayPlan) return null;
+  const tasks = dayPlan.tasks || [];
+  const done = tasks.filter((t) => t.completed).length;
+  const total = tasks.length;
+
+  function refreshPlan() {
+    setPlan(storage.get("exam_plan", null));
+    setTick((v) => v + 1);
+  }
+
+  function handleComplete(task) {
+    markTaskCompleted(today, task.id, { attempted: task.target_count || 0, correct: task.target_count || 0 });
+    refreshPlan();
+  }
+
+  function handleStart(task) {
+    // 不同类型 → 不同入口
+    if (task.type === "sm2_due" || task.type === "chapter_practice" || task.type === "mock_exam" || task.type === "light_review") {
+      if (task.chapter && setChapterFilter) setChapterFilter([task.chapter]);
+      if (setPage) setPage("题库练习");
+    } else if (task.type === "concept_study") {
+      if (setPage) setPage("资料对话");
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 14, background: "linear-gradient(135deg,#F9FAFB,#FFFFFF)", border: "1px solid #E5E7EB", borderRadius: 14, padding: "14px 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>📋 今日任务 · {done}/{total} 完成</div>
+        {backlog > 0 && (
+          <div style={{ fontSize: 11.5, color: "#B45309", background: "#FFFBEB", border: "1px solid #FCD34D", padding: "3px 8px", borderRadius: 8 }}>
+            📌 昨日还有 {backlog} 个低优任务未完成
+          </div>
+        )}
+      </div>
+      {total === 0 ? (
+        <div style={{ fontSize: 13, color: "#888", padding: "12px 0", textAlign: "center" }}>今日暂无任务（考试日 / 范围为空）</div>
+      ) : total === done ? (
+        <div style={{ fontSize: 13, color: G.tealDark, padding: "10px 0", textAlign: "center", fontWeight: 700 }}>🎉 今日计划已完成，去做点别的吧</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {tasks
+            .slice()
+            .sort((a, b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0) || priorityWeight(b.priority) - priorityWeight(a.priority))
+            .map((task) => <TaskCard key={task.id} task={task} onStart={() => handleStart(task)} onComplete={() => handleComplete(task)} />)
+          }
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskCard({ task, onStart, onComplete }) {
+  const icons = { sm2_due: "🔁", chapter_practice: "📝", concept_study: "📖", mock_exam: "⏱️", light_review: "🧘", wrong_review: "❌" };
+  const prioColor = task.priority === "high" ? "#DC2626" : task.priority === "low" ? "#94A3B8" : G.blue;
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 12,
+      padding: "10px 12px",
+      background: task.completed ? "#F9FAFB" : "#fff",
+      border: "1px solid #E5E7EB",
+      borderLeft: `3px solid ${task.completed ? "#D1D5DB" : prioColor}`,
+      borderRadius: 10,
+      opacity: task.completed ? 0.7 : 1,
+    }}>
+      <div style={{ fontSize: 20, flexShrink: 0 }}>{icons[task.type] || "•"}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: task.completed ? "#9CA3AF" : "#111", textDecoration: task.completed ? "line-through" : "none" }}>{task.title}</div>
+        {task.subtitle && <div style={{ fontSize: 11.5, color: "#888", marginTop: 2 }}>{task.subtitle}</div>}
+        <div style={{ fontSize: 11, color: "#aaa", marginTop: 3 }}>预计 {task.target_minutes || 0} 分钟{task.priority === "high" ? " · 高优先" : ""}</div>
+      </div>
+      {task.completed ? (
+        <span style={{ fontSize: 12, fontWeight: 700, color: G.tealDark, background: G.tealLight, padding: "4px 10px", borderRadius: 8 }}>✓ 已完成</span>
+      ) : (
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <button onClick={onStart} style={{ padding: "6px 14px", background: G.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>开始</button>
+          <button onClick={onComplete} title="手动标记为已完成" style={{ padding: "6px 10px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>✓</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -6973,45 +7180,108 @@ function WrongDrill({ questions, onExit, onMastered }) {
   );
 }
 
-// ── Wrong Page ─────────────────────────────────────────────────────────────────
-function WrongPage({ setPage, sessionAnswers = {} }) {
-  const chapterStats = getChapterStats(sessionAnswers);
-  const weakChapters = Object.entries(chapterStats)
-    .filter(([, s]) => s.total >= 2 && s.correct / s.total < 0.75)
-    .sort((a, b) => (a[1].correct/a[1].total) - (b[1].correct/b[1].total));
-
-  const WRONG_QS = [
-    ALL_QUESTIONS.find(q => q.id === "4"),
-    ALL_QUESTIONS.find(q => q.id === "11"),
-    ALL_QUESTIONS.find(q => q.id === "7"),
-    ALL_QUESTIONS.find(q => q.id === "26"),
-  ].filter(Boolean);
-
-  const [drillMode, setDrillMode] = useState(false);
-  const [drillStart, setDrillStart] = useState(0);
-  const [mastered, setMastered] = useState(new Set());
-  const [aiWrongQs, setAiWrongQs] = useState([]);
+// ── Wrong Page (L3b: 真实错题 + SM2 + 错因标签 + 筛选) ──────────────────────
+// 数据源改造：从硬编码 4 道 + sessionAnswers 派生的"假薄弱章节"，
+// 升级到持久化 wrong_items 表：所有答题入口通过 recordAnswer 自动落表，
+// 错题本只读表、渲染、触发重做/标签/AI 变式。
+function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion }) {
+  const [items, setItems] = useState(() => getWrongItemsFromStore());
+  const [filter, setFilter] = useState({ chapter: "all", status: "active", errorTag: "all" });
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [drillQueue, setDrillQueue] = useState(null); // null = 未进入 drill
+  const [drillKind, setDrillKind] = useState("original"); // "original" | "variant"
   const [regenLoading, setRegenLoading] = useState(false);
   const [regenMsg, setRegenMsg] = useState("");
-  const [aiDrillMode, setAiDrillMode] = useState(false);
-  const mergedWrong = [...WRONG_QS, ...aiWrongQs];
-  const remaining = mergedWrong.filter(q => !mastered.has(q.id || q.question));
 
-  const regenerateWrongQuestions = async () => {
+  // 从 store 拉最新数据
+  function refresh() {
+    setItems(getWrongItemsFromStore());
+  }
+
+  // 章节选项（从真实错题聚合）
+  const chapterOptions = useMemo(() => {
+    const m = new Map();
+    items.forEach((w) => {
+      if (!m.has(w.chapter)) m.set(w.chapter, { slug: w.chapter, label: w.chapter_label || w.chapter, count: 0 });
+      m.get(w.chapter).count += 1;
+    });
+    return Array.from(m.values()).sort((a, b) => b.count - a.count);
+  }, [items]);
+
+  // 筛选结果
+  const filteredItems = useMemo(() => {
+    const now = Date.now();
+    return items.filter((w) => {
+      if (filter.status !== "all" && w.status !== filter.status) return false;
+      if (filter.chapter !== "all" && w.chapter !== filter.chapter) return false;
+      if (filter.errorTag !== "all") {
+        if (filter.errorTag === "unknown") {
+          if ((w.error_tags || []).length > 0) return false;
+        } else if (!(w.error_tags || []).includes(filter.errorTag)) return false;
+      }
+      return true;
+    }).sort((a, b) => {
+      // 优先展示今日到期的，其次按最近错误时间
+      const aDue = a.status === "active" && a.sm2.due_at <= now ? 0 : 1;
+      const bDue = b.status === "active" && b.sm2.due_at <= now ? 0 : 1;
+      if (aDue !== bDue) return aDue - bDue;
+      return (b.last_wrong_at || 0) - (a.last_wrong_at || 0);
+    });
+  }, [items, filter]);
+
+  const activeCount = items.filter((w) => w.status === "active").length;
+  const dueCount = items.filter((w) => w.status === "active" && w.sm2 && w.sm2.due_at <= Date.now()).length;
+  const masteredCount = items.filter((w) => w.status === "mastered").length;
+
+  // 多选
+  function toggleSelect(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function selectAllVisible() {
+    setSelectedIds(new Set(filteredItems.map((w) => w.id)));
+  }
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  // 把错题 id 还原为完整 question payload（从 ALL_QUESTIONS 查）
+  function resolveQuestion(item) {
+    return ALL_QUESTIONS.find((q) => String(q.id) === String(item.id));
+  }
+
+  // 进入原题重做（选中题 / 全部到期 / 单题）
+  function startDrill(ids, kind = "original") {
+    const qs = ids.map((id) => items.find((w) => w.id === id)).filter(Boolean).map(resolveQuestion).filter(Boolean);
+    if (qs.length === 0) {
+      alert("选中的题目在题库里找不到（可能来自 AI 变式，暂不支持原题重做）");
+      return;
+    }
+    setDrillQueue(qs);
+    setDrillKind(kind);
+  }
+
+  // AI 变式出题（基于选中错题）
+  async function generateVariantsForSelected() {
+    const selectedItems = items.filter((w) => selectedIds.has(w.id));
+    if (selectedItems.length === 0) return;
     setRegenLoading(true);
     setRegenMsg("");
     try {
-      // 针对最弱章节生成变式题
-      const targetChapters = weakChapters.slice(0, 2).map(([ch]) => ch);
-      const chapter = targetChapters.length > 0
-        ? targetChapters.join(" 和 ")
-        : (WRONG_QS[0]?.chapter || "数学综合");
+      // 聚合选中错题的章节做 prompt（现有 /api/generate 按 chapter+type+count 出题）
+      const chapters = Array.from(new Set(selectedItems.map((w) => w.chapter_label || w.chapter)));
+      const chapter = chapters.join(" / ");
+      const type = selectedItems[0]?.type || "单选题";
+      const count = Math.min(Math.max(selectedItems.length, 5), 10);
       const aiCfg = getAIConfig();
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chapter, type: "单选题", count: 8,
+          chapter, type, count,
           userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
         }),
       });
@@ -7019,7 +7289,7 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
       if (data?.error) throw new Error(data.error);
       const rows = (data.questions || []).map((q, idx2) => ({
         id: "ai_wrong_" + Date.now() + "_" + idx2,
-        chapter,
+        chapter: chapters[0] || "综合",
         type: q.type || "单选题",
         question: q.question,
         options: q.options || null,
@@ -7027,109 +7297,326 @@ function WrongPage({ setPage, sessionAnswers = {} }) {
         explanation: q.explanation || "",
       }));
       if (rows.length === 0) throw new Error("AI 未返回题目，请检查 API Key 配置");
-      setAiWrongQs(rows);
-      setRegenMsg(`✅ 已针对薄弱章节生成 ${rows.length} 道变式题！点击下方"专项练习"开始练习。`);
+      // 给这些错题累加"变式已生成"计数
+      incrementVariantsGenerated(selectedItems.map((w) => w.id), rows.length);
+      refresh();
+      setDrillQueue(rows);
+      setDrillKind("variant");
+      setRegenMsg(`✅ 已针对 ${selectedItems.length} 道错题生成 ${rows.length} 道变式`);
     } catch (err) {
       setRegenMsg("❌ 生成失败：" + (err?.message || "请检查 API 设置"));
     }
     setRegenLoading(false);
-  };
+  }
 
-  if (drillMode) return (
-    <div style={{ padding: "0 0 18px", maxWidth: 800, margin: "0 auto" }}>
-      <WrongDrill questions={remaining.slice(drillStart)} onExit={() => setDrillMode(false)} onMastered={id => setMastered(s => new Set([...s, id]))} />
-    </div>
-  );
-  if (aiDrillMode && aiWrongQs.length > 0) return (
-    <div style={{ padding: "0 0 18px", maxWidth: 800, margin: "0 auto" }}>
-      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
-        <Btn onClick={() => setAiDrillMode(false)}>← 返回错题本</Btn>
-        <span style={{ fontSize: 16, fontWeight: 700, color: G.blue }}>🤖 AI 变式题专项练习</span>
+  // drill 模式
+  if (drillQueue && drillQueue.length > 0) {
+    const isVariant = drillKind === "variant";
+    return (
+      <div style={{ padding: "0 0 18px", maxWidth: 800, margin: "0 auto" }}>
+        <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+          <Btn onClick={() => { setDrillQueue(null); refresh(); }}>← 返回错题本</Btn>
+          <span style={{ fontSize: 16, fontWeight: 700, color: isVariant ? G.blue : G.teal }}>
+            {isVariant ? "🤖 AI 变式题专项练习" : "🔄 原题重做"}（{drillQueue.length} 题）
+          </span>
+        </div>
+        <WrongDrill
+          questions={drillQueue}
+          onExit={() => { setDrillQueue(null); refresh(); }}
+          onMastered={() => {}}
+        />
       </div>
-      <WrongDrill questions={aiWrongQs} onExit={() => setAiDrillMode(false)} onMastered={() => {}} />
-    </div>
-  );
+    );
+  }
+
+  // 章节薄弱卡（从 wrong_items 聚合 —— 跨会话持久化的真实薄弱度）
+  const chapterStats = useMemo(() => {
+    const m = new Map();
+    items.forEach((w) => {
+      if (!m.has(w.chapter)) m.set(w.chapter, { chapter: w.chapter, label: w.chapter_label || w.chapter, active: 0, mastered: 0 });
+      if (w.status === "active") m.get(w.chapter).active += 1;
+      else if (w.status === "mastered") m.get(w.chapter).mastered += 1;
+    });
+    return Array.from(m.values())
+      .filter((c) => c.active > 0)
+      .sort((a, b) => b.active - a.active)
+      .slice(0, 6);
+  }, [items]);
 
   return (
     <div style={{ padding: "0 0 18px", maxWidth: 960, margin: "0 auto" }}>
       <PageHeader
         title="错题本与薄弱分析"
-        subtitle="针对错因生成变式训练，闭环强化。"
+        subtitle="所有错题自动持久化 · 按 SM2 间隔重复推荐复习"
         onBack={() => setPage("首页")}
         actions={<>
-          {remaining.length > 0 && <Badge color="red">{remaining.length} 题</Badge>}
-          {mastered.size > 0 && <Badge color="teal">已掌握 {mastered.size}</Badge>}
+          <Badge color="red">{activeCount} 待复习</Badge>
+          {dueCount > 0 && <Badge color="amber">⏰ {dueCount} 今日到期</Badge>}
+          {masteredCount > 0 && <Badge color="teal">已掌握 {masteredCount}</Badge>}
         </>}
       />
 
-      {/* Weak chapter stats from session */}
-      {weakChapters.length > 0 && (
+      {items.length === 0 && (
+        <div style={{ ...s.card, textAlign: "center", padding: "3rem 1rem" }}>
+          <div style={{ fontSize: 40, marginBottom: 10 }}>📚</div>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>错题本还是空的</div>
+          <div style={{ fontSize: 14, color: "#888", marginBottom: 18 }}>去题库做几道题吧——答错的会自动进这里</div>
+          <Btn variant="primary" onClick={() => setPage("题库练习")}>✏️ 去刷题</Btn>
+        </div>
+      )}
+
+      {/* 薄弱章节（从持久化错题聚合） */}
+      {chapterStats.length > 0 && (
         <div style={{ ...s.card, marginBottom: 16 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>📊 薄弱章节（根据本次答题记录）</div>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14 }}>📊 薄弱章节（持久化累计）</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 10 }}>
-            {weakChapters.map(([ch, stat]) => {
-              const pct = Math.round(stat.correct/stat.total*100);
-              return (
-                <div key={ch} style={{ background: G.redLight, borderRadius: 12, padding: "14px", border: "1px solid "+G.red+"22" }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: G.red, marginBottom: 4 }}>{ch}</div>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: G.red, marginBottom: 4 }}>{pct}%</div>
-                  <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>{stat.correct}/{stat.total} 题正确</div>
-                  <ProgressBar value={stat.correct} max={stat.total} color={G.red} height={5} />
-                  <button onClick={() => setPage("题库练习")} style={{ marginTop: 10, width: "100%", padding: "7px 0", background: G.red, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>专项练习 →</button>
-                </div>
-              );
-            })}
+            {chapterStats.map((c) => (
+              <div key={c.chapter} style={{ background: G.redLight, borderRadius: 12, padding: "14px", border: "1px solid "+G.red+"22", cursor: "pointer" }} onClick={() => setFilter((f) => ({ ...f, chapter: c.chapter }))}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: G.red, marginBottom: 4 }}>{c.label}</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: G.red, marginBottom: 4 }}>{c.active}</div>
+                <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>待复习 · 已掌握 {c.mastered}</div>
+                <div style={{ fontSize: 11, color: G.red, fontWeight: 600 }}>点击筛选本章错题 →</div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Wrong list */}
-      <div style={{ ...s.card }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 14, borderBottom: "1px solid #f0f0f0" }}>
-          <div style={{ fontSize: 16, fontWeight: 700 }}>收录错题 <span style={{ fontSize: 14, color: "#aaa", fontWeight: 400 }}>({remaining.length}题)</span></div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {remaining.length > 0 && (
-              <button onClick={regenerateWrongQuestions} disabled={regenLoading} style={{ padding: "10px 14px", background: G.blue, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
-                {regenLoading ? "AI生成中…" : "AI变式出题"}
-              </button>
-            )}
-            {remaining.length > 0 && (
-              <button onClick={() => { setDrillStart(0); setDrillMode(true); }} style={{ padding: "10px 22px", background: G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", fontSize: 14, fontWeight: 700, fontFamily: "inherit" }}>🔄 全部复习</button>
-            )}
+      {/* 筛选栏 */}
+      {items.length > 0 && (
+        <div style={{ ...s.card, marginBottom: 12, padding: "14px 18px" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+            <WPFilterSelect
+              label="章节"
+              value={filter.chapter}
+              options={[{ value: "all", label: `全部 (${items.length})` }, ...chapterOptions.map((c) => ({ value: c.slug, label: `${c.label} (${c.count})` }))]}
+              onChange={(v) => setFilter({ ...filter, chapter: v })}
+            />
+            <WPFilterSelect
+              label="状态"
+              value={filter.status}
+              options={[
+                { value: "active", label: `待复习 (${activeCount})` },
+                { value: "mastered", label: `已掌握 (${masteredCount})` },
+                { value: "all", label: `全部 (${items.length})` },
+              ]}
+              onChange={(v) => setFilter({ ...filter, status: v })}
+            />
+            <WPFilterSelect
+              label="错因"
+              value={filter.errorTag}
+              options={[
+                { value: "all", label: "全部错因" },
+                ...ERROR_TAGS.map((t) => ({ value: t.id, label: t.label })),
+                { value: "unknown", label: "未分类" },
+              ]}
+              onChange={(v) => setFilter({ ...filter, errorTag: v })}
+            />
           </div>
         </div>
-        {regenMsg && <div style={{ padding: "10px 12px", borderRadius: 10, background: G.blueLight, color: G.blue, marginBottom: 12, fontSize: 14 }}>{regenMsg}</div>}
-        {aiWrongQs.length > 0 && (
-          <div style={{ marginBottom: 14, padding: "14px 16px", background: "linear-gradient(135deg,#eff6ff,#dbeafe)", borderRadius: 12, border: "1px solid #bfdbfe", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-            <div>
-              <div style={{ fontWeight: 700, color: G.blue, fontSize: 14, marginBottom: 2 }}>🤖 AI 变式题已就绪 — {aiWrongQs.length} 道</div>
-              <div style={{ fontSize: 12, color: "#64748b" }}>针对薄弱章节量身定制，点击右侧开始专项练习</div>
+      )}
+
+      {/* 批量操作栏 */}
+      {selectedIds.size > 0 && (
+        <div style={{ ...s.card, marginBottom: 12, padding: "12px 18px", display: "flex", alignItems: "center", gap: 12, background: "#EEF2FF", borderLeft: "4px solid "+G.blue }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#4338CA" }}>已选 {selectedIds.size} 道</span>
+          <div style={{ flex: 1 }} />
+          <Btn size="sm" onClick={() => startDrill(Array.from(selectedIds), "original")}>🔄 原题重做</Btn>
+          <button onClick={generateVariantsForSelected} disabled={regenLoading} style={{ padding: "8px 14px", background: G.blue, color: "#fff", border: "none", borderRadius: 10, cursor: regenLoading ? "wait" : "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
+            {regenLoading ? "AI 生成中…" : "🤖 AI 变式出题"}
+          </button>
+          <Btn size="sm" onClick={clearSelection}>取消</Btn>
+        </div>
+      )}
+      {regenMsg && <div style={{ padding: "10px 14px", borderRadius: 10, background: G.blueLight, color: G.blue, marginBottom: 12, fontSize: 13 }}>{regenMsg}</div>}
+
+      {/* 错题列表 */}
+      {items.length > 0 && (
+        <div style={{ ...s.card }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 14, borderBottom: "1px solid #f0f0f0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#555" }}>
+                <input type="checkbox" checked={filteredItems.length > 0 && selectedIds.size === filteredItems.length} onChange={(e) => e.target.checked ? selectAllVisible() : clearSelection()} />
+                全选可见
+              </label>
+              <span style={{ fontSize: 14, color: "#888" }}>共 {filteredItems.length} 道</span>
             </div>
-            <button onClick={() => setAiDrillMode(true)} style={{ padding: "10px 20px", background: G.blue, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap" }}>🎯 专项练习</button>
-          </div>
-        )}
-        {aiWrongQs.length > 0 && (
-          <div style={{ marginBottom: 14, padding: "14px 16px", background: "linear-gradient(135deg,#eff6ff,#dbeafe)", borderRadius: 12, border: "1px solid #bfdbfe", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontWeight: 700, color: G.blue, fontSize: 14, marginBottom: 2 }}>🤖 AI 变式题已生成 {aiWrongQs.length} 道</div>
-              <div style={{ fontSize: 12, color: "#64748b" }}>针对你的薄弱点量身定制，点击右侧开始专项练习</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {dueCount > 0 && (
+                <button onClick={() => startDrill(items.filter((w) => w.status === "active" && w.sm2.due_at <= Date.now()).map((w) => w.id), "original")}
+                  style={{ padding: "8px 14px", background: G.amberLight || "#FFFBEB", color: "#B45309", border: "1px solid #F59E0B", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
+                  ⏰ 复习今日到期 {dueCount} 道
+                </button>
+              )}
+              {filteredItems.length > 0 && (
+                <button onClick={() => startDrill(filteredItems.map((w) => w.id), "original")}
+                  style={{ padding: "8px 18px", background: G.teal, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
+                  🔄 全部重做（筛选后）
+                </button>
+              )}
             </div>
-            <button onClick={() => setAiDrillMode(true)} style={{ padding: "10px 20px", background: G.blue, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>🎯 专项练习</button>
           </div>
-        )}
-        {remaining.length === 0 && <div style={{ textAlign: "center", padding: "3rem", color: "#888" }}><div style={{ fontSize: 40, marginBottom: 10 }}>🎉</div><div style={{ fontSize: 18, fontWeight: 600 }}>所有错题已掌握！</div></div>}
-        {remaining.map((q, i) => (
-          <div key={i} style={{ padding: "16px 0", borderBottom: i < remaining.length-1 ? "1px solid #f5f5f5" : "none", display: "flex", alignItems: "flex-start", gap: 14 }}>
-            <div style={{ width: 10, height: 10, borderRadius: "50%", background: G.red, marginTop: 8, flexShrink: 0 }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 15, color: "#111", marginBottom: 4 }}>{q.question}</div>
-              <div style={{ fontSize: 13, color: G.tealDark, marginBottom: 3 }}>✓ {q.answer}</div>
-              <div style={{ fontSize: 12, color: "#aaa" }}>{q.chapter} · {q.type}</div>
+
+          {filteredItems.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "2.5rem", color: "#888" }}>
+              <div style={{ fontSize: 36, marginBottom: 10 }}>🎉</div>
+              <div style={{ fontSize: 16, fontWeight: 600 }}>当前筛选下没有错题</div>
+              <div style={{ fontSize: 13, color: "#aaa", marginTop: 4 }}>
+                {filter.status === "mastered" ? "切到'待复习'看看未掌握的" : "换个章节/错因试试"}
+              </div>
             </div>
-            <button onClick={() => { setDrillStart(i); setDrillMode(true); }} style={{ padding: "8px 14px", background: G.redLight, color: G.red, border: "1px solid "+G.red+"44", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit", flexShrink: 0 }}>重做</button>
-          </div>
-        ))}
+          ) : (
+            filteredItems.map((item) => (
+              <WrongItemRow
+                key={item.id}
+                item={item}
+                question={resolveQuestion(item)}
+                selected={selectedIds.has(item.id)}
+                onToggleSelect={() => toggleSelect(item.id)}
+                onMarkMastered={() => { markMastered(item.id); refresh(); }}
+                onSuspend={() => { suspendItem(item.id); refresh(); }}
+                onTagsChange={(tags) => { tagWrongItem(item.id, tags); refresh(); }}
+                onRetry={() => startDrill([item.id], "original")}
+                onAskAI={() => {
+                  const q = resolveQuestion(item);
+                  if (!q) return;
+                  if (typeof onAskAIAboutQuestion === "function") {
+                    onAskAIAboutQuestion(q);
+                  } else {
+                    setPage("资料对话");
+                  }
+                }}
+              />
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// —— 错题本筛选下拉 ——
+function WPFilterSelect({ label, value, options, onChange }) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#555" }}>
+      <span style={{ fontWeight: 600 }}>{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)}
+        style={{ padding: "7px 12px", borderRadius: 10, border: "1.5px solid #E5E7EB", fontSize: 13, fontFamily: "inherit", background: "#fff", cursor: "pointer" }}>
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
+  );
+}
+
+// —— 单个错题行：预览 / 错因标签 / 重做 / 问 AI / 下拉菜单 ——
+function WrongItemRow({ item, question, selected, onToggleSelect, onMarkMastered, onSuspend, onTagsChange, onRetry, onAskAI }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  if (!question) {
+    // 题库里找不到了（题目被删除 / id 不匹配）—— 降级展示"孤儿错题"
+    return (
+      <div style={{ padding: "14px 0", borderBottom: "1px dashed #eee", fontSize: 13, color: "#aaa" }}>
+        题目 #{item.id} 已从题库移除（错题记录保留）
+        <button onClick={onSuspend} style={{ marginLeft: 12, padding: "4px 10px", fontSize: 12, background: "#F3F4F6", border: "1px solid #E5E7EB", borderRadius: 6, cursor: "pointer" }}>隐藏</button>
       </div>
+    );
+  }
+
+  const now = Date.now();
+  const daysSinceFirstWrong = Math.max(0, Math.floor((now - item.first_wrong_at) / 86400000));
+  const attemptCount = (item.attempts || []).length;
+  const correctCount = (item.attempts || []).filter((a) => a.correct).length;
+  const isDue = item.status === "active" && item.sm2 && item.sm2.due_at <= now;
+  const isMastered = item.status === "mastered";
+  const dueIn = item.sm2 ? Math.ceil((item.sm2.due_at - now) / 86400000) : null;
+
+  return (
+    <div style={{
+      padding: "16px 0",
+      borderBottom: "1px solid #f5f5f5",
+      display: "flex",
+      alignItems: "flex-start",
+      gap: 12,
+      background: selected ? "#F9FAFB" : "transparent",
+      borderRadius: selected ? 8 : 0,
+      marginLeft: selected ? -6 : 0,
+      marginRight: selected ? -6 : 0,
+      paddingLeft: selected ? 12 : 0,
+      paddingRight: selected ? 12 : 0,
+    }}>
+      <input type="checkbox" checked={selected} onChange={onToggleSelect} style={{ marginTop: 6, flexShrink: 0 }} />
+      <div style={{ width: 10, height: 10, borderRadius: "50%", background: isMastered ? G.teal : (isDue ? "#F59E0B" : G.red), marginTop: 8, flexShrink: 0 }} />
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, background: G.blueLight, color: G.blue, padding: "2px 8px", borderRadius: 6 }}>{item.chapter_label || item.chapter}</span>
+          <span style={{ fontSize: 11, color: "#aaa" }}>{question.type}</span>
+          {isDue && <span style={{ fontSize: 11, fontWeight: 700, background: "#FFFBEB", color: "#B45309", padding: "2px 8px", borderRadius: 6 }}>⏰ 今日到期</span>}
+          {isMastered && <span style={{ fontSize: 11, fontWeight: 700, background: G.tealLight, color: G.tealDark, padding: "2px 8px", borderRadius: 6 }}>✓ 已掌握</span>}
+          {!isMastered && !isDue && dueIn !== null && dueIn > 0 && (
+            <span style={{ fontSize: 11, color: "#888" }}>{dueIn}天后复习</span>
+          )}
+        </div>
+        <div style={{ fontSize: 14.5, color: "#111", marginBottom: 4, lineHeight: 1.6, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{question.question}</div>
+        <div style={{ fontSize: 12.5, color: G.tealDark, marginBottom: 8 }}>✓ 正确答案：{question.answer}</div>
+
+        <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#888", marginBottom: 10, flexWrap: "wrap" }}>
+          <span>📅 {daysSinceFirstWrong === 0 ? "今天首次做错" : `${daysSinceFirstWrong} 天前首次做错`}</span>
+          <span>🔁 {correctCount}/{attemptCount} 正确</span>
+          {item.variants_generated > 0 && <span>🤖 已生成 {item.variants_generated} 道变式</span>}
+          <span>SM2: ease {item.sm2.ease_factor.toFixed(2)} · 间隔 {item.sm2.interval_days}天</span>
+        </div>
+
+        <ErrorTagPicker value={item.error_tags || []} onChange={onTagsChange} />
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0, position: "relative" }}>
+        <button onClick={onRetry} style={{ padding: "6px 12px", background: G.redLight, color: G.red, border: "1px solid "+G.red+"44", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 600, fontFamily: "inherit" }}>重做</button>
+        <button onClick={onAskAI} style={{ padding: "6px 12px", background: "#EEF2FF", color: G.blue, border: "1px solid #C7D2FE", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 600, fontFamily: "inherit" }}>问 AI</button>
+        <button onClick={() => setMenuOpen((v) => !v)} style={{ padding: "6px 12px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 600, fontFamily: "inherit" }}>···</button>
+        {menuOpen && (
+          <div style={{ position: "absolute", right: 0, top: "100%", marginTop: 4, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.08)", zIndex: 10, minWidth: 140 }}>
+            {!isMastered && (
+              <button onClick={() => { setMenuOpen(false); onMarkMastered(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", background: "transparent", border: "none", cursor: "pointer", fontSize: 13, color: G.tealDark, fontFamily: "inherit" }}>✓ 标记为已掌握</button>
+            )}
+            <button onClick={() => { setMenuOpen(false); onSuspend(); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px", background: "transparent", border: "none", cursor: "pointer", fontSize: 13, color: "#6B7280", fontFamily: "inherit" }}>暂时隐藏</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// —— 错因标签选择器（支持多选） ——
+function ErrorTagPicker({ value, onChange }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {ERROR_TAGS.map((tag) => {
+        const active = value.includes(tag.id);
+        return (
+          <button
+            key={tag.id}
+            onClick={() => {
+              const next = active ? value.filter((t) => t !== tag.id) : [...value, tag.id];
+              onChange(next);
+            }}
+            style={{
+              padding: "4px 10px",
+              borderRadius: 999,
+              border: `1.5px solid ${active ? tag.color : "#E5E7EB"}`,
+              background: active ? tag.bg : "#fff",
+              color: active ? tag.color : "#9CA3AF",
+              fontSize: 11.5,
+              fontWeight: 700,
+              cursor: "pointer",
+              fontFamily: "inherit",
+              transition: "all 0.15s",
+            }}
+            title={active ? "点击取消" : "点击标记"}
+          >
+            {active ? "●" : "○"} {tag.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -10176,6 +10663,27 @@ export default function App() {
       const updated = { ...sessionAnswers, [qid]: { correct, chapter } };
       setSessionAnswers(updated);
     } catch (e) {}
+    // L3b 闭环：答题结果进入错题本持久化表
+    //   · 错 → 入库 / 重置 SM2
+    //   · 对 → 若在错题本里则推进 SM2（不在不处理）
+    try {
+      const qSnapshot = {
+        id: qid,
+        chapter: chapter || (questionPayload && questionPayload.chapter) || "unclassified",
+        question: questionPayload && questionPayload.question,
+        answer: questionPayload && questionPayload.answer,
+        options: questionPayload && questionPayload.options,
+        explanation: questionPayload && questionPayload.explanation,
+        type: questionPayload && questionPayload.type,
+      };
+      if (correct) {
+        recordCorrectAnswer({ question: qSnapshot });
+      } else {
+        recordWrongAnswer({ question: qSnapshot, userAnswer: questionPayload && questionPayload.userAnswer });
+      }
+    } catch (e) {
+      // 持久化失败不能影响答题体验
+    }
     try {
       if (!session?.user?.id) return;
       await supabase.from("answers").insert({
