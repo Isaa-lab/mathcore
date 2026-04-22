@@ -377,8 +377,17 @@ function extractCountBadge(structure, data) {
     return n > 0 ? `${n} 节点 · ${e} 连接` : null;
   }
   if (structure === "comparison") {
-    const n = Array.isArray(data.columns) ? data.columns.length : 0;
-    return n > 0 ? `${n} 列对比` : null;
+    const cols = Array.isArray(data.columns) ? data.columns : [];
+    const n = cols.length;
+    if (n === 0) return null;
+    // 新 schema (rows+dim) 下，显示"N 列 × M 维"；旧 schema (points) 降级为"N 列对比"
+    // 动机：对齐用户反馈——"3 列对比"只反映宽度不反映深度，让用户一眼能看出信息密度
+    const dimCount = (() => {
+      if (!cols.some((c) => Array.isArray(c?.rows) && c.rows.length > 0)) return 0;
+      if (Array.isArray(data.dimensions) && data.dimensions.length > 0) return data.dimensions.length;
+      return (cols[0]?.rows?.length) || 0;
+    })();
+    return dimCount > 0 ? `${n} 列 × ${dimCount} 维` : `${n} 列对比`;
   }
   if (structure === "hierarchy") {
     const countNodes = (node) => {

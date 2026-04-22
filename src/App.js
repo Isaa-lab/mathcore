@@ -11,6 +11,7 @@ import StudyWorkspace from "./layouts/StudyWorkspace";
 import SprintWorkspace from "./layouts/SprintWorkspace";
 import { isEditableFocused } from "./utils/keyboard";
 import { detectVizIntent, logVizIntent } from "./utils/vizIntent";
+import { resolveDialogueMode, deriveQuizState, DIALOGUE_MODE_LABELS } from "./utils/dialogueMode";
 import "katex/dist/katex.min.css";
 
 // Inject global CSS animations
@@ -4489,6 +4490,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   // 真正的对话流：保留所有轮次。每条消息 { id, role: "user"|"assistant", content, isStreaming?, isError? }
   const [aiMessages, setAIMessages] = useState([]);
   const [aiIsBusy, setAIIsBusy] = useState(false);
+  // 当前面板的对话模式（socratic = 拆题引导，exposition = 讲解延伸）
+  // 面板标题据此切换，避免"答对后标题还显示'拆解这道题'"的语义错误。
+  const [currentDialogueMode, setCurrentDialogueMode] = useState("socratic");
   const aiScrollRef = useRef(null);
   // 全屏可视化实验室入口（来自 MaterialChatPage 的同一套工具）
   const openLab = useMathStore((s) => s.openLab);
@@ -4729,6 +4733,19 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       : detectVizIntent(text);
     logVizIntent(text, intent);
 
+    // —— 对话模式分级（失误一的主防线）——
+    // 决策依据：
+    //   · 答题前/答错 → socratic（引导思考）
+    //   · 答对后默认 → exposition（直接讲解，不反问 —— 保护正向反馈窗口）
+    //   · 用户显式信号（"讲讲/举例/引导我/"）会覆盖默认
+    const quizState = deriveQuizState({
+      answered,
+      isCorrect: !isWrongAnswered && answered,
+      selected,
+    });
+    const dialogue = resolveDialogueMode({ userMessage: text, quizState });
+    setCurrentDialogueMode(dialogue.mode);
+
     const userId = "u_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
     const aiId = "a_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
     const activeProvider = getAIConfig().provider;
@@ -4763,6 +4780,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             wantsViz: !!intent.wantsViz,
             reason: intent.reason,
           },
+          // 对话模式：socratic(引导式) vs exposition(讲解式)
+          // 后端据此切换 system prompt，避免答对场景被连环反问
+          dialogueMode: dialogue.mode,
+          dialogueModeReason: dialogue.reason,
+          quizState,
           questionContext: {
             stem: q.question,
             options: q.options || null,
@@ -4871,6 +4893,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     let retryInstruction;
     if (isQualityIssue && failedStructure === "process") {
       retryInstruction = `你刚才那个 [VIZ:{structure:"process",...}] JSON 语法没问题，但推演质量不合格：${reason}${scoreNote}${issuesBlock}\n\n重新生成这个 process 图，必须同时满足：\n· steps.length ∈ [4,7]（必须至少 4 步，不是 1-2 步糊弄）\n· 每个 step 的 title 是具体的动作短句（如"从 2 节点最简情形出发""分析基函数 Lᵢ(x) 的次数"），禁用"步骤1/第一步/Step 1/分析问题/考虑简单情况"这类占位词\n· 每个 step 必须有 narrative（1-2 句说清"做什么 + 为什么"，≥15 字），禁用"让我们/接下来/首先/考虑简单情况/一步步来"作为句子开头\n· 至少一半 step 包含 math: { latex, explanation }，latex 里反斜杠双写\n· 每个 step 都要有 insight 字段（≥10 字的关键洞察，不是"这很重要"/"这是关键"这种空话）\n· data 顶层请给 title / conclusion（≥10 字）；最后一步要呼应 conclusion\n· 第 1 步从简单/特殊情形入手，最后 1 步给出结论\n\n请特别针对上面列出的具体问题逐条修正，不要只修第一条。如果这道题/这个知识点本来就不需要 4 步以上的推演（比如就是一个定义回忆），请不要画 process 图，改用纯文字 + $LaTeX$ 说清楚——硬凑 1 个"步骤1：考虑简单情况"比不画还糟。`;
+    } else if (isQualityIssue && failedStructure === "comparison") {
+      retryInstruction = `你刚才那个 [VIZ:{structure:"comparison",...}] JSON 语法没问题，但对比质量不合格：${reason}${scoreNote}${issuesBlock}\n\n重新生成这个 comparison 图，必须同时满足：\n· columns.length ∈ [2,4]（少于 2 没对比意义，多于 4 信息过载）\n· 每个 column 必须包含 rows 数组，rows.length ≥ 3（至少 3 个对比维度）\n· **所有列的 rows.dim 必须完全对齐**——即每列第 i 行都在讨论同一个维度（如节点分布 / 误差行为 / 计算复杂度 / 典型应用）。横向无法对比等于没做这张图。\n· 每个 rows[i].content ≥ 10 字且有信息量，禁止"高次数多项式""局部线性"这种 4-6 字的标签式短语\n· 顶层必须有 takeaway（≥15 字的核心洞察，点明"为什么值得这样对比"，不是"总结一下"这种凑数）\n· 建议顶层给 dimensions 数组（和 rows.dim 完全一致的顺序），方便前端渲染维度表头\n· 事实性防护：Newton 插值 ≠ 分段线性（前者全局多项式）；Lagrange 和 Newton 精度等价只是构造方式不同；Chebyshev 优势来自节点分布本身不是算法；不确定就不写该 row\n\n请逐条修正上面列出的具体问题，不要只修第一条。如果这个知识点本质上没有 2-4 个可对比的对象，就不要画 comparison，改用文字 + $LaTeX$ 讲清楚。`;
     } else if (isQualityIssue) {
       retryInstruction = `你刚才那个 [VIZ:...] 虽然 JSON 语法对了，但内容质量不合格：${reason}${issuesBlock}\n\n重新生成一次，这次必须满足：\n· 如果是 concept 结构：节点 ≥ 8（理想 10-12）个，边 ≥ 节点数 - 1；每条 edge 都要带 label 说明关系；节点至少分 level 0（1 个中心）/ level 1（3-6 个主分支）/ level 2（若干细节）两到三层；覆盖 definition/formula/construction/property/error/application/related 里至少 4 个 dimension。\n· 不要重复同样的浅薄结构。用精确的数学术语做节点名（如"基函数 Lᵢ(x)""Runge 现象""Chebyshev 节点""唯一性定理"），禁用模糊词（"公式/方法/性质/应用"）。\n· 如果真的这个知识点没那么多可画的东西，那就不画图，改用文字 + $LaTeX$ 讲清楚，不要硬凑两个节点。`;
     } else {
@@ -5823,7 +5847,18 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           style={{ marginTop: 12, padding: 18, borderLeft: "4px solid #6366F1", overflow: "hidden" }}
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: "#4338CA" }}>💬 AI 正在和你一起拆解这道题</div>
+            {/* 标题随 dialogueMode 动态切换：
+                 socratic → 💬 AI 正在和你一起拆解这道题
+                 exposition → 💡 AI 正在帮你深入理解
+                默认 socratic，避免 state 未初始化时闪空。 */}
+            {(() => {
+              const meta = DIALOGUE_MODE_LABELS[currentDialogueMode] || DIALOGUE_MODE_LABELS.socratic;
+              return (
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#4338CA" }}>
+                  {meta.icon} {meta.title}
+                </div>
+              );
+            })()}
             <button onClick={() => { setShowAIHelp(false); setAIMessages([]); setAIHelpInput(""); setAIContextPrompt(""); }} title="Esc 也能收起" style={{ border: "none", background: "transparent", color: "#6B7280", cursor: "pointer", fontSize: 13 }}>收起 × <span style={{ fontSize: 10, opacity: 0.6, marginLeft: 2 }}>Esc</span></button>
           </div>
 
@@ -7484,15 +7519,59 @@ function splitQuizChatBlocks(text) {
       }
     }
     // [VIZ:{...}] 或 [CHART:{...}] 兼容
+    // —— 新解析策略（修"}" 残骸泄漏）：从 prefix 后的第一个 '{' 开始，做
+    //    **花括号平衡 + 字符串引号感知**，找到匹配的 '}' 后再吃一个可选的 ']'。
+    //    旧版本只数方括号，一旦 AI 在 ']' 后多吐一个孤立 '}'，它会作为
+    //    文本泄漏到聊天气泡里（图二现象）。
     const prefix = src.slice(i, i + 5) === "[VIZ:" ? "[VIZ:" : src.slice(i, i + 7) === "[CHART:" ? "[CHART:" : null;
     if (prefix) {
-      let depth = 1, j = i + prefix.length;
-      while (j < src.length && depth > 0) {
-        if (src[j] === "[") depth++;
-        else if (src[j] === "]") depth--;
-        j++;
+      const bodyStart = i + prefix.length;
+      let k = bodyStart;
+      while (k < src.length && /\s/.test(src[k])) k++;
+      let raw = null;
+      let cursor = k; // 解析结束后下一个要处理的位置
+      if (src[k] === "{") {
+        let depth = 0;
+        let inString = false;
+        let escape = false;
+        let p = k;
+        while (p < src.length) {
+          const ch = src[p];
+          if (escape) { escape = false; p++; continue; }
+          if (ch === "\\") { escape = true; p++; continue; }
+          if (ch === '"') { inString = !inString; p++; continue; }
+          if (!inString) {
+            if (ch === "{") depth++;
+            else if (ch === "}") {
+              depth--;
+              if (depth === 0) {
+                raw = src.slice(k, p + 1);
+                cursor = p + 1;
+                // 吃掉紧邻的可选 ']'（标准闭合）以及一切紧跟的孤立 '}'/空白
+                // ———— 这是图二 } 残骸问题的"兜底扫残骸"部分 ————
+                while (cursor < src.length && (src[cursor] === "]" || src[cursor] === "}" || src[cursor] === " ")) {
+                  cursor++;
+                }
+                break;
+              }
+            }
+          }
+          p++;
+        }
       }
-      const raw = src.slice(i + prefix.length, j - 1).trim();
+      if (raw === null) {
+        // 退路：按老方括号策略兜底（极端情况，例如 [VIZ: 后不是 '{' 而是裸值）
+        let depth = 1, j = i + prefix.length;
+        while (j < src.length && depth > 0) {
+          if (src[j] === "[") depth++;
+          else if (src[j] === "]") depth--;
+          j++;
+        }
+        raw = src.slice(i + prefix.length, j - 1).trim();
+        cursor = j;
+      } else {
+        raw = raw.trim();
+      }
       flushText();
       // 尝试解析（normalizeVizIntent 内含 repair 级联）
       let intent = null;
@@ -7588,8 +7667,73 @@ function splitQuizChatBlocks(text) {
         }
       }
 
+      // ── comparison 结构的深度守门（和 process 同一套 score + issues 套路）──
+      // 判据：
+      //   · 列数 2-4（少于 2 没对比意义，多于 4 信息过载）
+      //   · 每列 rows ≥ 3（少于 3 行无法立体对比）
+      //   · 所有列的 rows.dim 必须对齐（横向可比才是 comparison 的本质）
+      //   · 每个 content ≥ 10 字（"局部线性"这种 4 字标签直接扣）
+      //   · takeaway ≥ 15 字（缺它就只是个表格，不是洞察）
+      // 兼容：如果 AI 还在用旧 schema points:[{text}] 也不一棍子打死，降级通过但扣分
+      if (intent && !parseError && intent.structure === "comparison") {
+        const cols = Array.isArray(intent.data?.columns) ? intent.data.columns : [];
+        const issues = [];
+        let score = 100;
+
+        if (cols.length < 2) { issues.push(`列数不足：${cols.length}（应 2-4）`); score -= 50; }
+        else if (cols.length > 4) { issues.push(`列数过多：${cols.length}（建议 ≤ 4）`); score -= 10; }
+
+        // 判新旧 schema：优先认 rows（新），否则降级到 points（旧）
+        const usingRows = cols.some((c) => Array.isArray(c?.rows) && c.rows.length > 0);
+        if (!usingRows && cols.length > 0) {
+          issues.push("使用旧 points schema（建议升级为 rows+dim 以实现维度对齐）");
+          score -= 15;
+        }
+
+        cols.forEach((col, ci) => {
+          const n = ci + 1;
+          const t = typeof col?.title === "string" ? col.title.trim() : "";
+          if (!t) { issues.push(`列 ${n}：缺少 title`); score -= 10; }
+
+          if (usingRows) {
+            const rows = Array.isArray(col?.rows) ? col.rows : [];
+            if (rows.length < 3) { issues.push(`列 ${n} "${t}"：只有 ${rows.length} 行（应 ≥ 3）`); score -= 20; }
+            rows.forEach((r, ri) => {
+              const c = typeof r?.content === "string" ? r.content.trim() : "";
+              if (!c || c.length < 10) { issues.push(`列 ${n} 行 ${ri + 1}：内容过短"${c}"（应 ≥ 10 字，禁止标签式短语）`); score -= 8; }
+              if (!r?.dim || typeof r.dim !== "string") { issues.push(`列 ${n} 行 ${ri + 1}：缺少 dim 字段（维度标签，横向对齐必备）`); score -= 5; }
+            });
+          } else {
+            const pts = Array.isArray(col?.points) ? col.points : [];
+            if (pts.length < 3) { issues.push(`列 ${n} "${t}"：只有 ${pts.length} 个 point（应 ≥ 3）`); score -= 18; }
+            pts.forEach((p, pi) => {
+              const txt = typeof p === "string" ? p : (p?.text || "");
+              if (!txt || txt.trim().length < 6) { issues.push(`列 ${n} point ${pi + 1}：过短"${txt}"`); score -= 6; }
+            });
+          }
+        });
+
+        // 维度对齐检查（仅新 schema）
+        if (usingRows && cols.length >= 2) {
+          const dimSets = cols.map((col) => new Set((col.rows || []).map((r) => r?.dim).filter(Boolean)));
+          const firstDims = dimSets[0] || new Set();
+          const aligned = dimSets.every((s) => s.size === firstDims.size && [...firstDims].every((d) => s.has(d)));
+          if (!aligned) { issues.push("各列的对比维度（dim）不对齐，无法横向比较"); score -= 20; }
+        }
+
+        // takeaway 洞察检查
+        const tk = typeof intent.data?.takeaway === "string" ? intent.data.takeaway.trim() : "";
+        if (!tk || tk.length < 15) { issues.push("缺少 takeaway 核心洞察（≥15 字，点明为什么这样对比）"); score -= 10; }
+
+        qualityScore = Math.max(0, score);
+        qualityIssues = issues;
+        if (score < 65) {
+          qualityIssue = issues[0] || `comparison 质量分 ${qualityScore}/100 不足`;
+        }
+      }
+
       out.push({ type: "viz", content: raw, intent, parseError, qualityIssue, qualityIssues, qualityScore });
-      i = j;
+      i = cursor;
       continue;
     }
     buf += src[i];

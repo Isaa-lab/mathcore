@@ -599,9 +599,21 @@ function ProcessStage({ intent, accent }) {
 //                            STAGE 4: COMPARISON
 // ───────────────────────────────────────────────────────────────────────────
 function ComparisonStage({ intent, accent }) {
-  const columns = Array.isArray(intent?.data?.columns) && intent.data.columns.length > 0
+  // Schema v2：columns[i].rows:[{dim, content}] + 顶层 dimensions + takeaway
+  // 兼容 v1：columns[i].points:[{text, tone}]（旧数据仍能渲染，但降级为"无维度表头"）
+  const rawColumns = Array.isArray(intent?.data?.columns) && intent.data.columns.length > 0
     ? intent.data.columns
     : [{ title: "方案 A", points: ["（AI 未提供）"] }, { title: "方案 B", points: ["（AI 未提供）"] }];
+
+  // 判定使用哪个 schema
+  const usingRows = rawColumns.some((c) => Array.isArray(c?.rows) && c.rows.length > 0);
+
+  // dimensions：优先用顶层，其次从第一列的 rows.dim 推导
+  const dimensions = Array.isArray(intent?.data?.dimensions) && intent.data.dimensions.length > 0
+    ? intent.data.dimensions
+    : (usingRows ? (rawColumns[0]?.rows || []).map((r) => r?.dim).filter(Boolean) : []);
+
+  const takeaway = typeof intent?.data?.takeaway === "string" ? intent.data.takeaway.trim() : "";
 
   const palettes = [
     { bg: accent.bg, fg: accent.fg, accent: accent.accent },
@@ -609,44 +621,111 @@ function ComparisonStage({ intent, accent }) {
     { bg: "#F0FDF4", fg: "#047857", accent: "#10B981" },
     { bg: "#FEF2F2", fg: "#B91C1C", accent: "#EF4444" },
   ];
+  // accent 名→色映射（AI 可以指定 "green"/"yellow"/"blue"/"red"）
+  const accentByName = {
+    green:  { bg: "#F0FDF4", fg: "#047857", accent: "#10B981" },
+    yellow: { bg: "#FFFBEB", fg: "#B45309", accent: "#F59E0B" },
+    blue:   { bg: "#EFF6FF", fg: "#1D4ED8", accent: "#3B82F6" },
+    red:    { bg: "#FEF2F2", fg: "#B91C1C", accent: "#EF4444" },
+    indigo: { bg: "#EEF2FF", fg: "#4338CA", accent: "#6366F1" },
+    purple: { bg: "#FAF5FF", fg: "#7E22CE", accent: "#A855F7" },
+  };
 
   return (
     <div style={{ flex: 1, padding: 32, overflowY: "auto" }}>
-      <div style={{ maxWidth: 1200, margin: "0 auto", display: "grid", gridTemplateColumns: `repeat(${Math.min(columns.length, 4)}, minmax(0, 1fr))`, gap: 24 }}>
-        {columns.map((col, ci) => {
-          const p = palettes[ci % palettes.length];
-          const points = Array.isArray(col.points) ? col.points : [];
-          return (
-            <motion.div
-              key={ci}
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ type: "spring", stiffness: 260, damping: 24, delay: ci * 0.06 }}
-              style={{ background: "#FFFFFF", borderRadius: 28, padding: 28, border: "1px solid #F3F4F6", boxShadow: "0 15px 50px rgba(0,0,0,0.04)", display: "flex", flexDirection: "column", gap: 16 }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: p.bg, color: p.fg, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, letterSpacing: "-0.02em" }}>{ci + 1}</div>
-                <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
-                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#111827", letterSpacing: "-0.015em" }}>{col.title || `方案 ${ci + 1}`}</h3>
-                  {col.subtitle && <span style={{ marginTop: 2, fontSize: 12, color: "#6B7280" }}>{col.subtitle}</span>}
+      <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", flexDirection: "column", gap: 20 }}>
+        {/* 维度表头（只在新 schema 下显示）—— 帮用户理解"这是一张 N×M 的维度对齐表" */}
+        {usingRows && dimensions.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 12, color: "#6B7280" }}>
+            <span style={{ fontWeight: 700, color: "#4B5563" }}>对比维度：</span>
+            {dimensions.map((d, i) => (
+              <span key={i} style={{ padding: "2px 10px", borderRadius: 999, background: "#F3F4F6", color: "#374151", fontWeight: 600 }}>{d}</span>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(rawColumns.length, 4)}, minmax(0, 1fr))`, gap: 24 }}>
+          {rawColumns.map((col, ci) => {
+            const namedAccent = col?.accent && accentByName[col.accent] ? accentByName[col.accent] : null;
+            const p = namedAccent || palettes[ci % palettes.length];
+            const rows = Array.isArray(col?.rows) ? col.rows : [];
+            const points = Array.isArray(col?.points) ? col.points : [];
+
+            return (
+              <motion.div
+                key={ci}
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ type: "spring", stiffness: 260, damping: 24, delay: ci * 0.06 }}
+                style={{ background: "#FFFFFF", borderRadius: 28, padding: 28, border: "1px solid #F3F4F6", boxShadow: "0 15px 50px rgba(0,0,0,0.04)", display: "flex", flexDirection: "column", gap: 16 }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: p.bg, color: p.fg, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, letterSpacing: "-0.02em" }}>{ci + 1}</div>
+                  <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
+                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#111827", letterSpacing: "-0.015em" }}>{col.title || `方案 ${ci + 1}`}</h3>
+                    {col.subtitle && <span style={{ marginTop: 2, fontSize: 12, color: "#6B7280" }}>{col.subtitle}</span>}
+                  </div>
                 </div>
-              </div>
-              <div style={{ height: 2, background: `linear-gradient(90deg, ${p.accent} 0%, transparent 100%)`, borderRadius: 999 }} />
-              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 10 }}>
-                {points.map((pt, pi) => {
-                  const text = typeof pt === "string" ? pt : (pt?.text || JSON.stringify(pt));
-                  const tone = typeof pt === "object" ? pt?.tone : null; // "pro" | "con" | null
-                  return (
-                    <li key={pi} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 12px", borderRadius: 10, background: "#FAFAFC" }}>
-                      <span style={{ flexShrink: 0, marginTop: 6, width: 6, height: 6, borderRadius: 999, background: tone === "con" ? "#EF4444" : tone === "pro" ? "#10B981" : p.accent }} />
-                      <span style={{ fontSize: 13.5, color: "#1F2937", lineHeight: 1.6 }}>{text}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </motion.div>
-          );
-        })}
+                <div style={{ height: 2, background: `linear-gradient(90deg, ${p.accent} 0%, transparent 100%)`, borderRadius: 999 }} />
+
+                {usingRows && rows.length > 0 ? (
+                  // 新 schema：维度分行，每行小标签 + 内容
+                  <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12 }}>
+                    {rows.map((r, ri) => (
+                      <li key={ri} style={{ padding: "10px 12px", borderRadius: 12, background: "#FAFAFC", display: "flex", flexDirection: "column", gap: 4 }}>
+                        {r?.dim && (
+                          <span style={{ fontSize: 10.5, fontWeight: 700, color: p.fg, letterSpacing: "0.02em", textTransform: "uppercase" }}>{r.dim}</span>
+                        )}
+                        <span style={{ fontSize: 13.5, color: "#1F2937", lineHeight: 1.6 }}>
+                          {renderInlineKatex(r?.content || "")}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  // 旧 schema 兼容：points 列表
+                  <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 10 }}>
+                    {points.map((pt, pi) => {
+                      const text = typeof pt === "string" ? pt : (pt?.text || JSON.stringify(pt));
+                      const tone = typeof pt === "object" ? pt?.tone : null;
+                      return (
+                        <li key={pi} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "8px 12px", borderRadius: 10, background: "#FAFAFC" }}>
+                          <span style={{ flexShrink: 0, marginTop: 6, width: 6, height: 6, borderRadius: 999, background: tone === "con" ? "#EF4444" : tone === "pro" ? "#10B981" : p.accent }} />
+                          <span style={{ fontSize: 13.5, color: "#1F2937", lineHeight: 1.6 }}>{renderInlineKatex(text)}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </motion.div>
+            );
+          })}
+        </div>
+
+        {/* takeaway：底部洞察带 —— 把"核心结论"从埋在列里提到最醒目的位置 */}
+        {takeaway && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: rawColumns.length * 0.06 + 0.1 }}
+            style={{
+              marginTop: 4,
+              padding: "16px 20px",
+              borderRadius: 18,
+              background: `linear-gradient(135deg, ${accent.bg} 0%, #FFFFFF 100%)`,
+              border: `1px solid ${accent.accent}33`,
+              display: "flex",
+              gap: 12,
+              alignItems: "flex-start",
+            }}
+          >
+            <div style={{ flexShrink: 0, fontSize: 18, lineHeight: 1 }}>💡</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: accent.fg, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 4 }}>核心洞察</div>
+              <div style={{ fontSize: 14, color: "#111827", lineHeight: 1.7, fontWeight: 500 }}>{renderInlineKatex(takeaway)}</div>
+            </div>
+          </motion.div>
+        )}
       </div>
     </div>
   );

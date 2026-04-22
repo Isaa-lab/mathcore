@@ -75,6 +75,8 @@ async function runHandler(req, res) {
     conversationHistory,
     questionContext, // { stem, options, correctAnswer, userSelection, isCorrect, misconception, knowledgePoints }
     vizIntent,       // { wantsViz: bool, reason: string } —— 前端已做关键词检测，后端据此分流 prompt
+    dialogueMode,    // "socratic" | "exposition" —— 前端根据答题状态 + 用户意图推导
+    // dialogueModeReason, quizState —— 仅日志用，不参与 prompt 构造
     userProvider, userKey, userCustomUrl,
   } = body;
 
@@ -498,7 +500,43 @@ data 骨架（选 structure 对应的那一种即可）：
 · annotation: {"formula":"\\\\frac{dy}{dx}+P(x)y=Q(x)","parts":[{"tex":"\\\\frac{dy}{dx}","label":"导数","tone":"indigo"}, ...]}
 · hierarchy: {"root":{"name":"根","children":[...]}}
 · process: {"steps":[{"title":"第1步","narrative":"...","math":{"latex":"P(x)=\\\\sum y_i L_i(x)","explanation":"..."},"insight":"..."}]}
-· comparison: {"columns":[{"title":"A","points":[{"text":"优势","tone":"pro"}]}]}
+· comparison（Schema v2 · 维度对齐 + 事实守门）:
+    {
+      "title":"三种插值策略的横向对比",
+      "subtitle":"在近似 Runge 函数 1/(1+25x²) 时的表现差异",
+      "dimensions":["节点分布","误差行为","计算复杂度","典型应用"],
+      "columns":[
+        {"title":"Chebyshev 节点","accent":"green","rows":[
+          {"dim":"节点分布","content":"端点密集、中心稀疏（$\\\\cos((2i+1)\\\\pi/2n)$）"},
+          {"dim":"误差行为","content":"最小化最大误差，避免 Runge 现象"},
+          {"dim":"计算复杂度","content":"节点生成 $O(n)$，插值 $O(n^2)$"},
+          {"dim":"典型应用","content":"Gauss 求积 / 高精度近似"}
+        ]},
+        {"title":"Lagrange 等距节点","accent":"yellow","rows":[
+          {"dim":"节点分布","content":"区间内均匀分布"},
+          {"dim":"误差行为","content":"高次时端点剧烈振荡（Runge 现象）"},
+          {"dim":"计算复杂度","content":"$O(n^2)$，实现简单"},
+          {"dim":"典型应用","content":"低次插值 / 教学演示"}
+        ]},
+        {"title":"分段线性插值","accent":"blue","rows":[
+          {"dim":"节点分布","content":"任意分布，逐段连接"},
+          {"dim":"误差行为","content":"局部 $O(h^2)$ 精度，无振荡"},
+          {"dim":"计算复杂度","content":"$O(n)$ 构造、$O(\\\\log n)$ 查询"},
+          {"dim":"典型应用","content":"实时渲染 / 数据可视化"}
+        ]}
+      ],
+      "takeaway":"Chebyshev 的优势来自节点分布（非算法本身），等距节点才是 Runge 的元凶"
+    }
+  · 硬指标：columns 必须 2-4 列；每列 rows 必须 ≥ 3；所有列的 rows.dim 必须**完全对齐**（横向可比）
+  · content ≥ 10 字且有信息量，禁止"高次数多项式""局部线性"这种<6字的标签式短语
+  · takeaway 必须给出核心洞察（不是"总结一下"这种凑数）
+  · **事实性防护（禁止犯的常见错）**：
+    - Newton 插值 ≠ 分段线性插值（前者全局多项式，后者分段）
+    - Lagrange 和 Newton 本质相同，差异仅在构造方式，精度一致
+    - Chebyshev 节点的优势来自**节点分布**，不是插值算法本身
+    - 分段三次样条是"三次多项式"，不是"低次近似"
+    - 不确定事实准确性时，宁可省略该 row，也不编造
+  · 兼容：若仍用旧 {points:[{text,tone}]} 字段，前端会回退渲染但徽章会标记"简版对比"
 · concept：本版本改为**引用标记** [GRAPH_REF:<slug>|<中文名>]。例：[GRAPH_REF:lagrange_interpolation|Lagrange 插值多项式]
 
 ⚠️ **LaTeX 字段规范（关键，避免公式以原始代码显示在红框里）**：
@@ -517,22 +555,46 @@ ${vizProfile.extraConstraint ? "\n" + vizProfile.extraConstraint + "\n" : ""}`
    （不要多提，偶尔点一下即可；更多场景由 UI 上的"💡 你可能想"按钮兜底）
 ✅ [GRAPH_REF:<slug>|<中文名>] 这种**轻量引用标记**依然可以用（它不会立刻画图，用户点开才展开缓存的概念图谱）。`;
 
-    // 精简版 socratic prompt —— 只保留硬约束，去掉大量冗余和反模式举例
-    // （原版 2000+ tokens，精简后 ~600 tokens，配合 llama-3.1-8b-instant 能稳定 < 3s 返回）
-    systemPrompt = `你是数学老师，在帮学生复盘 TA 刚做完的题。苏格拉底式引导，多问少讲。
+    // —— 对话模式分级（socratic 引导 vs exposition 讲解） ——
+    // 决策在前端 resolveDialogueMode 里做，这里只负责把 prompt 分流。
+    // 旧行为：全走 socratic，用户答对后要求"举例/对比"还被连环反问。
+    // 新行为：答对后默认 exposition（直接讲），用户明说"引导我"才回到 socratic。
+    const effectiveMode = dialogueMode === "exposition" ? "exposition" : "socratic";
 
-【学生状态】${wrong ? "答错" : userPick ? "答对" : "未作答"}${wrong ? "——引导 TA 自己发现错误，不报答案" : userPick ? "——帮 TA 把直觉升级成推理链" : "——从已知条件迈出第一步"}
+    const modeRules = effectiveMode === "exposition"
+      ? `【对话模式：讲解式 Exposition】
+学生已答对这道题，现在想**深入理解 / 看对比 / 看例子 / 看延伸**。
+直接把内容讲清楚，**绝对不要反问**。
+✅ 先用 1 句话肯定他的思路对在哪里（具体，不是"你很棒"）
+✅ 然后直接给他要的东西——例子给全、对比给全、延伸给全
+✅ 结尾最多用一句**开放式邀请**（如"想继续看哪个方向？"），不是悬念反问
+❌ 禁止："你认为...吗？""会有什么区别呢？""让我们看看..."这类反问/悬念收尾
+❌ 禁止让用户第 2 次催"能不能举个例子"——第 1 次就把例子给全
+❌ 禁止"一次只讲一个点然后问'懂了吗'"——他已经答对了，别打断节奏`
+      : `【对话模式：引导式 Socratic】
+学生${wrong ? "答错了" : "还在思考中"}，用提问引导他自己想明白。
+✅ 文字回复 ≤150 字；一次只抛 **1 个**问题
+✅ 开场接住情绪（"嗯，你选了 X，我们一起想想..."）
+✅ 通过 1 个关键问题把他引到"自己发现"的那一步，不直接给答案
+❌ 禁止连环追问（已经问了一个就等学生回复，不要一口气再抛三个）`;
 
-【硬禁止】
-❌ 不能直接说正确答案${correct ? `（本题答案是「${correct}」，你知道但不许告诉学生）` : ""}
+    // 精简版 prompt —— 只保留硬约束，去掉大量冗余和反模式举例
+    // （原版 2000+ tokens，精简后 ~700 tokens，配合 llama-3.1-8b-instant 能稳定 < 3s 返回）
+    systemPrompt = `你是数学老师，在帮学生复盘 TA 刚做完的题。
+
+【学生状态】${wrong ? "答错" : userPick ? "答对" : "未作答"}
+
+${modeRules}
+
+【通用硬禁止】
+❌ 不能直接说正确答案${correct ? `（本题答案是「${correct}」，你${effectiveMode === "exposition" ? "可以引用来讲解，但不要突兀地独立说一句'答案是 X'" : "知道但不许告诉学生"}）` : ""}
 ❌ 不能出新题、不能说"我们再做一道"
 ❌ 不能用【题目/选项/答案】这类结构化标签
 ❌ 不能用 ASCII 树枝 (├──│└──) 或 Markdown 表格冒充可视化
 
 【必做】
 ✅ 公式用 LaTeX：行内 $...$，块级 $$...$$
-✅ 文字回复 ≤150 字；一次只抛 1 个问题
-✅ 开场接住情绪（"嗯，你选了 X，我们一起想想..."）
+✅ 生成前先自检：如果要写"Newton 插值是分段"这类事实，先确认对不对——宁可不说也不要编造
 
 ${vizSection}
 
@@ -540,7 +602,7 @@ ${vizSection}
 题目：${stem || "（未提供）"}
 ${optLines ? `选项：\n${optLines}` : ""}${kps ? `\n知识点：${kps}` : ""}${userPick ? `\n学生选：${userPick}` : ""}${miscon ? `\n错项对应的误解：${miscon}` : ""}
 
-现在根据学生的提问开始引导。第一句温和不打击。`;
+现在根据学生的提问${effectiveMode === "exposition" ? "直接讲清楚" : "开始引导，第一句温和不打击"}。`;
   } else if (isChatMode) {
     systemPrompt = `你是一位亲切、有趣的数学私教，正在陪学生学习《${materialTitle || "数学教材"}》。风格：温暖鼓励、循循善诱、像朋友交流。
 ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
