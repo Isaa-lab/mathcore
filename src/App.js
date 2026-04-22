@@ -7974,17 +7974,17 @@ function MistakeCard({ item, question, selected, onToggleSelect, onMarkMastered,
         </div>
       </div>
 
-      {/* 题干摘要（3 行截断） */}
-      <h3 style={{
+      {/* 题干摘要（3 行截断） —— 用 MathText 渲染 LaTeX，容器裁切 */}
+      <div style={{
         margin: 0, fontSize: 14.5, fontWeight: 700, color: "#111827",
         lineHeight: 1.55,
-        display: "-webkit-box",
-        WebkitLineClamp: 3, WebkitBoxOrient: "vertical",
-        overflow: "hidden", textOverflow: "ellipsis",
+        maxHeight: "calc(1.55em * 3)",
+        overflow: "hidden",
         wordBreak: "break-word",
+        position: "relative",
       }}>
-        {question.question}
-      </h3>
+        <MathText text={String(question.question || "")} />
+      </div>
 
       {/* AI 归因诊断框 —— 卡片核心 */}
       <div style={{
@@ -9057,6 +9057,16 @@ function rescueQuizMath(input) {
     );
     // 9) 一撇/二撇导数 y', f''
     out = out.replace(/\b([yfguv])('{1,3})(?=[\s+\-=()]|$)/g, "$$1$2$");
+    // 10) 兜底：短串（≤120字）含 LaTeX 反斜杠命令（\int/\frac/\sum/\sqrt/\partial/希腊字母等）
+    //     且未被 $ 包裹、无中文 → 整串包 $...$，避免前面规则没命中导致 raw LaTeX 外漏
+    if (
+      out.length <= 120 &&
+      !/\$/.test(out) &&
+      !/[\u4e00-\u9fa5]/.test(out) &&
+      /\\(?:int|iint|iiint|oint|sum|prod|frac|dfrac|tfrac|binom|sqrt|partial|nabla|infty|cdot|times|to|Rightarrow|leftarrow|rightarrow|leq|geq|neq|approx|equiv|mapsto|circ|left|right|mathbb|mathcal|mathrm|boldsymbol|vec|hat|bar|tilde|dot|ddot|alpha|beta|gamma|delta|epsilon|varepsilon|zeta|eta|theta|vartheta|iota|kappa|lambda|mu|nu|xi|omicron|pi|varpi|rho|varrho|sigma|varsigma|tau|upsilon|phi|varphi|chi|psi|omega|Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Upsilon|Phi|Psi|Omega|quad|qquad|[,;:!])/.test(out)
+    ) {
+      out = "$" + out + "$";
+    }
     return out;
   }).join("");
 }
@@ -11561,7 +11571,7 @@ export default function App() {
                   <SprintWorkspace
                     chatPage={<MaterialChatPage setPage={handleSetPage} profile={profile} />}
                     quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} isSprint autoStartIntent={quizIntent} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
-                    onViewWrong={() => handleSetPage("错题本")}
+                    onViewWrong={() => { setWorkspaceMode("study"); handleSetPage("错题本"); }}
                     allQuestions={ALL_QUESTIONS}
                     onAutoStartQuiz={(intent) => {
                       if (intent && intent.chapter && setChapterFilter) setChapterFilter([intent.chapter]);
