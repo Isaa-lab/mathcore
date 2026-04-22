@@ -12255,6 +12255,18 @@ export default function App() {
   if (emailJustConfirmed) return <EmailConfirmedPage onContinue={() => { setEmailJustConfirmed(false); }} />;
   if (!session) return <AuthPage />;
 
+  // 这些 page 不是 StudyWorkspace 的 tab，也不是 SprintWorkspace 的内置视图 —— 必须当做
+  // 全屏 overlay 渲染。否则 setPage("上传资料") 会被 StudyWorkspace 的 activeTab 吃掉，
+  // 用户会觉得按钮"点不动"（实际上 page 变了但屏幕没变）。
+  const isFullscreenPage =
+    page === "错题本" ||
+    page === "上传资料" ||
+    page === "资料对话" ||
+    page === "学习报告" ||
+    page === "记忆卡片" ||
+    page === "教师管理" ||
+    (typeof page === "string" && page.startsWith("quiz_material_"));
+
   const renderPage = () => {
     if (page === "首页") return <HomePage setPage={handleSetPage} profile={profile} />;
     if (page === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
@@ -12314,12 +12326,12 @@ export default function App() {
             exit={{ opacity: 0, y: -15, filter: "blur(4px)" }}
             transition={springNav}
           >
-            {/* 64px Header —— 错题本 overlay 时隐藏 tab 胶囊，改为返回提示 */}
+            {/* 64px Header —— 任意全屏 overlay 页（上传/对话/错题本/报告/...） 时隐藏 tab 胶囊，改为返回提示 */}
             <header style={{ height: 64, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", borderBottom: "1px solid #E5E7EB", background: "#FFFFFF" }}>
               <h1 style={{ fontSize: 18, fontWeight: "bold", color: "#111827", margin: 0 }}>MathCore 学习操作系统</h1>
-              {page === "错题本" ? (
+              {isFullscreenPage ? (
                 <button
-                  onClick={() => handleSetPage("首页")}
+                  onClick={() => handleSetPage(workspaceMode === "sprint" ? "首页" : "资料库")}
                   style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 9999, background: "#F3F4F6", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13.5, fontWeight: 700, color: "#111827" }}
                   title={`返回${workspaceMode === "sprint" ? "考前冲刺" : "学习"}模式`}
                 >
@@ -12344,20 +12356,16 @@ export default function App() {
               <UserAvatarMenu profile={profile} />
             </header>
 
-            {/* Workspace area —— 错题本作为全屏 overlay，不改变 workspaceMode */}
-            {page === "错题本" ? (
+            {/* Workspace area —— 全屏页作为 overlay，不改变 workspaceMode */}
+            {isFullscreenPage ? (
               <motion.div
-                key="wrong-overlay"
+                key={`fullscreen-overlay-${page}`}
                 style={{ flex: 1, overflowY: "auto", background: "#FAFAFC" }}
                 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.2 }}
               >
-                <div style={{ padding: "20px 0" }}>
-                  <WrongPage
-                    setPage={handleSetPage}
-                    sessionAnswers={sessionAnswers}
-                    setChapterFilter={setChapterFilter}
-                  />
+                <div style={{ padding: "20px 32px" }}>
+                  {renderPage()}
                 </div>
               </motion.div>
             ) : (
