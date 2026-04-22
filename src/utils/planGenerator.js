@@ -14,6 +14,8 @@ import { getDueWrongItems } from "./wrongItems";
 
 const DAY = 24 * 60 * 60 * 1000;
 
+// 本地时区 YYYY-MM-DD。不能用 toISOString().slice(0,10)：
+// 在非 UTC 时区午夜前后会把 23:59 的结果算到"昨天"或"明天"，任务会飘。
 function dayKey(date) {
   const d = new Date(date);
   const y = d.getFullYear();
@@ -59,15 +61,22 @@ export function generateDailyPlans({ examDate, chaptersInScope, dailyMinutesTarg
     const isPast = remainingDays < 0;
     const phase = isExamDay ? "exam_day" : isPast ? "past" : resolvePhase(remainingDays);
 
+    let tasks = [];
+    let dropped = 0;
+    if (isExamDay) {
+      tasks = [{ id: `exam_${key}`, type: "exam", title: "🎓 考试日！加油！", subtitle: "相信自己，沉着作答", priority: "high", target_minutes: 0, completed: false }];
+    } else if (!isPast) {
+      const out = generateDayTasks({ date: key, phase, remainingDays, chaptersInScope, targetMinutes: dailyMinutesTarget, dayOffset: offset });
+      tasks = out.tasks;
+      dropped = out.dropped;
+    }
     plans[key] = {
       date: key,
       phase,
       remainingDays: exam ? remainingDays : null,
-      tasks: isExamDay
-        ? [{ id: `exam_${key}`, type: "exam", title: "🎓 考试日！加油！", subtitle: "相信自己，沉着作答", priority: "high", target_minutes: 0, completed: false }]
-        : isPast
-        ? []
-        : generateDayTasks({ date: key, phase, remainingDays, chaptersInScope, targetMinutes: dailyMinutesTarget, dayOffset: offset }),
+      tasks,
+      dropped_count: dropped,
+      backlog: [],       // 由 rolloverIncompleteTasks 写入
       summary: null,
     };
     plans[key].summary = computeSummary(plans[key]);
@@ -155,8 +164,8 @@ function generateDayTasks({ date, phase, remainingDays, chaptersInScope, targetM
     });
   }
 
-  // —— 按硬上限裁尾：按优先级排序后累加时长到上限 ——
-  return enforceDailyCap(tasks, targetMinutes);
+  // —— 按硬上限裁尾：优先级 + SM2 最高优 + chapter_practice 超时可缩减题数 ——
+  return enforceTimeBudget(tasks, targetMinutes); // { tasks, dropped }
 }
 
 function pickWeakChapters(chaptersInScope) {
@@ -181,21 +190,61 @@ function rotateChaptersForDay(weakChapters, dayOffset, slots) {
   return out;
 }
 
-// 按优先级裁任务到每日硬上限
-function enforceDailyCap(tasks, cap) {
-  if (!cap || cap <= 0) return tasks;
-  const sorted = [...tasks].sort((a, b) => priorityWeight(b.priority) - priorityWeight(a.priority));
-  const kept = [];
-  let acc = 0;
+// 按预算砍尾：
+//   · SM2 到期任务永远最高优（不砍、不缩）
+//   · 按 priority 降序累加
+//   · 超预算时尝试缩减 chapter_practice 的题数（每题 3 分钟）而不是整个丢
+//   · 其他类型超预算直接丢弃
+// 返回 { tasks, dropped }，tasks 保持原对象顺序（UI 稳定）
+export function enforceTimeBudget(tasks, budgetMinutes) {
+  if (!budgetMinutes || budgetMinutes <= 0) return { tasks: [...tasks], dropped: 0 };
+  const sorted = [...tasks].sort((a, b) => {
+    if (a.type === "sm2_due" && b.type !== "sm2_due") return -1;
+    if (b.type === "sm2_due" && a.type !== "sm2_due") return 1;
+    return priorityWeight(b.priority) - priorityWeight(a.priority);
+  });
+
+  const keptById = new Map();
+  let used = 0;
+  let dropped = 0;
+
   for (const t of sorted) {
     const mins = t.target_minutes || 0;
-    if (acc + mins <= cap * 1.2) { // 允许超 20%（避免过分严格）
-      kept.push(t);
-      acc += mins;
+    if (t.type === "sm2_due") {
+      keptById.set(t.id, t); used += mins; continue; // 永远保留
     }
+    if (used + mins <= budgetMinutes) {
+      keptById.set(t.id, t); used += mins; continue;
+    }
+    // 超预算：尝试缩减 chapter_practice 题数
+    if (t.type === "chapter_practice") {
+      const remain = budgetMinutes - used;
+      if (remain >= 6) {
+        const reducedCount = Math.floor(remain / 3);
+        if (reducedCount >= 2) {
+          keptById.set(t.id, {
+            ...t,
+            target_count: reducedCount,
+            target_minutes: reducedCount * 3,
+            title: t.title.replace(/\d+/, reducedCount),
+            _budget_adjusted: true,
+          });
+          used = budgetMinutes;
+          continue;
+        }
+      }
+    }
+    dropped += 1;
   }
-  // 恢复原顺序
-  return tasks.filter((t) => kept.includes(t));
+
+  // 保持原顺序（UI 稳定）
+  const resultTasks = tasks.filter((t) => keptById.has(t.id)).map((t) => keptById.get(t.id));
+  return { tasks: resultTasks, dropped };
+}
+
+// 便捷包装：返回纯 tasks 数组（已废弃 _dropped_count 的调用方用这个）
+export function enforceDailyCap(tasks, budgetMinutes) {
+  return enforceTimeBudget(tasks, budgetMinutes).tasks;
 }
 
 export function priorityWeight(p) {
@@ -239,47 +288,116 @@ export function markTaskUncompleted(dateKey, taskId) {
 }
 
 /**
- * 未完成顺延策略：
- *   · 只自动顺延 priority: high + type: sm2_due 的任务（不滚雪球）
- *   · 其他未完成任务保持在昨天，今日 UI 显示"积压"提示让用户自己决定
- * 每次用户打开今日计划时调用即可。
+ * 顺延策略（决策 4）：
+ *   · sm2_due 类型 + priority: high 的任务 → 自动顺延到今日任务列表（加 [昨日] 前缀）
+ *   · 其他未完成任务 → 写入 today.backlog，由 UI banner 展示，用户自己决定"添加到今日"或"跳过"
+ * 返回 { auto_rolled, backlog }
  */
 export function rolloverIncompleteTasks(now = new Date()) {
   const plan = storage.get("exam_plan", null);
-  if (!plan || !plan.daily_plans) return;
+  if (!plan || !plan.daily_plans) return { auto_rolled: 0, backlog: [] };
 
   const today = dayKey(now);
   const yesterday = dayKey(new Date(now.getTime() - DAY));
   const yd = plan.daily_plans[yesterday];
   const td = plan.daily_plans[today];
-  if (!yd || !td) return;
+  if (!yd || !td) return { auto_rolled: 0, backlog: [] };
 
-  const highPrioIncomplete = (yd.tasks || []).filter((t) =>
-    !t.completed && (t.priority === "high" || t.type === "sm2_due") && !String(t.id).endsWith("_rollover")
-  );
-  if (highPrioIncomplete.length === 0) return;
+  const incomplete = (yd.tasks || []).filter((t) => !t.completed && !String(t.id).endsWith("_r"));
+  if (incomplete.length === 0) return { auto_rolled: 0, backlog: td.backlog || [] };
 
-  const todayIds = new Set((td.tasks || []).map((t) => t.id));
-  const toRoll = highPrioIncomplete
-    .filter((t) => !todayIds.has(`${t.id}_rollover`))
-    .map((t) => ({ ...t, id: `${t.id}_rollover`, title: `[昨日未完成] ${t.title}`, completed: false, completed_at: null }));
-  if (toRoll.length === 0) return;
+  // 分类：sm2_due / priority:high 自动顺延，其余入 backlog
+  const autoRoll = incomplete.filter((t) => t.type === "sm2_due" || t.priority === "high");
+  const backlog = incomplete.filter((t) => t.type !== "sm2_due" && t.priority !== "high").map((t) => ({
+    id: t.id,
+    title: t.title,
+    type: t.type,
+    chapter: t.chapter || null,
+    from_date: yesterday,
+    target_minutes: t.target_minutes || 0,
+    priority: t.priority || "normal",
+  }));
 
-  const newToday = { ...td, tasks: [...toRoll, ...(td.tasks || [])] };
+  const existingIds = new Set((td.tasks || []).map((tt) => tt.id));
+  const toRoll = autoRoll
+    .filter((t) => !existingIds.has(`${t.id}_r`))
+    .map((t) => ({ ...t, id: `${t.id}_r`, title: `[昨日] ${t.title}`, completed: false, completed_at: null, _rolled_from: yesterday }));
+
+  const cap = plan.daily_minutes_target || 60;
+  const mergedTasks = [...toRoll, ...(td.tasks || [])];
+  // 顺延后再裁一次预算（避免超时）
+  const { tasks: finalTasks, dropped } = enforceTimeBudget(mergedTasks, cap);
+
+  const newToday = { ...td, tasks: finalTasks, backlog, dropped_count: (td.dropped_count || 0) + dropped };
   newToday.summary = computeSummary(newToday);
   storage.set("exam_plan", { ...plan, daily_plans: { ...plan.daily_plans, [today]: newToday } });
+
+  return { auto_rolled: toRoll.length, backlog };
 }
 
 /**
- * 计算积压：昨天未完成的非 high 优先任务数（今日 UI 显示提示）
+ * 把 backlog 里的任务加入今日任务列表（用户点"添加到今日"时）
+ * 返回添加的任务数
+ */
+export function importBacklogToToday(now = new Date()) {
+  const plan = storage.get("exam_plan", null);
+  if (!plan || !plan.daily_plans) return 0;
+  const today = dayKey(now);
+  const td = plan.daily_plans[today];
+  if (!td || !(td.backlog || []).length) return 0;
+
+  const existingIds = new Set((td.tasks || []).map((t) => t.id));
+  const backlogAsTasks = td.backlog
+    .filter((b) => !existingIds.has(`${b.id}_imported`))
+    .map((b) => ({
+      id: `${b.id}_imported`,
+      type: b.type,
+      title: `[补做] ${b.title}`,
+      chapter: b.chapter,
+      target_minutes: b.target_minutes,
+      target_count: Math.max(1, Math.round((b.target_minutes || 6) / 3)),
+      priority: "normal",
+      completed: false,
+    }));
+  if (backlogAsTasks.length === 0) return 0;
+
+  const cap = plan.daily_minutes_target || 60;
+  const { tasks: finalTasks, dropped } = enforceTimeBudget([...(td.tasks || []), ...backlogAsTasks], cap);
+  const newToday = { ...td, tasks: finalTasks, backlog: [], dropped_count: (td.dropped_count || 0) + dropped };
+  newToday.summary = computeSummary(newToday);
+  storage.set("exam_plan", { ...plan, daily_plans: { ...plan.daily_plans, [today]: newToday } });
+  return backlogAsTasks.length;
+}
+
+/**
+ * 用户选择"跳过"积压：清空 today.backlog
+ */
+export function dismissBacklog(now = new Date()) {
+  const plan = storage.get("exam_plan", null);
+  if (!plan || !plan.daily_plans) return;
+  const today = dayKey(now);
+  const td = plan.daily_plans[today];
+  if (!td) return;
+  storage.set("exam_plan", { ...plan, daily_plans: { ...plan.daily_plans, [today]: { ...td, backlog: [] } } });
+}
+
+/**
+ * 计算积压任务数（从 today.backlog 读，不再扫昨天）
  */
 export function countBacklog(now = new Date()) {
   const plan = storage.get("exam_plan", null);
   if (!plan || !plan.daily_plans) return 0;
-  const yesterday = dayKey(new Date(now.getTime() - DAY));
-  const yd = plan.daily_plans[yesterday];
-  if (!yd) return 0;
-  return (yd.tasks || []).filter((t) => !t.completed && t.priority !== "high" && t.type !== "sm2_due").length;
+  const today = dayKey(now);
+  const td = plan.daily_plans[today];
+  return td && Array.isArray(td.backlog) ? td.backlog.length : 0;
+}
+
+export function getTodayBacklog(now = new Date()) {
+  const plan = storage.get("exam_plan", null);
+  if (!plan || !plan.daily_plans) return [];
+  const today = dayKey(now);
+  const td = plan.daily_plans[today];
+  return (td && td.backlog) || [];
 }
 
 export { dayKey };

@@ -15,7 +15,7 @@ import { resolveDialogueMode, deriveQuizState, DIALOGUE_MODE_LABELS } from "./ut
 import { recordWrongAnswer, recordCorrectAnswer, getWrongItems as getWrongItemsFromStore, getDueWrongItems, markMastered, suspendItem, tagWrongItem, incrementVariantsGenerated, ERROR_TAGS, getChapterMistakeStats } from "./utils/wrongItems";
 import { storage } from "./utils/storage";
 import { getUserChapters } from "./utils/chapters";
-import { generateDailyPlans, dayKey as planDayKey, markTaskCompleted, rolloverIncompleteTasks, countBacklog, priorityWeight } from "./utils/planGenerator";
+import { generateDailyPlans, dayKey as planDayKey, markTaskCompleted, rolloverIncompleteTasks, importBacklogToToday, dismissBacklog, getTodayBacklog, priorityWeight } from "./utils/planGenerator";
 import "katex/dist/katex.min.css";
 
 // Inject global CSS animations
@@ -6586,38 +6586,29 @@ function ProgressRing({ progress }) {
   );
 }
 
-// —— 今日任务视图：从 exam_plan 读取 today，支持"开始/完成" ——
+// —— 今日任务视图：顺延 + 积压 banner + 开始/完成 ——
 function TodayPlanView({ setPage, setChapterFilter }) {
   const [plan, setPlan] = useState(() => storage.get("exam_plan", null));
-  const [tick, setTick] = useState(0); // 强制刷新
+  const [rolledInfo, setRolledInfo] = useState({ auto_rolled: 0, backlog: [] });
+  const [backlogDismissed, setBacklogDismissed] = useState(false);
   const today = planDayKey(new Date());
   const dayPlan = plan && plan.daily_plans && plan.daily_plans[today];
 
-  // 首次挂载顺延昨天未完成的 P0
+  // 挂载时跑顺延
   useEffect(() => {
-    rolloverIncompleteTasks();
+    const info = rolloverIncompleteTasks();
+    setRolledInfo(info);
     setPlan(storage.get("exam_plan", null));
   }, []);
 
-  const backlog = useMemo(() => countBacklog(), [tick]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (!dayPlan) return null;
-  const tasks = dayPlan.tasks || [];
-  const done = tasks.filter((t) => t.completed).length;
-  const total = tasks.length;
-
   function refreshPlan() {
     setPlan(storage.get("exam_plan", null));
-    setTick((v) => v + 1);
   }
-
   function handleComplete(task) {
     markTaskCompleted(today, task.id, { attempted: task.target_count || 0, correct: task.target_count || 0 });
     refreshPlan();
   }
-
   function handleStart(task) {
-    // 不同类型 → 不同入口
     if (task.type === "sm2_due" || task.type === "chapter_practice" || task.type === "mock_exam" || task.type === "light_review") {
       if (task.chapter && setChapterFilter) setChapterFilter([task.chapter]);
       if (setPage) setPage("题库练习");
@@ -6625,17 +6616,47 @@ function TodayPlanView({ setPage, setChapterFilter }) {
       if (setPage) setPage("资料对话");
     }
   }
+  function handleImportBacklog() {
+    const n = importBacklogToToday();
+    if (n > 0) refreshPlan();
+    setBacklogDismissed(true);
+  }
+  function handleDismissBacklog() {
+    dismissBacklog();
+    setBacklogDismissed(true);
+    refreshPlan();
+  }
+
+  if (!dayPlan) return null;
+  const tasks = dayPlan.tasks || [];
+  const done = tasks.filter((t) => t.completed).length;
+  const total = tasks.length;
+  const totalMinutes = tasks.reduce((s, t) => s + (t.target_minutes || 0), 0);
+  const budget = (plan && plan.daily_minutes_target) || 60;
+  const backlog = !backlogDismissed ? (dayPlan.backlog || []) : [];
+  const droppedCount = dayPlan.dropped_count || 0;
 
   return (
     <div style={{ marginTop: 14, background: "linear-gradient(135deg,#F9FAFB,#FFFFFF)", border: "1px solid #E5E7EB", borderRadius: 14, padding: "14px 16px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <div style={{ fontSize: 14, fontWeight: 700 }}>📋 今日任务 · {done}/{total} 完成</div>
-        {backlog > 0 && (
-          <div style={{ fontSize: 11.5, color: "#B45309", background: "#FFFBEB", border: "1px solid #FCD34D", padding: "3px 8px", borderRadius: 8 }}>
-            📌 昨日还有 {backlog} 个低优任务未完成
-          </div>
+      {/* 积压 banner —— 决策 4 的关键 UI */}
+      <BacklogBanner backlog={backlog} onImport={handleImportBacklog} onDismiss={handleDismissBacklog} />
+
+      {rolledInfo.auto_rolled > 0 && (
+        <div style={{ fontSize: 11.5, color: G.tealDark, marginBottom: 8, padding: "4px 8px", background: G.tealLight, borderRadius: 6, display: "inline-block" }}>
+          ✓ 已自动顺延 {rolledInfo.auto_rolled} 个高优/SM2 任务
+        </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>📋 今日任务 · {done}/{total} 完成 <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 500, marginLeft: 6 }}>约 {totalMinutes}/{budget} 分钟</span></div>
+        {droppedCount > 0 && (
+          <span title={`按你设的 ${budget} 分钟上限，省略了 ${droppedCount} 个低优任务。可在设置中放宽上限。`}
+            style={{ fontSize: 11, color: "#6B7280", background: "#F3F4F6", padding: "3px 8px", borderRadius: 8, cursor: "help" }}>
+            ℹ️ 已精简 {droppedCount} 项
+          </span>
         )}
       </div>
+
       {total === 0 ? (
         <div style={{ fontSize: 13, color: "#888", padding: "12px 0", textAlign: "center" }}>今日暂无任务（考试日 / 范围为空）</div>
       ) : total === done ? (
@@ -6649,6 +6670,25 @@ function TodayPlanView({ setPage, setChapterFilter }) {
           }
         </div>
       )}
+    </div>
+  );
+}
+
+// —— 昨日低优积压 banner ——
+function BacklogBanner({ backlog, onImport, onDismiss }) {
+  if (!backlog || backlog.length === 0) return null;
+  const totalMinutes = backlog.reduce((s, t) => s + (t.target_minutes || 0), 0);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, background: "#FFFBEB", border: "1px solid #FCD34D", borderRadius: 10, padding: "10px 14px", marginBottom: 10 }}>
+      <div style={{ fontSize: 22, flexShrink: 0 }}>📌</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#92400E" }}>有 {backlog.length} 个昨日未完成任务（约 {totalMinutes} 分钟）</div>
+        <div style={{ fontSize: 11.5, color: "#B45309", marginTop: 2 }}>高优任务和 SM2 复习已自动顺延；其余由你决定</div>
+      </div>
+      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+        <button onClick={onImport} style={{ padding: "6px 14px", background: "#F59E0B", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>添加到今日</button>
+        <button onClick={onDismiss} style={{ padding: "6px 14px", background: "#fff", color: "#92400E", border: "1px solid #FCD34D", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 600, fontFamily: "inherit" }}>跳过</button>
+      </div>
     </div>
   );
 }
@@ -7559,14 +7599,14 @@ function WrongItemRow({ item, question, selected, onToggleSelect, onMarkMastered
         <div style={{ fontSize: 14.5, color: "#111", marginBottom: 4, lineHeight: 1.6, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{question.question}</div>
         <div style={{ fontSize: 12.5, color: G.tealDark, marginBottom: 8 }}>✓ 正确答案：{question.answer}</div>
 
-        <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#888", marginBottom: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 12, fontSize: 12, color: "#888", marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
           <span>📅 {daysSinceFirstWrong === 0 ? "今天首次做错" : `${daysSinceFirstWrong} 天前首次做错`}</span>
           <span>🔁 {correctCount}/{attemptCount} 正确</span>
           {item.variants_generated > 0 && <span>🤖 已生成 {item.variants_generated} 道变式</span>}
-          <span>SM2: ease {item.sm2.ease_factor.toFixed(2)} · 间隔 {item.sm2.interval_days}天</span>
+          <SM2Progress sm2={item.sm2} status={item.status} />
         </div>
 
-        <ErrorTagPicker value={item.error_tags || []} onChange={onTagsChange} />
+        <ErrorCauseSection item={item} question={question} onTagsChange={onTagsChange} />
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0, position: "relative" }}>
@@ -7582,6 +7622,119 @@ function WrongItemRow({ item, question, selected, onToggleSelect, onMarkMastered
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// —— SM2 掌握度进度（连对 N/3 + 到期倒计时 + tooltip 解释阈值） ——
+function SM2Progress({ sm2, status }) {
+  if (status === "mastered") {
+    return <span style={{ fontSize: 11.5, fontWeight: 700, background: G.tealLight, color: G.tealDark, padding: "2px 8px", borderRadius: 999 }}>✓ 已掌握</span>;
+  }
+  const reps = Math.min(sm2.repetitions || 0, 3);
+  const pct = reps / 3;
+  const days = Math.ceil(((sm2.due_at || 0) - Date.now()) / 86400000);
+  const intervalDays = sm2.interval_days || 1;
+  const nearMastered = reps >= 3 && intervalDays < 14;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "#555" }}
+          title={`掌握规则：连对 3 次且间隔 ≥ 14 天时自动移出错题本\n当前：连对 ${reps}/3 · 间隔 ${intervalDays} 天${nearMastered ? "（再等几次间隔拉长就会变已掌握）" : ""}`}>
+      <span style={{ fontWeight: 700 }}>连对 {reps}/3</span>
+      <span style={{ display: "inline-block", width: 40, height: 5, background: "#E5E7EB", borderRadius: 999, overflow: "hidden" }}>
+        <span style={{ display: "block", width: `${pct * 100}%`, height: "100%", background: reps >= 3 ? G.teal : G.blue, transition: "width .3s" }} />
+      </span>
+      <span style={{ color: days <= 0 ? "#B45309" : "#888" }}>{days <= 0 ? "今日到期" : `${days} 天后`}</span>
+    </span>
+  );
+}
+
+// —— 错因分析区：被动 AI + 主动手标 ——
+//   · 无标签时：展示"让 AI 猜一下"按钮 + 手标入口并存
+//   · AI 猜完：3 个动作（采纳 / 采纳并微调 / 不对，自己标）
+//   · 已标：直接展示可编辑的 ErrorTagPicker
+function ErrorCauseSection({ item, question, onTagsChange }) {
+  const [aiSuggestion, setAiSuggestion] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState(null);
+  const hasUserTags = (item.error_tags || []).length > 0;
+  const hasAi = aiSuggestion !== null;
+
+  async function askAI() {
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const lastAttempt = (item.attempts || []).filter((a) => !a.correct).slice(-1)[0];
+      const aiCfg = getAIConfig();
+      const resp = await fetch("/api/analyze-error", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question_stem: question.question,
+          options: question.options,
+          correct_answer: question.answer,
+          user_answer: lastAttempt?.user_answer || "",
+          chapter: item.chapter_label || item.chapter,
+          userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+        }),
+      });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      setAiSuggestion(data);
+    } catch (e) {
+      setAiError(e.message || "未知错误");
+    }
+    setAiLoading(false);
+  }
+
+  const tagLabel = (id) => (ERROR_TAGS.find((t) => t.id === id) || { label: id === "unknown" ? "未分类" : id }).label;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <span style={{ fontSize: 11.5, color: "#6B7280", fontWeight: 600 }}>错因标记</span>
+        {!hasUserTags && !hasAi && (
+          <button onClick={askAI} disabled={aiLoading}
+            style={{ fontSize: 11.5, padding: "3px 10px", background: aiLoading ? "#F3F4F6" : "#EEF2FF", color: aiLoading ? "#9CA3AF" : G.blue, border: "1px solid " + (aiLoading ? "#E5E7EB" : "#C7D2FE"), borderRadius: 999, cursor: aiLoading ? "wait" : "pointer", fontFamily: "inherit", fontWeight: 700 }}>
+            {aiLoading ? "分析中…" : "🤖 让 AI 猜一下"}
+          </button>
+        )}
+      </div>
+
+      {hasAi && (
+        <div style={{ background: "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: G.blue }}>🤖 AI 分析</span>
+            <button onClick={() => setAiSuggestion(null)} style={{ fontSize: 13, background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF" }} title="关闭">✕</button>
+          </div>
+          {aiSuggestion.reasoning && (
+            <div style={{ fontSize: 12.5, color: "#374151", marginBottom: 8, lineHeight: 1.5 }}>{aiSuggestion.reasoning}</div>
+          )}
+          <div style={{ fontSize: 12, color: "#4B5563", marginBottom: 8 }}>
+            建议标记：
+            {(aiSuggestion.tags || []).map((t) => (
+              <span key={t} style={{ marginLeft: 6, padding: "1px 8px", background: "#fff", color: G.blue, borderRadius: 999, fontSize: 11.5, fontWeight: 700, border: "1px solid #C7D2FE" }}>{tagLabel(t)}</span>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => { onTagsChange(aiSuggestion.tags); setAiSuggestion(null); }}
+              style={{ padding: "5px 12px", background: G.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>采纳</button>
+            <button onClick={() => { onTagsChange(aiSuggestion.tags); setAiSuggestion(null); }}
+              style={{ padding: "5px 12px", background: "#fff", color: G.blue, border: "1px solid " + G.blue, borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>采纳并微调</button>
+            <button onClick={() => setAiSuggestion(null)}
+              style={{ padding: "5px 12px", background: "transparent", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>不对，自己标</button>
+          </div>
+        </div>
+      )}
+
+      {aiError && (
+        <div style={{ fontSize: 11.5, color: G.red, marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+          AI 分析失败：{aiError}
+          <button onClick={askAI} style={{ padding: "2px 8px", background: G.redLight, color: G.red, border: "1px solid " + G.red + "44", borderRadius: 6, cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>重试</button>
+        </div>
+      )}
+
+      {/* 始终展示标签选择器：未标时点选即可，已标后用于调整 */}
+      <ErrorTagPicker value={item.error_tags || []} onChange={onTagsChange} />
     </div>
   );
 }
