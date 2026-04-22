@@ -6348,6 +6348,8 @@ function ExamPlanSection({ weak, setPage, setChapterFilter }) {
     const n = raw ? parseInt(raw, 10) : 60;
     return isNaN(n) ? 60 : n;
   });
+  const [selectedDayKey, setSelectedDayKey] = useState(null);
+  const [drawerTick, setDrawerTick] = useState(0);
   // 真实章节池 —— 从题库 + 错题本聚合（薄弱度已按错题数排序）
   const availableChapters = useMemo(() => getUserChapters(ALL_QUESTIONS), []);
   // 后备：题库全空时给个最小骨架（不应该发生，但防御一下）
@@ -6406,7 +6408,8 @@ function ExamPlanSection({ weak, setPage, setChapterFilter }) {
     setShowForm(false);
   };
 
-  // 从持久化 plan 读取日历数据（上面 useEffect 里刚写入）
+  // 从持久化 plan 读取日历数据（上面 useEffect 里刚写入；drawerTick 变化会触发重读）
+  void drawerTick;
   const examPlan = storage.get("exam_plan", null);
   const planLen = daysLeft !== null && daysLeft > 7 ? Math.min(daysLeft + 1, 14) : 7;
   const dayNames = ["日","一","二","三","四","五","六"];
@@ -6497,16 +6500,43 @@ function ExamPlanSection({ weak, setPage, setChapterFilter }) {
         </div>
       )}
 
-      <div style={{ overflowX: "auto", margin: "0 -4px", paddingBottom: 4 }}>
-        <div style={{ display: "flex", gap: 8, minWidth: calendarDays.length * 132 + "px" }}>
-          {calendarDays.map((d, di) => (
-            <CalendarDayCell key={di} day={d} isToday={di === 0} />
-          ))}
+      {!examDate && !showForm ? (
+        // 没设考试日期 + 表单收起：显眼 CTA 空态卡
+        <div style={{ background: "linear-gradient(135deg,#EEF2FF,#F0F9FF)", border: "2px dashed " + G.blue + "66", borderRadius: 14, padding: "28px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 40, marginBottom: 6 }}>🎯</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#111", marginBottom: 4 }}>还没有考试计划</div>
+          <div style={{ fontSize: 12.5, color: "#6B7280", marginBottom: 16 }}>告诉系统考试哪天，选几个要复习的章节，每天学多久，就能看到个性化的复习计划</div>
+          <button onClick={() => setShowForm(true)} style={{ padding: "10px 22px", background: G.blue, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 12px rgba(79,70,229,0.3)" }}>⚙️ 设置考试日期</button>
         </div>
-      </div>
+      ) : (
+        <div style={{ overflowX: "auto", margin: "0 -4px", paddingBottom: 4 }}>
+          <div style={{ display: "flex", gap: 8, minWidth: calendarDays.length * 132 + "px" }}>
+            {calendarDays.map((d, di) => (
+              <CalendarDayCell key={di} day={d} isToday={di === 0}
+                isSelected={selectedDayKey === d.dayKey}
+                onClick={() => setSelectedDayKey(d.dayKey)} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 今日任务列表（实时） */}
       {examDate && <TodayPlanView setPage={setPage} setChapterFilter={setChapterFilter} />}
+
+      {/* 日详情抽屉：点击日历任一日期打开 */}
+      {selectedDayKey && (
+        <DayDetailDrawer
+          dayKey={selectedDayKey}
+          examPlan={examPlan}
+          onClose={() => setSelectedDayKey(null)}
+          onRefresh={() => setDrawerTick((v) => v + 1)}
+          onStartTask={(task) => {
+            if (task.type === "concept_study") { setPage && setPage("资料对话"); }
+            else { if (task.chapter && setChapterFilter) setChapterFilter([task.chapter]); setPage && setPage("题库练习"); }
+            setSelectedDayKey(null);
+          }}
+        />
+      )}
 
       <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontSize: 12, color: "#aaa" }}>
@@ -6524,7 +6554,7 @@ function ExamPlanSection({ weak, setPage, setChapterFilter }) {
 }
 
 // —— 日历格子：进度环 + 任务数 + phase 徽章 ——
-function CalendarDayCell({ day, isToday }) {
+function CalendarDayCell({ day, isToday, isSelected, onClick }) {
   const { date, dayName, dLeft, isExamDay, isPast, phase, summary, progress, bg, border } = day;
   const tasks = (day.dayPlan && day.dayPlan.tasks) || [];
   const totalTasks = summary ? summary.total_tasks : 0;
@@ -6535,8 +6565,23 @@ function CalendarDayCell({ day, isToday }) {
     normal:   { label: "常规", color: G.teal },
     light:    { label: "铺垫", color: "#14B8A6" },
   }[phase];
+  const clickable = true;
+  const outline = isSelected ? `3px solid ${G.blue}` : "2px solid " + border;
   return (
-    <div style={{ background: bg, border: "2px solid " + border, borderRadius: 16, padding: "12px 8px", textAlign: "center", opacity: isPast ? 0.45 : 1, minWidth: 120, flex: "0 0 auto", position: "relative" }}>
+    <div role="button" tabIndex={0}
+      onClick={clickable ? onClick : undefined}
+      onKeyDown={(e) => { if (clickable && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onClick && onClick(); } }}
+      aria-label={`${date.getMonth() + 1}月${date.getDate()}日${totalTasks ? `, ${doneTasks}/${totalTasks} 任务` : ""}${isExamDay ? ", 考试日" : ""}`}
+      style={{
+        background: bg, border: outline, outlineOffset: isSelected ? -1 : 0,
+        borderRadius: 16, padding: "12px 8px", textAlign: "center",
+        opacity: isPast ? 0.5 : 1, minWidth: 120, flex: "0 0 auto",
+        position: "relative", cursor: clickable ? "pointer" : "default",
+        transition: "transform .15s, box-shadow .15s",
+        boxShadow: isSelected ? "0 4px 14px rgba(79,70,229,0.25)" : "0 1px 0 rgba(0,0,0,0.03)",
+      }}
+      onMouseEnter={(e) => { if (clickable) e.currentTarget.style.transform = "translateY(-2px)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.transform = "translateY(0)"; }}>
       <div style={{ fontSize: 11, color: "#999", fontWeight: 600, marginBottom: 3, letterSpacing: "0.05em" }}>{"周" + dayName}</div>
       <div style={{ fontSize: 22, fontWeight: 800, color: isExamDay ? "#92400e" : isToday ? G.teal : "#222", lineHeight: 1, marginBottom: 4 }}>
         {date.getDate()}
@@ -6568,6 +6613,189 @@ function CalendarDayCell({ day, isToday }) {
       {tasks.length > 2 && <div style={{ fontSize: 10, color: "#aaa", marginTop: 3 }}>+{tasks.length - 2}</div>}
     </div>
   );
+}
+
+// —— 点击日历后弹出的当日详情抽屉 ——
+//   · dayKey: "YYYY-MM-DD"
+//   · 未来日：展示计划但不能点"开始"（还没到）
+//   · 今天：正常可点
+//   · 过去：只读
+function DayDetailDrawer({ dayKey, examPlan, onClose, onRefresh, onStartTask }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const todayKey = planDayKey(new Date());
+  const isToday = dayKey === todayKey;
+  const isPast = dayKey < todayKey;
+  const isFuture = dayKey > todayKey;
+  const isExamDay = examPlan && examPlan.exam_date === dayKey;
+  const dayPlan = examPlan && examPlan.daily_plans && examPlan.daily_plans[dayKey];
+
+  const date = new Date(dayKey + "T00:00:00");
+  const weekday = ["日","一","二","三","四","五","六"][date.getDay()];
+  const daysFromToday = Math.round((date - new Date(todayKey + "T00:00:00")) / 86400000);
+
+  const phaseMeta = {
+    light:  { label: "铺垫期", desc: "打基础，不用太紧张", color: "#14B8A6", bg: G.tealLight },
+    normal: { label: "常规期", desc: "按部就班推进",       color: G.teal,    bg: G.tealLight },
+    high:   { label: "强化期", desc: "进入高强度练习",     color: G.blue,    bg: G.blueLight },
+    sprint: { label: "冲刺期", desc: "错题 + 模拟为主",    color: "#DC2626", bg: "#FEE2E2" },
+  };
+
+  function handleTaskComplete(task) {
+    markTaskCompleted(dayKey, task.id, { attempted: task.target_count || 0, correct: task.target_count || 0 });
+    onRefresh && onRefresh();
+  }
+
+  return (
+    <>
+      {/* backdrop */}
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 1040, animation: "mcFadeIn .15s" }} />
+      {/* drawer */}
+      <aside role="dialog" aria-label="当日计划详情"
+        style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: "min(460px, 100vw)", background: "#fff", boxShadow: "-6px 0 24px rgba(0,0,0,0.12)", zIndex: 1041, display: "flex", flexDirection: "column", animation: "mcSlideInRight .22s ease-out" }}>
+        <header style={{ padding: "18px 20px", borderBottom: "1px solid #E5E7EB", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#111" }}>{date.getMonth() + 1} 月 {date.getDate()} 日 · 周{weekday}</div>
+            <div style={{ fontSize: 12.5, color: "#6B7280", marginTop: 3 }}>
+              {isToday && <span style={{ color: G.blue, fontWeight: 700 }}>今天</span>}
+              {isPast && `已过 ${Math.abs(daysFromToday)} 天`}
+              {isFuture && `${daysFromToday} 天后`}
+              {isExamDay && <span style={{ marginLeft: 8, color: "#92400E", fontWeight: 700 }}>🎓 考试日</span>}
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="关闭"
+            style={{ fontSize: 18, background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", padding: 4, lineHeight: 1 }}>✕</button>
+        </header>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "18px 20px" }}>
+          {isExamDay ? (
+            <div style={{ textAlign: "center", padding: "40px 10px" }}>
+              <div style={{ fontSize: 48, marginBottom: 10 }}>🎓</div>
+              <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>考试日</div>
+              <div style={{ fontSize: 13, color: "#6B7280" }}>今天不安排复习任务，祝你考试顺利！</div>
+            </div>
+          ) : !dayPlan ? (
+            <div style={{ textAlign: "center", padding: "40px 10px" }}>
+              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.6 }}>📅</div>
+              <div style={{ fontSize: 13, color: "#6B7280" }}>
+                {isPast ? "这一天没有计划任务" : isFuture ? "这一天的任务会在接近时生成" : "暂无任务"}
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* 阶段 + 进度 */}
+              {(() => {
+                const ph = phaseMeta[dayPlan.phase] || phaseMeta.normal;
+                const total = dayPlan.tasks.length;
+                const done = dayPlan.tasks.filter((t) => t.completed).length;
+                const totalMin = dayPlan.tasks.reduce((s, t) => s + (t.target_minutes || 0), 0);
+                const doneMin = dayPlan.tasks.filter((t) => t.completed).reduce((s, t) => s + (t.target_minutes || 0), 0);
+                return (
+                  <section style={{ marginBottom: 18 }}>
+                    <div style={{ display: "inline-block", padding: "3px 10px", background: ph.bg, color: ph.color, borderRadius: 999, fontSize: 11.5, fontWeight: 700, marginBottom: 6 }}>{ph.label}</div>
+                    <div style={{ fontSize: 12.5, color: "#6B7280", marginBottom: 10 }}>{ph.desc}</div>
+                    <div style={{ height: 8, background: "#F3F4F6", borderRadius: 999, overflow: "hidden", marginBottom: 6 }}>
+                      <div style={{ height: "100%", width: total > 0 ? `${(done / total) * 100}%` : "0%", background: `linear-gradient(90deg, ${ph.color}, ${ph.color}dd)`, transition: "width .3s" }} />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#6B7280" }}>
+                      <span>{done}/{total} 任务</span>
+                      <span>{doneMin}/{totalMin} 分钟</span>
+                    </div>
+                  </section>
+                );
+              })()}
+
+              {/* 任务列表 */}
+              <section>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#6B7280", marginBottom: 8, letterSpacing: "0.05em" }}>任务列表</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {dayPlan.tasks.map((task) => (
+                    <DrawerTaskItem key={task.id} task={task} isToday={isToday} isPast={isPast}
+                      onStart={() => onStartTask(task)} onComplete={() => handleTaskComplete(task)} />
+                  ))}
+                </div>
+              </section>
+
+              {/* 精简提示 */}
+              {dayPlan.dropped_count > 0 && (
+                <section style={{ marginTop: 14, padding: "8px 12px", background: "#F3F4F6", borderRadius: 8, fontSize: 11.5, color: "#6B7280" }}>
+                  💡 按当前时长上限，这一天省略了 {dayPlan.dropped_count} 个低优任务
+                </section>
+              )}
+
+              {/* 积压（仅今天显示） */}
+              {isToday && Array.isArray(dayPlan.backlog) && dayPlan.backlog.length > 0 && (
+                <section style={{ marginTop: 14, padding: "10px 12px", background: "#FFFBEB", border: "1px solid #FCD34D", borderRadius: 8, fontSize: 12, color: "#92400E" }}>
+                  📌 还有 {dayPlan.backlog.length} 个昨日低优任务在积压区，可在今日计划下方"添加到今日"
+                </section>
+              )}
+            </>
+          )}
+        </div>
+      </aside>
+
+      {/* 抽屉动画关键帧（注入到 document，只注入一次） */}
+      <DrawerAnimations />
+    </>
+  );
+}
+
+// —— 抽屉里的任务行 ——
+function DrawerTaskItem({ task, isToday, isPast, onStart, onComplete }) {
+  const icons = { sm2_due: "🔁", chapter_practice: "📝", concept_study: "📖", mock_exam: "⏱️", light_review: "🧘", wrong_review: "❌" };
+  const prioColor = task.priority === "high" ? "#DC2626" : task.priority === "low" ? "#94A3B8" : G.blue;
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 12, padding: "10px 12px",
+      background: task.completed ? "#F9FAFB" : "#fff",
+      border: "1px solid #E5E7EB",
+      borderLeft: `3px solid ${task.completed ? "#D1D5DB" : prioColor}`,
+      borderRadius: 10, opacity: task.completed ? 0.7 : 1,
+    }}>
+      <div style={{ fontSize: 20, flexShrink: 0 }}>{icons[task.type] || "•"}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: task.completed ? "#9CA3AF" : "#111", textDecoration: task.completed ? "line-through" : "none" }}>{task.title}</div>
+        {task.subtitle && <div style={{ fontSize: 11.5, color: "#888", marginTop: 2 }}>{task.subtitle}</div>}
+        <div style={{ fontSize: 11, color: "#aaa", marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span>⏱ {task.target_minutes || 0} 分钟</span>
+          {task.priority === "high" && <span style={{ color: "#DC2626", fontWeight: 700 }}>高优</span>}
+          {task._rolled_from && <span style={{ color: "#B45309", fontWeight: 700 }}>昨日顺延</span>}
+        </div>
+      </div>
+      {task.completed ? (
+        <span style={{ fontSize: 12, fontWeight: 700, color: G.tealDark, background: G.tealLight, padding: "4px 10px", borderRadius: 8, flexShrink: 0 }}>✓ 已完成</span>
+      ) : isToday ? (
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <button onClick={onStart} style={{ padding: "6px 14px", background: G.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>开始</button>
+          <button onClick={onComplete} title="手动标记为已完成" style={{ padding: "6px 10px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>✓</button>
+        </div>
+      ) : isPast ? (
+        <span style={{ fontSize: 11.5, color: "#9CA3AF", background: "#F3F4F6", padding: "3px 10px", borderRadius: 8, flexShrink: 0 }}>未完成</span>
+      ) : (
+        <span style={{ fontSize: 11.5, color: "#6B7280", background: "#EEF2FF", padding: "3px 10px", borderRadius: 8, flexShrink: 0 }}>待开启</span>
+      )}
+    </div>
+  );
+}
+
+// —— 把抽屉用的 keyframes 注入 document（幂等） ——
+function DrawerAnimations() {
+  useEffect(() => {
+    const id = "mc-drawer-anim-style";
+    if (document.getElementById(id)) return;
+    const style = document.createElement("style");
+    style.id = id;
+    style.textContent = `
+      @keyframes mcFadeIn { from { opacity: 0 } to { opacity: 1 } }
+      @keyframes mcSlideInRight { from { transform: translateX(100%) } to { transform: translateX(0) } }
+    `;
+    document.head.appendChild(style);
+  }, []);
+  return null;
 }
 
 function ProgressRing({ progress }) {
