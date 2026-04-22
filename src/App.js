@@ -9,6 +9,7 @@ import ConceptGraphCard from "./components/ConceptGraphCard";
 import InteractiveMathChart from "./components/InteractiveMathChart";
 import StudyWorkspace from "./layouts/StudyWorkspace";
 import SprintWorkspace from "./layouts/SprintWorkspace";
+import { isEditableFocused } from "./utils/keyboard";
 import "katex/dist/katex.min.css";
 
 // Inject global CSS animations
@@ -5014,7 +5015,17 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   useEffect(() => {
     if (quizMode !== "active" || finished || !q) return;
     const handler = (e) => {
-      if (answered) { if (e.key === "Enter" || e.key === "ArrowRight") handleNext(); return; }
+      // 焦点在输入框/文本域/contenteditable 时，任何全局快捷键都让行。
+      // 这是修复"用户在 AI 聊天框按 Enter 发送消息→同时跳到下一题"的根本防线：
+      // React 合成事件里的 stopPropagation 不能阻止 window 层的 native listener，
+      // 只有在 window handler 最前面主动 return 才真正阻断。
+      if (isEditableFocused(e)) return;
+
+      if (answered) {
+        // 已作答：→ 跳下一题（主推，符合翻阅肌肉记忆）；Enter 保留做便利兼容
+        if (e.key === "ArrowRight" || e.key === "Enter") handleNext();
+        return;
+      }
       if (!isTextQuestion(q)) {
         if (e.key === "1") setSelected(0);
         if (e.key === "2") setSelected(1);
@@ -5026,6 +5037,24 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [quizMode, finished, q, answered, selected]);
+
+  // AI 拆解面板：Esc 关闭（键盘用户终于能退出这个面板了）
+  // 焦点感知：在输入框内按 Esc → 让输入框自己处理（清空/blur），不关面板；
+  //           在输入框外按 Esc → 关面板。
+  // 这样用户不会"想清空输入却意外关掉整个对话历史"。
+  useEffect(() => {
+    if (!showAIHelp) return;
+    const handler = (e) => {
+      if (e.key !== "Escape") return;
+      if (isEditableFocused(e)) return; // 让输入框的 onKeyDown 先处理
+      setShowAIHelp(false);
+      setAIMessages([]);
+      setAIHelpInput("");
+      setAIContextPrompt("");
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [showAIHelp]);
 
 
   {/* Micro-win celebration overlay */}
@@ -5779,7 +5808,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         >
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <div style={{ fontSize: 14, fontWeight: 800, color: "#4338CA" }}>💬 AI 正在和你一起拆解这道题</div>
-            <button onClick={() => { setShowAIHelp(false); setAIMessages([]); setAIHelpInput(""); setAIContextPrompt(""); }} style={{ border: "none", background: "transparent", color: "#6B7280", cursor: "pointer", fontSize: 13 }}>收起 ×</button>
+            <button onClick={() => { setShowAIHelp(false); setAIMessages([]); setAIHelpInput(""); setAIContextPrompt(""); }} title="Esc 也能收起" style={{ border: "none", background: "transparent", color: "#6B7280", cursor: "pointer", fontSize: 13 }}>收起 × <span style={{ fontSize: 10, opacity: 0.6, marginLeft: 2 }}>Esc</span></button>
           </div>
 
           {/* 消息流容器 */}
@@ -6057,11 +6086,38 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
               value={aiHelpInput}
               onChange={(e) => setAIHelpInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && aiHelpInput.trim() && !aiIsBusy) {
+                // 双保险防御：
+                //   1. quiz 页面的 window keydown 已经加了 isEditableFocused 守卫（主防线），
+                //   2. 这里 stopPropagation 阻 React 合成事件继续往外冒，
+                //   3. nativeEvent.stopImmediatePropagation 阻 native 层同一元素上的其他 listener。
+                //  有三重保险才敢放心把 Enter 绑定在输入框上又同时在全局绑快捷键。
+                if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  const txt = aiHelpInput;
-                  setAIHelpInput("");
-                  sendChatMessage(txt);
+                  e.stopPropagation();
+                  if (e.nativeEvent && typeof e.nativeEvent.stopImmediatePropagation === "function") {
+                    e.nativeEvent.stopImmediatePropagation();
+                  }
+                  if (aiHelpInput.trim() && !aiIsBusy) {
+                    const txt = aiHelpInput;
+                    setAIHelpInput("");
+                    sendChatMessage(txt);
+                  }
+                  return;
+                }
+                // Esc：有内容先清空内容；空内容时 blur（下一次 Esc 才关掉面板）
+                if (e.key === "Escape") {
+                  if (aiHelpInput) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setAIHelpInput("");
+                  } else {
+                    e.target.blur && e.target.blur();
+                  }
+                  return;
+                }
+                // 方向键 / 退格等 text-input 原生行为：要阻 window 级守卫前可能剩余的冲突
+                if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") {
+                  e.stopPropagation();
                 }
               }}
               placeholder={aiIsBusy ? "AI 正在回复…" : "继续追问，比如：那如果条件改成…"}
@@ -6087,6 +6143,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             >
               {aiIsBusy ? "思考中…" : "发送 ↵"}
             </Btn>
+          </div>
+          {/* 键盘契约明示：避免用户猜"Enter 到底是发送还是跳题" */}
+          <div style={{ marginTop: 6, fontSize: 10.5, color: "#9CA3AF", paddingLeft: 4, letterSpacing: "0.01em", userSelect: "none" }}>
+            Enter 发送消息 · Esc 收起面板 · → 需先点击空白处再翻下一题
           </div>
 
           {/* dev-only: 查看真实发给 AI 的 prompt 原文 */}
@@ -6124,6 +6184,8 @@ function FlashcardPage({ setPage }) {
 
   useEffect(() => {
     const handler = (e) => {
+      // 全局快捷键守卫：焦点在输入框/contenteditable 时一律让行（预防未来加搜索框等）
+      if (isEditableFocused(e)) return;
       if (e.key === "ArrowRight" || e.key === "l") { setIdx(i => Math.min(filtered.length - 1, i + 1)); setFlipped(false); }
       if (e.key === "ArrowLeft" || e.key === "j") { setIdx(i => Math.max(0, i - 1)); setFlipped(false); }
       if (e.key === " " || e.key === "k") { e.preventDefault(); setFlipped(v => !v); }
