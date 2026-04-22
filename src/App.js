@@ -1599,6 +1599,8 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
   // Step 5: Save questions to DB — skip if quota exceeded (don't persist garbage)
   let insertedCount = 0;
   let materialLinked = false;
+  // Record concrete DB errors so UploadPage can show actionable feedback (RLS, schema, etc.).
+  const dbErrors = { questions: null, topics: null };
   if (!apiQuotaExceeded && questions.length > 0) {
     try {
       const rows = questions.map(q => ({
@@ -1618,8 +1620,9 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
         const rows2 = rows.map(({ material_id, ...r }) => r);
         const { error: e2 } = await supabase.from("questions").insert(rows2);
         if (!e2) insertedCount = rows2.length;
+        else dbErrors.questions = e2.message || e2.code || String(e2);
       }
-    } catch (e) {}
+    } catch (e) { dbErrors.questions = e?.message || String(e); }
   }
 
   // Step 5b: Persist AI topics into material_topics so KnowledgePage can surface them.
@@ -1641,12 +1644,13 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
         if (!et) topicsLinked = topicRows.length;
         else {
           // Common causes: relation does not exist (42P01), column missing, RLS blocked.
-          // Log for diagnostics, do not fail the whole upload.
           console.warn("[material_topics] insert failed:", et.message || et.code);
+          dbErrors.topics = et.message || et.code || String(et);
         }
       }
     } catch (e) {
       console.warn("[material_topics] insert exception:", e?.message);
+      dbErrors.topics = e?.message || String(e);
     }
   }
 
@@ -1672,6 +1676,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
     textDiag,
     apiQuotaExceeded,
     apiErrorMsg,
+    dbErrors,
     parseHint: !hasText ? "未能从 PDF 提取文字（可能是扫描版），建议使用可选中文字的电子版 PDF。" : null,
   };
 };
@@ -7300,48 +7305,36 @@ function ReportPage({ setPage, setChapterFilter }) {
 // ── Upload Page ─────────────────────────────────────────────────────────────
 function UploadPage({ setPage, profile }) {
   const DEFAULT_UPLOAD_COURSES = ["数值分析", "线性代数", "概率论", "数理统计", "ODE", "最优化", "高等数学"];
-  const [title, setTitle] = useState("");
-  const [course, setCourse] = useState("线性代数");
-  const [customCourse, setCustomCourse] = useState("");
-  const [addingCourse, setAddingCourse] = useState(false);
   const [courses, setCourses] = useState(DEFAULT_UPLOAD_COURSES);
-  const [chapter, setChapter] = useState("全部");
-  const [desc, setDesc] = useState("");
-  const [file, setFile] = useState(null);
-  const [isPublic, setIsPublic] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [step, setStep] = useState("");
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-  const pdfRef = useRef();
 
   // 诊断 & 我的资料快照
   const [myMaterials, setMyMaterials] = useState([]);
   const [diagOpen, setDiagOpen] = useState(false);
   const [diagReport, setDiagReport] = useState(null);
 
-  // 批量上传面板
-  const [batchFiles, setBatchFiles] = useState([]); // [{file, title, course, isPublic, status: "pending"|"running"|"done"|"error", msg, progress}]
+  // 批量上传面板（主交互，唯一入口）
+  // 每项 shape：{ file, title, course|null, isPublic, status, msg, stepMsg, result: { topics, questions, errors: [] } }
+  const [batchFiles, setBatchFiles] = useState([]);
   const [batchRunning, setBatchRunning] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const batchInputRef = useRef();
 
-  const CHAPTERS = ["全部", ...Array.from({ length: 12 }, (_, i) => `Ch.${i + 1}`)];
   const getExt = (name = "") => {
     const idx = name.lastIndexOf(".");
     return idx >= 0 ? name.slice(idx).toLowerCase() : "";
   };
 
-  // 猜课程：从文件名/路径/title 中识别学科
+  // 猜课程：从文件名/路径/title 识别学科。失败返回 null（UI 会标红提示用户选一下）。
   const guessCourse = (name = "") => {
     const s = String(name).toLowerCase();
     if (/(ode|ordinary.*diff|常微分|微分方程)/i.test(s)) return "ODE";
     if (/(probab|概率|probability)/i.test(s)) return "概率论";
-    if (/(stat|统计)/i.test(s)) return "数理统计";
-    if (/(linear.*algebra|线性代数|matrix)/i.test(s)) return "线性代数";
+    if (/(stat|统计|applied.*statistics)/i.test(s)) return "数理统计";
+    if (/(linear.*algebra|线性代数|matrix|leon)/i.test(s)) return "线性代数";
     if (/(numerical|数值|sauer)/i.test(s)) return "数值分析";
-    if (/(optim|最优化)/i.test(s)) return "最优化";
+    if (/(optim|最优化|convex)/i.test(s)) return "最优化";
     if (/(calculus|高等数学|微积分)/i.test(s)) return "高等数学";
-    return course;
+    return null;
   };
 
   const buildUploadError = (err) => {
@@ -7408,10 +7401,13 @@ function UploadPage({ setPage, profile }) {
   };
 
   // 核心：上传 + 解析 + AI + 入库 topics/questions
-  const uploadOne = async ({ title: tTitle, file: tFile, course: tCourse, chapter: tChapter, isPublic: tPub, desc: tDesc, onStep }) => {
+  //   返回 { material, aiResult }；失败抛 Error。
+  //   aiResult 里细项：topicsLinked / insertedCount / dbErrors / apiErrorMsg / parseHint / pdfLikelyScanned
+  const uploadOne = async ({ title: tTitle, file: tFile, course: tCourse, isPublic: tPub, onStep }) => {
     const ext = getExt(tFile.name);
     if (!MATERIAL_ALLOWED_EXTS.includes(ext)) throw new Error(`仅支持 PDF/PPT/DOC，当前扩展名：${ext}`);
     if (tFile.size > 50 * 1024 * 1024) throw new Error("文件超过 50MB");
+    if (!tCourse) throw new Error("还没指定学科，请在行内选择一个");
 
     onStep && onStep("上传到存储…");
     const filePath = `${profile?.id || "anon"}/${Date.now()}_${tFile.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
@@ -7422,9 +7418,9 @@ function UploadPage({ setPage, profile }) {
     onStep && onStep("写入资料库…");
     const basePayload = {
       title: String(tTitle || tFile.name).trim(),
-      course: tCourse || guessCourse(tFile.name) || "数学",
-      chapter: (!tChapter || tChapter === "全部") ? null : tChapter,
-      description: tDesc ? String(tDesc).trim() : null,
+      course: tCourse,
+      chapter: null,
+      description: null,
       file_name: tFile.name,
       file_size: tFile.size > 1024 * 1024 ? (tFile.size / 1024 / 1024).toFixed(1) + " MB" : (tFile.size / 1024).toFixed(0) + " KB",
       file_data: publicUrl,
@@ -7432,10 +7428,6 @@ function UploadPage({ setPage, profile }) {
       uploaded_by: profile?.id || null,
       is_public: tPub !== false,
     };
-    // 策略：
-    //   - teacher → approved
-    //   - student → pending（走 sql/materials_review_workflow.sql RLS）
-    //   - 无 role → 直接尝试 approved，不行再 pending，最后退化到无 status
     const roleKnown = profile?.role === "teacher" || profile?.role === "student";
     const primaryStatus = profile?.role === "teacher" ? "approved" : "pending";
 
@@ -7449,7 +7441,6 @@ function UploadPage({ setPage, profile }) {
       const r = await supabase.from("materials").insert(basePayload).select().single();
       insertedMaterial = r.data; dbErr = r.error;
     }
-    // 如果是 RLS 拒绝，且 role 未知，再尝试另一个 status
     if (dbErr && !roleKnown && /row-level security|42501|permission/i.test(String(dbErr.message || ""))) {
       const alt = primaryStatus === "approved" ? "pending" : "approved";
       const r = await supabase.from("materials").insert({ ...basePayload, status: alt }).select().single();
@@ -7457,9 +7448,7 @@ function UploadPage({ setPage, profile }) {
     }
     if (dbErr) throw dbErr;
 
-    // 关键变化：不管 teacher 还是 student，上传成功后都立刻本地抽文本 + AI 抽知识点 + 入库
-    // 这样学生上传自己的私有资料后也能马上用 AI 知识点 / 按知识点出题
-    onStep && onStep("PDF 解析 + AI 抽知识点…");
+    onStep && onStep("解析 PDF + AI 抽知识点…");
     let aiResult = null;
     try {
       aiResult = await processMaterialWithAI({
@@ -7469,55 +7458,72 @@ function UploadPage({ setPage, profile }) {
         actorName: profile?.name || "用户",
       });
     } catch (e) {
-      // 解析失败不回滚上传，保障资料至少入库
-      aiResult = { topics: [], questions: [], insertedCount: 0, topicsLinked: 0, apiErrorMsg: e?.message };
+      aiResult = {
+        topics: [], questions: [], insertedCount: 0, topicsLinked: 0,
+        apiErrorMsg: e?.message || String(e),
+        dbErrors: { questions: null, topics: null },
+      };
     }
 
     return { material: insertedMaterial, aiResult };
   };
 
-  const handleUpload = async () => {
-    if (!title.trim()) { setError("请填写资料名称"); return; }
-    if (!file) { setError("请选择 PDF / PPT / DOC 文件"); return; }
-    setUploading(true); setError(""); setSuccess("");
-    try {
-      const { material, aiResult } = await uploadOne({
-        title, file, course, chapter, isPublic, desc,
-        onStep: setStep,
-      });
-      const topicsMsg = aiResult.topicsLinked > 0 ? `已抽 ${aiResult.topicsLinked} 个知识点` : (aiResult?.apiQuotaExceeded ? "AI 配额暂满，稍后可补题" : "知识点抽取 0 条");
-      const qMsg = aiResult.insertedCount > 0 ? `${aiResult.insertedCount} 道题入库` : "未入库题目";
-      setSuccess(`上传成功！${topicsMsg}，${qMsg}。${material?.status === "pending" ? "（待审核状态，你自己随时可见）" : ""}`);
-      setTitle(""); setDesc(""); setFile(null); setChapter("全部");
-      loadMyMaterials();
-    } catch (e) {
-      setError("上传失败：" + buildUploadError(e));
-    }
-    setUploading(false); setStep("");
+  // 组装一个"人类可读的状态行"：告诉用户哪步成功、哪步失败、该怎么办。
+  const summarizeAIResult = (ai) => {
+    if (!ai) return { text: "未知结果", ok: false };
+    if (ai.apiQuotaExceeded) return { text: "⚠ AI 配额已满，请 1 分钟后在资料库点「补题」重试", ok: false };
+    if (ai.pdfLikelyScanned) return { text: "⚠ 扫描版 PDF 未提取到文字（AI 无法出题）", ok: false };
+    const parts = [];
+    if (ai.topicsLinked > 0) parts.push(`✓ 知识点 ${ai.topicsLinked}`);
+    else if (ai.dbErrors?.topics) parts.push(`知识点入库失败（${ai.dbErrors.topics.slice(0, 60)}）`);
+    else parts.push(`知识点 0`);
+
+    if (ai.insertedCount > 0) parts.push(`✓ 题目 ${ai.insertedCount}`);
+    else if (ai.dbErrors?.questions) parts.push(`题目入库失败（${ai.dbErrors.questions.slice(0, 60)}）`);
+    else if (ai.apiErrorMsg) parts.push(`AI 出题失败：${ai.apiErrorMsg.slice(0, 60)}`);
+    else parts.push(`题目 0`);
+
+    const ok = (ai.topicsLinked > 0 || ai.insertedCount > 0);
+    return { text: parts.join(" · "), ok };
   };
 
-  // 批量上传：每个文件独立状态
+  // 批量上传（也是唯一入口）：每个文件独立状态
   const runBatch = async () => {
     if (batchFiles.length === 0) return;
+    // 预检：所有文件必须已指定学科
+    const missingCourse = batchFiles.some(x => x.status !== "done" && !x.course);
+    if (missingCourse) {
+      setBatchFiles(prev => prev.map(it => it.status === "pending" && !it.course
+        ? { ...it, msg: "⚠ 请先选择学科" }
+        : it));
+      return;
+    }
+
     setBatchRunning(true);
     for (let i = 0; i < batchFiles.length; i++) {
       const item = batchFiles[i];
       if (item.status === "done") continue;
-      setBatchFiles(prev => prev.map((it, idx) => idx === i ? { ...it, status: "running", msg: "排队中" } : it));
+      setBatchFiles(prev => prev.map((it, idx) => idx === i ? { ...it, status: "running", msg: "排队中", stepMsg: "" } : it));
       try {
         const { aiResult } = await uploadOne({
           title: item.title || item.file.name.replace(/\.[^.]+$/, ""),
           file: item.file,
           course: item.course,
-          chapter: "全部",
           isPublic: item.isPublic !== false,
-          desc: "",
-          onStep: (s) => setBatchFiles(prev => prev.map((it, idx) => idx === i ? { ...it, msg: s } : it)),
+          onStep: (s) => setBatchFiles(prev => prev.map((it, idx) => idx === i ? { ...it, stepMsg: s } : it)),
         });
-        const ok = `✓ 知识点 ${aiResult.topicsLinked || 0} · 题目 ${aiResult.insertedCount || 0}`;
-        setBatchFiles(prev => prev.map((it, idx) => idx === i ? { ...it, status: "done", msg: ok } : it));
+        const summary = summarizeAIResult(aiResult);
+        setBatchFiles(prev => prev.map((it, idx) => idx === i ? {
+          ...it,
+          status: summary.ok ? "done" : "warning",
+          msg: summary.text,
+          stepMsg: "",
+          aiResult,
+        } : it));
       } catch (e) {
-        setBatchFiles(prev => prev.map((it, idx) => idx === i ? { ...it, status: "error", msg: buildUploadError(e) } : it));
+        setBatchFiles(prev => prev.map((it, idx) => idx === i ? {
+          ...it, status: "error", msg: buildUploadError(e), stepMsg: "",
+        } : it));
       }
     }
     setBatchRunning(false);
@@ -7525,19 +7531,42 @@ function UploadPage({ setPage, profile }) {
   };
 
   const addBatchFiles = (fileList) => {
-    const picked = Array.from(fileList || []).filter(f => MATERIAL_ALLOWED_EXTS.includes(getExt(f.name)) && f.size <= 50 * 1024 * 1024);
-    if (picked.length === 0) return;
-    setBatchFiles(prev => [
-      ...prev,
-      ...picked.map(f => ({
-        file: f,
-        title: f.name.replace(/\.[^.]+$/, ""),
-        course: guessCourse(f.name),
-        isPublic: true,
-        status: "pending",
-        msg: "",
-      })),
-    ]);
+    const all = Array.from(fileList || []);
+    const rejected = [];
+    const picked = all.filter(f => {
+      const okExt = MATERIAL_ALLOWED_EXTS.includes(getExt(f.name));
+      const okSize = f.size <= 50 * 1024 * 1024;
+      if (!okExt) rejected.push(`${f.name}（格式不支持）`);
+      else if (!okSize) rejected.push(`${f.name}（>50MB）`);
+      return okExt && okSize;
+    });
+    if (picked.length > 0) {
+      setBatchFiles(prev => [
+        ...prev,
+        ...picked.map(f => ({
+          file: f,
+          title: f.name.replace(/\.[^.]+$/, ""),
+          course: guessCourse(f.name),
+          isPublic: true,
+          status: "pending",
+          msg: "",
+          stepMsg: "",
+          aiResult: null,
+        })),
+      ]);
+    }
+    if (rejected.length > 0) {
+      alert("以下文件已跳过：\n" + rejected.join("\n"));
+    }
+  };
+
+  // 拖拽事件
+  const onDragOver = (e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); };
+  const onDragLeave = (e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); };
+  const onDrop = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer?.files?.length) addBatchFiles(e.dataTransfer.files);
   };
 
   return (
@@ -7609,137 +7638,137 @@ function UploadPage({ setPage, profile }) {
         </div>
       )}
 
-      {/* 批量上传面板 */}
-      <div style={{ ...s.card, padding: "1.2rem 1.5rem", marginBottom: 16, border: `1.5px dashed ${G.purple}55`, background: "linear-gradient(180deg,#faf5ff 0%,#ffffff 70%)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: G.purple }}>📦 批量上传（推荐：把本地 PDF 一次拖进来）</div>
-            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 3 }}>自动识别学科；逐个上传并 AI 抽取知识点、生成题目</div>
-          </div>
-          <button onClick={() => batchInputRef.current?.click()} style={{ padding: "8px 14px", background: G.purple, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
-            + 选择多个文件
-          </button>
-          <input ref={batchInputRef} type="file" multiple accept=".pdf,.ppt,.pptx,.doc,.docx" style={{ display: "none" }} onChange={e => { addBatchFiles(e.target.files); e.target.value = ""; }} />
-        </div>
-        {batchFiles.length === 0 ? (
-          <div style={{ padding: "20px 0", fontSize: 13, color: "#9ca3af", textAlign: "center" }}>
-            还没添加文件。点「+ 选择多个文件」或把 PDF 从桌面拖到这里。
-          </div>
-        ) : (
-          <div>
-            {batchFiles.map((it, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: i < batchFiles.length - 1 ? "1px dashed #ede9fe" : "none" }}>
-                <span style={{ fontSize: 18 }}>{it.status === "done" ? "✅" : it.status === "error" ? "❌" : it.status === "running" ? "⏳" : "⏸️"}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title}</div>
-                  <div style={{ fontSize: 11, color: it.status === "error" ? G.red : "#6b7280", marginTop: 2 }}>{it.course} · {it.isPublic ? "🌐 公开" : "🔒 仅自己"} · {it.msg || "待上传"}</div>
-                </div>
-                <select value={it.course} disabled={it.status !== "pending"} onChange={e => setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, course: e.target.value } : x))} style={{ padding: "4px 6px", fontSize: 12, borderRadius: 6, border: "1px solid #e5e7eb" }}>
-                  {courses.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <button onClick={() => setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, isPublic: !x.isPublic } : x))} disabled={it.status !== "pending"} title="切换可见范围" style={{ padding: "4px 8px", fontSize: 11, borderRadius: 6, border: "1px solid #e5e7eb", background: "#fff", cursor: "pointer" }}>
-                  {it.isPublic ? "🌐" : "🔒"}
-                </button>
-                {it.status === "pending" && (
-                  <button onClick={() => setBatchFiles(prev => prev.filter((_, idx) => idx !== i))} style={{ padding: "4px 8px", fontSize: 11, borderRadius: 6, border: "1px solid #fecaca", background: "#fff", cursor: "pointer", color: G.red }}>移除</button>
-                )}
-              </div>
-            ))}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
-              <span style={{ fontSize: 12, color: "#6b7280" }}>{batchFiles.filter(x => x.status === "done").length} / {batchFiles.length} 已完成</span>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => setBatchFiles([])} disabled={batchRunning} style={{ padding: "8px 14px", fontSize: 13, background: "#fff", color: "#6b7280", border: "1px solid #e5e7eb", borderRadius: 8, cursor: "pointer" }}>清空</button>
-                <button onClick={runBatch} disabled={batchRunning || batchFiles.length === 0} style={{ padding: "8px 18px", fontSize: 13, fontWeight: 700, background: batchRunning ? "#ccc" : G.purple, color: "#fff", border: "none", borderRadius: 8, cursor: batchRunning ? "not-allowed" : "pointer" }}>
-                  {batchRunning ? "上传中…" : "🚀 全部上传"}
-                </button>
+      {/* ── 主区：批量上传（唯一入口），支持拖拽 ──────────────────────────── */}
+      <div
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        style={{
+          ...s.card,
+          padding: 0,
+          marginBottom: 16,
+          border: `2px dashed ${dragActive ? G.purple : G.purple + "55"}`,
+          background: dragActive
+            ? "linear-gradient(180deg,#f3e8ff 0%,#ffffff 70%)"
+            : "linear-gradient(180deg,#faf5ff 0%,#ffffff 70%)",
+          transition: "all 0.15s ease",
+        }}
+      >
+        <div style={{ padding: "1.2rem 1.5rem" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10, gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: G.purple }}>📦 把 PDF / PPT / DOC 拖进来，或点右侧按钮</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4, lineHeight: 1.6 }}>
+                自动识别学科 · 本地抽取正文 · AI 抽取知识点 · 自动生成 10 道题目入库。<br/>
+                支持一次多个文件，逐个处理，完成后直接在「知识点 / 资料库」可见。
               </div>
             </div>
+            <button onClick={() => batchInputRef.current?.click()} style={{ padding: "9px 16px", background: G.purple, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0 }}>
+              + 选择文件
+            </button>
+            <input ref={batchInputRef} type="file" multiple accept=".pdf,.ppt,.pptx,.doc,.docx" style={{ display: "none" }} onChange={e => { addBatchFiles(e.target.files); e.target.value = ""; }} />
           </div>
-        )}
-      </div>
 
-      <div style={{ ...s.card, padding: "2rem" }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#6b7280", marginBottom: 14, paddingBottom: 10, borderBottom: "1px solid #f3f4f6" }}>或者逐个精细上传 ↓</div>
-        {/* 资料名称 */}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ ...s.label }}>资料名称 *</label>
-          <input value={title} onChange={e => setTitle(e.target.value)} placeholder="例：第三章 插值方法讲义" style={{ ...s.input }} />
-        </div>
+          {batchFiles.length === 0 ? (
+            <div style={{
+              padding: "40px 20px", fontSize: 14, color: dragActive ? G.purple : "#9ca3af", textAlign: "center",
+              border: "1px dashed " + (dragActive ? G.purple : "#e5e7eb"),
+              borderRadius: 12, background: dragActive ? "#faf5ff" : "#fafafa", transition: "all 0.15s ease",
+            }}>
+              {dragActive ? (
+                <><div style={{ fontSize: 32, marginBottom: 8 }}>⬇️</div><div style={{ fontWeight: 700 }}>松手即可添加文件</div></>
+              ) : (
+                <>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>📂</div>
+                  <div style={{ fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>把文件拖到这个区域</div>
+                  <div style={{ fontSize: 12, color: "#9ca3af" }}>支持 PDF / PPT / DOC，单个文件最大 50MB</div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div>
+              {batchFiles.map((it, i) => {
+                const needCourse = !it.course && it.status === "pending";
+                const rowColor = it.status === "error" ? G.red
+                  : it.status === "warning" ? G.amber
+                  : it.status === "done" ? "#10b981"
+                  : needCourse ? G.red : "#6b7280";
+                const icon = it.status === "done" ? "✅"
+                  : it.status === "warning" ? "⚠️"
+                  : it.status === "error" ? "❌"
+                  : it.status === "running" ? "⏳"
+                  : needCourse ? "⚠️"
+                  : "📄";
+                return (
+                  <div key={i} style={{
+                    display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 0",
+                    borderBottom: i < batchFiles.length - 1 ? "1px dashed #ede9fe" : "none",
+                  }}>
+                    <span style={{ fontSize: 18, marginTop: 1 }}>{icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 700, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.title}</div>
+                      <div style={{ fontSize: 11.5, color: rowColor, marginTop: 3, lineHeight: 1.5 }}>
+                        {it.course || <span style={{ fontWeight: 700 }}>⚠ 未识别学科</span>}
+                        <span style={{ color: "#9ca3af" }}> · </span>
+                        {it.isPublic ? "🌐 公开" : "🔒 仅自己"}
+                        <span style={{ color: "#9ca3af" }}> · </span>
+                        {it.status === "running" ? (it.stepMsg || "上传中…") : (it.msg || "待上传")}
+                      </div>
+                    </div>
+                    <select
+                      value={it.course || ""}
+                      disabled={it.status === "running" || it.status === "done"}
+                      onChange={e => setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, course: e.target.value || null, msg: e.target.value ? "" : x.msg } : x))}
+                      style={{
+                        padding: "5px 8px", fontSize: 12, borderRadius: 6,
+                        border: needCourse ? `2px solid ${G.red}` : "1px solid #e5e7eb",
+                        background: needCourse ? G.redLight : "#fff",
+                        color: needCourse ? G.red : "#111",
+                        fontWeight: needCourse ? 700 : 400,
+                      }}
+                    >
+                      <option value="">选择学科…</option>
+                      {courses.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <button
+                      onClick={() => setBatchFiles(prev => prev.map((x, idx) => idx === i ? { ...x, isPublic: !x.isPublic } : x))}
+                      disabled={it.status === "running" || it.status === "done"}
+                      title={it.isPublic ? "当前公开，点击改为仅自己" : "当前仅自己，点击改为公开"}
+                      style={{ padding: "5px 8px", fontSize: 12, borderRadius: 6, border: "1px solid #e5e7eb", background: "#fff", cursor: it.status === "running" || it.status === "done" ? "not-allowed" : "pointer" }}
+                    >
+                      {it.isPublic ? "🌐" : "🔒"}
+                    </button>
+                    {(it.status === "pending" || it.status === "warning" || it.status === "error") && (
+                      <button onClick={() => setBatchFiles(prev => prev.filter((_, idx) => idx !== i))} title="移除" style={{ padding: "5px 8px", fontSize: 12, borderRadius: 6, border: "1px solid #fecaca", background: "#fff", cursor: "pointer", color: G.red }}>✕</button>
+                    )}
+                  </div>
+                );
+              })}
 
-        {/* 课程名称 */}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ ...s.label }}>课程名称 *</label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-            {courses.map(c => (
-              <button key={c} onClick={() => { setCourse(c); setAddingCourse(false); }} style={{ padding: "8px 16px", borderRadius: 20, border: "2px solid " + (course === c ? G.teal : "#e0e0e0"), cursor: "pointer", fontFamily: "inherit", fontSize: 14, fontWeight: course === c ? 700 : 400, background: course === c ? G.teal : "#fff", color: course === c ? "#fff" : "#555" }}>{c}</button>
-            ))}
-            <button onClick={() => setAddingCourse(v => !v)} style={{ padding: "8px 16px", borderRadius: 20, border: "2px dashed #ccc", cursor: "pointer", fontFamily: "inherit", fontSize: 14, color: "#888", background: "transparent" }}>+ 添加课程</button>
-          </div>
-          {addingCourse && (
-            <div style={{ display: "flex", gap: 8 }}>
-              <input value={customCourse} onChange={e => setCustomCourse(e.target.value)} placeholder="输入新课程名称" style={{ ...s.input, marginBottom: 0, flex: 1 }} />
-              <button onClick={() => { if (customCourse.trim()) { setCourses(c => [...c, customCourse.trim()]); setCourse(customCourse.trim()); setCustomCourse(""); setAddingCourse(false); } }} style={{ padding: "10px 18px", background: G.teal, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "inherit", flexShrink: 0 }}>确认添加</button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14, paddingTop: 12, borderTop: "1px solid #f3f4f6" }}>
+                <div style={{ fontSize: 12, color: "#6b7280" }}>
+                  {batchFiles.filter(x => x.status === "done").length} 成功 ·{" "}
+                  {batchFiles.filter(x => x.status === "warning").length} 有警告 ·{" "}
+                  {batchFiles.filter(x => x.status === "error").length} 失败 ·{" "}
+                  共 {batchFiles.length} 个
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => setBatchFiles([])} disabled={batchRunning} style={{ padding: "8px 14px", fontSize: 13, background: "#fff", color: "#6b7280", border: "1px solid #e5e7eb", borderRadius: 8, cursor: batchRunning ? "not-allowed" : "pointer" }}>清空</button>
+                  <button onClick={runBatch} disabled={batchRunning || batchFiles.filter(x => x.status !== "done").length === 0} style={{ padding: "9px 20px", fontSize: 13.5, fontWeight: 700, background: batchRunning ? "#ccc" : G.purple, color: "#fff", border: "none", borderRadius: 8, cursor: batchRunning ? "not-allowed" : "pointer" }}>
+                    {batchRunning ? "处理中…" : "🚀 开始上传并解析"}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
 
-        {/* 章节 */}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ ...s.label }}>章节范围</label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {CHAPTERS.map(c => (
-              <button key={c} onClick={() => setChapter(c)} style={{ padding: "7px 14px", borderRadius: 20, border: "2px solid " + (chapter === c ? G.blue : "#e0e0e0"), cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: chapter === c ? 700 : 400, background: chapter === c ? G.blueLight : "#fff", color: chapter === c ? G.blue : "#555" }}>{c}</button>
-            ))}
-          </div>
+        {/* 底部提示条 */}
+        <div style={{ padding: "10px 1.5rem", background: "#fafafa", borderTop: "1px solid #f3f4f6", borderRadius: "0 0 12px 12px", fontSize: 12, color: "#6b7280", lineHeight: 1.7 }}>
+          <strong style={{ color: "#374151" }}>说明：</strong>
+          系统会自动从文件名识别学科——<b style={{ color: G.red }}>如果识别为"未识别学科"请手动选一个</b>（左侧选择框），否则会被跳过。
+          扫描版 PDF（文字不可复制）AI 无法读取正文，会显示 ⚠ 警告；请换电子版或先 OCR 后再上传。
         </div>
-
-        {/* 简介 */}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ ...s.label }}>简介（可选）</label>
-          <textarea value={desc} onChange={e => setDesc(e.target.value)} placeholder="简单描述资料内容，帮助其他同学了解…" rows={3} style={{ width: "100%", fontSize: 14, padding: "12px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontFamily: "inherit", resize: "vertical", color: "#111", lineHeight: 1.6, boxSizing: "border-box" }} />
-        </div>
-
-        {/* 文件上传 */}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ ...s.label }}>上传资料文件 *</label>
-          <div onClick={() => pdfRef.current?.click()} style={{ border: "2px dashed " + (file ? G.teal : "#ddd"), borderRadius: 14, padding: "2.5rem", textAlign: "center", cursor: "pointer", background: file ? G.tealLight : "#fafafa" }}>
-            <input ref={pdfRef} type="file" accept=".pdf,.ppt,.pptx,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation" style={{ display: "none" }} onChange={e => { const f = e.target.files[0]; if (f) setFile(f); }} />
-            <div style={{ fontSize: 32, marginBottom: 10 }}>{file ? "✅" : "📂"}</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: file ? G.tealDark : "#333", marginBottom: 4 }}>{file ? file.name : "点击选择文件（PDF/PPT/DOC）"}</div>
-            <div style={{ fontSize: 13, color: "#aaa" }}>{file ? `${(file.size / 1024).toFixed(0)} KB` : "支持 PDF/PPT/DOC，最大 50MB"}</div>
-          </div>
-          <div style={{ marginTop: 12, fontSize: 13, color: "#666", lineHeight: 1.55 }}>
-            <strong style={{ color: "#444" }}>关于扫描版 PDF：</strong>
-            若文件是纸质书拍照/扫描生成的 PDF（页内文字无法用鼠标选中），本站无法读出正文，AI 只能根据标题与简介生成占位内容。
-            请换出版社「电子版」教材，或先用 Acrobat / ABBYY 等做 OCR 后再上传。
-          </div>
-        </div>
-
-        {/* 可见范围 */}
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ ...s.label }}>可见范围</label>
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={() => setIsPublic(true)} style={{ flex: 1, padding: "12px 0", fontSize: 14, fontFamily: "inherit", border: isPublic ? `2px solid ${G.teal}` : "2px solid #e0e0e0", borderRadius: 10, cursor: "pointer", fontWeight: isPublic ? 700 : 400, background: isPublic ? G.tealLight : "#fff", color: isPublic ? G.tealDark : "#666" }}>
-              🌐 公开<div style={{ fontSize: 11, fontWeight: 400, marginTop: 3, color: isPublic ? G.tealDark : "#aaa" }}>所有同学可见</div>
-            </button>
-            <button onClick={() => setIsPublic(false)} style={{ flex: 1, padding: "12px 0", fontSize: 14, fontFamily: "inherit", border: !isPublic ? `2px solid ${G.blue}` : "2px solid #e0e0e0", borderRadius: 10, cursor: "pointer", fontWeight: !isPublic ? 700 : 400, background: !isPublic ? G.blueLight : "#fff", color: !isPublic ? G.blue : "#666" }}>
-              🔒 仅自己<div style={{ fontSize: 11, fontWeight: 400, marginTop: 3, color: !isPublic ? G.blue : "#aaa" }}>只有你能看到</div>
-            </button>
-          </div>
-        </div>
-
-        {error && <div style={{ padding: "12px 16px", background: G.redLight, color: G.red, borderRadius: 10, fontSize: 14, marginBottom: 16 }}>{error}</div>}
-        {success && (
-          <div style={{ padding: "14px 16px", background: G.tealLight, color: G.tealDark, borderRadius: 10, fontSize: 14, marginBottom: 16 }}>
-            {success}
-            <button onClick={() => setPage("资料库")} style={{ marginLeft: 14, padding: "6px 14px", background: G.teal, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>查看资料库 →</button>
-          </div>
-        )}
-        {uploading && step && <div style={{ padding: "12px 16px", background: G.blueLight, color: G.blue, borderRadius: 10, fontSize: 14, marginBottom: 16 }}>⏳ {step}</div>}
-
-        <button disabled={uploading || !file || !title} onClick={handleUpload} style={{ width: "100%", padding: "14px 0", fontSize: 16, fontWeight: 700, fontFamily: "inherit", background: uploading || !file || !title ? "#ccc" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: uploading || !file || !title ? "not-allowed" : "pointer" }}>
-          {uploading ? step || "上传中…" : isPublic ? "📤 发布到资料库（公开）" : "🔒 上传到我的私有资料"}
-        </button>
       </div>
     </div>
   );
