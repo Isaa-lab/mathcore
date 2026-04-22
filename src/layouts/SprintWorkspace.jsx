@@ -696,33 +696,34 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
             </button>
           </div>
 
-          {!hasPlan ? (
-            // 未设置：整个区域给 CTA 居中，不显示空日历
+          {!hasPlan && (
+            // 紧凑 CTA 横幅：放在日历上方，不占用日历空间
             <div style={{
-              flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
               background: "linear-gradient(135deg,#EEF2FF,#F0F9FF)",
-              border: "2px dashed #C7D2FE", borderRadius: 12,
-              padding: "24px 18px", textAlign: "center", minHeight: 0,
+              border: "1.5px dashed #C7D2FE", borderRadius: 10,
+              padding: "10px 12px", marginBottom: 12,
+              display: "flex", alignItems: "center", gap: 10, flexShrink: 0,
             }}>
-              <div style={{ fontSize: 40, marginBottom: 10 }}>🎯</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#111", marginBottom: 6 }}>还没有考试计划</div>
-              <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16, lineHeight: 1.6, maxWidth: 220 }}>
-                告诉系统考试哪天、复习哪几章、每天学多久，系统会自动生成每日任务
+              <div style={{ fontSize: 22, lineHeight: 1 }}>🎯</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#111", lineHeight: 1.3 }}>还没有考试计划</div>
+                <div style={{ fontSize: 10.5, color: "#6B7280", lineHeight: 1.4, marginTop: 1 }}>
+                  告诉系统考试哪天、复习哪几章
+                </div>
               </div>
               <button onClick={() => setSetupOpen(true)}
-                style={{ padding: "10px 20px", background: "#4F46E5", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 4px 12px rgba(79,70,229,0.3)" }}>
-                设置考试日期
+                style={{ padding: "6px 11px", background: "#4F46E5", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", whiteSpace: "nowrap", boxShadow: "0 2px 6px rgba(79,70,229,0.3)" }}>
+                设置
               </button>
             </div>
-          ) : (
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-              <VerticalMiniCalendar
-                examPlan={examPlan}
-                selectedDayKey={selectedDayKey}
-                onDayClick={setSelectedDayKey}
-              />
-            </div>
           )}
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+            <VerticalMiniCalendar
+              examPlan={examPlan}
+              selectedDayKey={selectedDayKey}
+              onDayClick={setSelectedDayKey}
+            />
+          </div>
         </div>
 
         <div className="premium-card" style={{ flex: "0 0 auto", padding: 14, display: "flex", flexDirection: "column", gap: 8 }}>
