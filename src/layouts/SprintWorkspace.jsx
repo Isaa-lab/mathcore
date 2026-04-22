@@ -133,14 +133,47 @@ const navBtn = {
 // =============================================================================
 // 设置考试日期的弹窗表单
 // =============================================================================
+// 从章节 label（如 "ODE Ch.1" / "线性代数 Ch.5" / "Ch.3"）解析学科 + 章号
+function parseChapterLabel(label = "") {
+  const s = String(label).trim();
+  let m = s.match(/^(.+?)\s*Ch\.?\s*(\d+)\s*$/i);
+  if (m) return { subject: m[1].trim(), chNum: parseInt(m[2], 10), short: `Ch.${parseInt(m[2], 10)}` };
+  m = s.match(/^Ch\.?\s*(\d+)\s*$/i);
+  if (m) return { subject: "通用", chNum: parseInt(m[1], 10), short: `Ch.${parseInt(m[1], 10)}` };
+  return { subject: "其他", chNum: null, short: s };
+}
+
 function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete }) {
   const [examDate, setExamDate] = useState(initial?.exam_date || "");
   const [subject, setSubject] = useState(initial?.subject || "");
   const [selectedChapters, setSelectedChapters] = useState(new Set(initial?.chapters_in_scope || []));
   const [dailyMinutes, setDailyMinutes] = useState(initial?.daily_minutes_target || 60);
   const [errors, setErrors] = useState({});
+  const [collapsedGroups, setCollapsedGroups] = useState(new Set());
 
   const todayKey = planDayKey(new Date());
+
+  // 按学科分组
+  const chapterGroups = useMemo(() => {
+    const map = new Map();
+    availableChapters.forEach((ch) => {
+      const parsed = parseChapterLabel(ch.label);
+      const arr = map.get(parsed.subject) || [];
+      arr.push({ ...ch, ...parsed });
+      map.set(parsed.subject, arr);
+    });
+    const groups = Array.from(map.entries()).map(([subj, chapters]) => {
+      chapters.sort((a, b) => (a.chNum ?? 999) - (b.chNum ?? 999));
+      return {
+        subject: subj,
+        chapters,
+        totalWrong: chapters.reduce((s, c) => s + (c.wrong_count || 0), 0),
+      };
+    });
+    // 错题多的学科排前面，其次章节多的
+    groups.sort((a, b) => b.totalWrong - a.totalWrong || b.chapters.length - a.chapters.length);
+    return groups;
+  }, [availableChapters]);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -152,6 +185,23 @@ function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete 
     setSelectedChapters((prev) => {
       const n = new Set(prev);
       n.has(slug) ? n.delete(slug) : n.add(slug);
+      return n;
+    });
+  }
+  function toggleGroup(subj) {
+    setCollapsedGroups((prev) => {
+      const n = new Set(prev);
+      n.has(subj) ? n.delete(subj) : n.add(subj);
+      return n;
+    });
+  }
+  function toggleGroupSelect(group) {
+    const slugs = group.chapters.map((c) => c.slug);
+    const allSel = slugs.every((s) => selectedChapters.has(s));
+    setSelectedChapters((prev) => {
+      const n = new Set(prev);
+      if (allSel) slugs.forEach((s) => n.delete(s));
+      else slugs.forEach((s) => n.add(s));
       return n;
     });
   }
@@ -213,9 +263,9 @@ function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete 
             </label>
           </div>
 
-          {/* 章节 */}
+          {/* 章节 —— 按学科分组 */}
           <div style={{ marginBottom: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <span style={fieldLabel}>
                 📖 考试范围
                 <span style={{ marginLeft: 6, color: "#9CA3AF", fontWeight: 500 }}>
@@ -223,12 +273,18 @@ function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete 
                 </span>
               </span>
               {availableChapters.length > 0 && (
-                <button onClick={() => {
-                  if (selectedChapters.size === availableChapters.length) setSelectedChapters(new Set());
-                  else setSelectedChapters(new Set(availableChapters.map((c) => c.slug)));
-                }} style={{ fontSize: 11.5, padding: "3px 10px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 999, cursor: "pointer", color: "#6B7280", fontFamily: "inherit" }}>
-                  {selectedChapters.size === availableChapters.length ? "全不选" : "全选"}
-                </button>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => setSelectedChapters(new Set(availableChapters.map((c) => c.slug)))}
+                    style={miniBtn}>全选</button>
+                  <button onClick={() => setSelectedChapters(new Set())}
+                    style={miniBtn}>清空</button>
+                  <button onClick={() => {
+                    if (collapsedGroups.size === chapterGroups.length) setCollapsedGroups(new Set());
+                    else setCollapsedGroups(new Set(chapterGroups.map((g) => g.subject)));
+                  }} style={miniBtn}>
+                    {collapsedGroups.size === chapterGroups.length ? "全展开" : "全折叠"}
+                  </button>
+                </div>
               )}
             </div>
             {availableChapters.length === 0 ? (
@@ -236,26 +292,74 @@ function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete 
                 还没有章节数据。先去上传资料或答几道题，章节会自动出现
               </div>
             ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 180, overflowY: "auto", padding: 4 }}>
-                {availableChapters.map((ch) => {
-                  const sel = selectedChapters.has(ch.slug);
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 260, overflowY: "auto", padding: 2 }}>
+                {chapterGroups.map((group) => {
+                  const selInGroup = group.chapters.filter((c) => selectedChapters.has(c.slug)).length;
+                  const total = group.chapters.length;
+                  const allSel = selInGroup === total && total > 0;
+                  const noneSel = selInGroup === 0;
+                  const collapsed = collapsedGroups.has(group.subject);
                   return (
-                    <button key={ch.slug} onClick={() => toggleChapter(ch.slug)}
-                      style={{
-                        padding: "6px 12px", borderRadius: 999,
-                        border: "1.5px solid " + (sel ? "#4F46E5" : "#E5E7EB"),
-                        background: sel ? "#4F46E5" : "#fff",
-                        color: sel ? "#fff" : "#374151",
-                        fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
-                        display: "inline-flex", alignItems: "center", gap: 5,
-                      }}>
-                      {ch.label}
-                      {ch.wrong_count > 0 && (
-                        <span style={{ fontSize: 10, background: sel ? "rgba(255,255,255,0.22)" : "#FEE2E2", color: sel ? "#fff" : "#991B1B", padding: "0 6px", borderRadius: 10, fontWeight: 700 }}>
-                          {ch.wrong_count} 错
-                        </span>
+                    <div key={group.subject} style={{
+                      border: "1px solid #E5E7EB", borderRadius: 10,
+                      background: allSel ? "#F5F3FF" : "#fff",
+                      borderColor: allSel ? "#DDD6FE" : "#E5E7EB",
+                      overflow: "hidden", transition: "background .15s",
+                    }}>
+                      {/* 组头 */}
+                      <div style={{ display: "flex", alignItems: "center", padding: "8px 10px", gap: 8 }}>
+                        <button onClick={() => toggleGroup(group.subject)} aria-label={collapsed ? "展开" : "折叠"}
+                          style={{ width: 20, height: 20, padding: 0, border: "none", background: "transparent", cursor: "pointer", color: "#6B7280", fontSize: 11, transition: "transform .15s", transform: collapsed ? "rotate(-90deg)" : "rotate(0)" }}>
+                          ▼
+                        </button>
+                        <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: "#111" }}>{group.subject}</span>
+                          <span style={{ fontSize: 11, color: "#9CA3AF" }}>{selInGroup}/{total}</span>
+                          {group.totalWrong > 0 && (
+                            <span style={{ fontSize: 10, background: "#FEE2E2", color: "#991B1B", padding: "1px 7px", borderRadius: 999, fontWeight: 700 }}>
+                              {group.totalWrong} 错
+                            </span>
+                          )}
+                        </div>
+                        <button onClick={() => toggleGroupSelect(group)}
+                          style={{
+                            fontSize: 11, padding: "3px 10px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit", fontWeight: 600,
+                            border: "1px solid " + (allSel ? "#4F46E5" : "#E5E7EB"),
+                            background: allSel ? "#4F46E5" : "#fff",
+                            color: allSel ? "#fff" : (noneSel ? "#6B7280" : "#4F46E5"),
+                          }}>
+                          {allSel ? "✓ 全选" : noneSel ? "选本组" : "补齐"}
+                        </button>
+                      </div>
+                      {/* 组内 chip 列表 */}
+                      {!collapsed && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, padding: "0 10px 10px 30px" }}>
+                          {group.chapters.map((ch) => {
+                            const sel = selectedChapters.has(ch.slug);
+                            return (
+                              <button key={ch.slug} onClick={() => toggleChapter(ch.slug)}
+                                style={{
+                                  padding: "4px 10px", borderRadius: 8,
+                                  border: "1.5px solid " + (sel ? "#4F46E5" : "#E5E7EB"),
+                                  background: sel ? "#4F46E5" : "#fff",
+                                  color: sel ? "#fff" : "#374151",
+                                  fontSize: 11.5, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                                  display: "inline-flex", alignItems: "center", gap: 4,
+                                  lineHeight: 1.4,
+                                }}
+                                title={ch.label}>
+                                {ch.short}
+                                {ch.wrong_count > 0 && (
+                                  <span style={{ fontSize: 9.5, background: sel ? "rgba(255,255,255,0.25)" : "#FEE2E2", color: sel ? "#fff" : "#991B1B", padding: "0 5px", borderRadius: 10, fontWeight: 700 }}>
+                                    {ch.wrong_count}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
                       )}
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -302,6 +406,7 @@ function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete 
 const fieldLabel = { fontSize: 12, fontWeight: 700, color: "#374151", display: "inline-block", marginBottom: 5 };
 const fieldInput = { width: "100%", padding: "9px 12px", borderRadius: 9, border: "1.5px solid #E5E7EB", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", outline: "none" };
 const errMsg = { fontSize: 11, color: "#DC2626", marginTop: 4, fontWeight: 600 };
+const miniBtn = { fontSize: 11, padding: "3px 9px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 999, cursor: "pointer", color: "#6B7280", fontFamily: "inherit", fontWeight: 600 };
 
 // =============================================================================
 // 日详情抽屉 —— 点击日历任一日期打开
