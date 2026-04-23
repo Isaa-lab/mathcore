@@ -12270,7 +12270,82 @@ const COURSE_COLORS_TREE = {
   "线性代数": { solid: "#10B981", soft: "#ECFDF5", ring: "#A7F3D0", ink: "#047857" },
   "ODE":      { solid: "#8B5CF6", soft: "#F5F3FF", ring: "#DDD6FE", ink: "#5B21B6" },
   "概率论":   { solid: "#F59E0B", soft: "#FFFBEB", ring: "#FDE68A", ink: "#B45309" },
+  "数理统计": { solid: "#EF4444", soft: "#FEF2F2", ring: "#FECACA", ink: "#B91C1C" },
+  "最优化":   { solid: "#0EA5E9", soft: "#F0F9FF", ring: "#BAE6FD", ink: "#0369A1" },
+  "综合":     { solid: "#64748B", soft: "#F1F5F9", ring: "#CBD5E1", ink: "#334155" },
 };
+
+// 从章节字符串推断学科（"ODE Ch.2" / "数值分析 Ch.3" / 裸章节名都支持）
+function inferCourseFromChapterTree(ch) {
+  const s = String(ch || "").trim();
+  if (!s) return null;
+  for (const name of Object.keys(COURSE_COLORS_TREE)) {
+    if (name === "综合") continue;
+    if (s.startsWith(name) || s === name) return name;
+  }
+  if (/ODE|ordinary\s*diff/i.test(s)) return "ODE";
+  if (/数值|numer/i.test(s))           return "数值分析";
+  if (/线性|linear|matrix/i.test(s))   return "线性代数";
+  if (/概率|probab/i.test(s))          return "概率论";
+  if (/统计|stat/i.test(s))            return "数理统计";
+  if (/最优|optim/i.test(s))           return "最优化";
+  return null;
+}
+
+// AI 节点自动布局：按 course 归组，并追加到已有课程的同列正下方；未知课程进入右侧新列
+// 这是一个轻量 DAG 布局的替代实现 —— 用户上传资料越多，AI 节点越多，画布会自动向下/向右扩展
+function placeAiTopicsToTree(aiTopics, existingNodes) {
+  if (!Array.isArray(aiTopics) || aiTopics.length === 0) return [];
+  const groups = new Map();
+  for (const t of aiTopics) {
+    const course = inferCourseFromChapterTree(t.chapter) || "综合";
+    if (!groups.has(course)) groups.set(course, []);
+    groups.get(course).push(t);
+  }
+  const maxExistingX = existingNodes.length ? Math.max(...existingNodes.map(n => n.x)) : 800;
+  let freeColX = maxExistingX + 240;
+  const out = [];
+  for (const [course, topics] of groups.entries()) {
+    const existing = existingNodes.filter(n => n.course === course);
+    let col_x, base_y;
+    if (existing.length > 0) {
+      col_x = Math.min(...existing.map(n => n.x));
+      base_y = Math.max(...existing.map(n => n.y)) + 150;
+    } else {
+      col_x = freeColX;
+      freeColX += 180;
+      base_y = 70;
+    }
+    const seen = new Set();
+    let x = col_x, y = base_y, colOffset = 0;
+    for (const t of topics) {
+      const label = String(t.name || "").trim();
+      if (!label) continue;
+      const key = label.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        id: "ai:" + t.id,
+        label: label.length > 12 ? label.slice(0, 11) + "…" : label,
+        fullLabel: label,
+        sym: "✱",
+        course,
+        x: x + colOffset * 170,
+        y,
+        estMin: 20,
+        bullet: (t.summary || "AI 从你上传的资料里抽取的知识点").slice(0, 68),
+        chapter: t.chapter || null,
+        topics: [label],
+        deps: [],
+        isAI: true,
+        materialId: t.material_id,
+      });
+      y += 100;
+      if (y > base_y + 600) { colOffset += 1; y = base_y; }
+    }
+  }
+  return out;
+}
 
 // 状态派生：locked / unlocked / learning / mastered
 function deriveStatus(node, progress) {
@@ -12283,12 +12358,12 @@ function deriveStatus(node, progress) {
 }
 
 // 推荐下一步：已解锁 / 学习中 里，按（学习中优先 → 可解锁的下游节点数降序 → 时长升序）
-function computeRecommendations(progress) {
+function computeRecommendations(progress, nodeList = SKILL_TREE) {
   const candidates = [];
-  for (const n of SKILL_TREE) {
+  for (const n of nodeList) {
     const s = deriveStatus(n, progress);
     if (s === "unlocked" || s === "learning") {
-      const downstream = SKILL_TREE.filter(m => (m.deps || []).some(d => d.id === n.id && d.kind === "strong")).length;
+      const downstream = nodeList.filter(m => (m.deps || []).some(d => d.id === n.id && d.kind === "strong")).length;
       candidates.push({ node: n, status: s, downstream });
     }
   }
@@ -12336,6 +12411,50 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   // 打开知识点详情弹窗：{ name, chapterNum, course }
   const [modalTopic, setModalTopic] = useState(null);
 
+  // ══ AI 抽取的知识点（来自用户上传的资料）═══════════════════════
+  // 从 Supabase `material_topics` 表拉取，合并到树里。节点用 ✱ 标识，自动排版于其归属学科列下方
+  const [aiTopics, setAiTopics] = useState([]);
+  const [aiTopicsLoaded, setAiTopicsLoaded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("material_topics")
+          .select("id, material_id, name, summary, chapter, created_at")
+          .order("created_at", { ascending: true })
+          .limit(200);
+        if (cancelled) return;
+        if (!error && Array.isArray(data)) setAiTopics(data);
+      } catch { /* 静默：用户未登录 / 无此表时直接用内置树 */ }
+      finally { if (!cancelled) setAiTopicsLoaded(true); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // AI 节点 + 合并后的节点集 / 索引（替代原来的全局 SKILL_TREE / NODE_INDEX）
+  const aiNodes = useMemo(() => placeAiTopicsToTree(aiTopics, SKILL_TREE), [aiTopics]);
+  const treeNodes = useMemo(() => [...SKILL_TREE, ...aiNodes], [aiNodes]);
+  const nodeIndex = useMemo(() => Object.fromEntries(treeNodes.map(n => [n.id, n])), [treeNodes]);
+
+  // ══ 悬浮高亮：沿依赖链向上/向下扫描，点亮前置 + 后续，其他节点/边暗化 ══
+  const [hoveredId, setHoveredId] = useState(null);
+  const highlightSet = useMemo(() => {
+    if (!hoveredId) return null;
+    const s = new Set([hoveredId]);
+    const up = (id) => {
+      const n = nodeIndex[id]; if (!n) return;
+      for (const d of (n.deps || [])) if (!s.has(d.id)) { s.add(d.id); up(d.id); }
+    };
+    const down = (id) => {
+      for (const m of treeNodes) {
+        if ((m.deps || []).some(d => d.id === id) && !s.has(m.id)) { s.add(m.id); down(m.id); }
+      }
+    };
+    up(hoveredId); down(hoveredId);
+    return s;
+  }, [hoveredId, treeNodes, nodeIndex]);
+
   const openTopicModal = (nodeCourse, nodeChapter, topicName) => {
     const chapterNum = (nodeChapter || "").split(/\s+/).pop() || null; // "ODE Ch.2" -> "Ch.2"
     setModalTopic({ name: topicName, chapterNum, course: nodeCourse });
@@ -12366,30 +12485,29 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     else if (typeof setPage === "function") setPage(p);
   };
 
-  const courses = useMemo(() => ["全部", ...Array.from(new Set(SKILL_TREE.map(s => s.course)))], []);
+  const courses = useMemo(() => ["全部", ...Array.from(new Set(treeNodes.map(s => s.course)))], [treeNodes]);
   const visibleNodes = useMemo(() => (
-    selectedCourse === "全部" ? SKILL_TREE : SKILL_TREE.filter(n => n.course === selectedCourse)
-  ), [selectedCourse]);
+    selectedCourse === "全部" ? treeNodes : treeNodes.filter(n => n.course === selectedCourse)
+  ), [selectedCourse, treeNodes]);
   const visibleIds = useMemo(() => new Set(visibleNodes.map(n => n.id)), [visibleNodes]);
 
   const statusCounts = useMemo(() => {
     const c = { mastered: 0, learning: 0, unlocked: 0, locked: 0 };
-    SKILL_TREE.forEach(n => { c[deriveStatus(n, progress)]++; });
+    treeNodes.forEach(n => { c[deriveStatus(n, progress)]++; });
     return c;
-  }, [progress]);
+  }, [progress, treeNodes]);
 
-  const recommendations = useMemo(() => computeRecommendations(progress), [progress]);
+  const recommendations = useMemo(() => computeRecommendations(progress, treeNodes), [progress, treeNodes]);
   const recommendedSet = useMemo(() => new Set(recommendations.map(r => r.node.id)), [recommendations]);
 
-  // 复习提醒：已掌握 >= 7 天的
   const reviewDue = useMemo(() => {
     const now = Date.now();
-    return SKILL_TREE
+    return treeNodes
       .map(n => ({ node: n, p: progress[n.id] }))
       .filter(({ p }) => p && p.status === "mastered" && p.masteredAt && (now - p.masteredAt) >= 7 * MS_DAY)
       .sort((a, b) => a.p.masteredAt - b.p.masteredAt)
       .slice(0, 3);
-  }, [progress]);
+  }, [progress, treeNodes]);
 
   const mutate = (id, patch) => {
     setProgress(prev => {
@@ -12410,7 +12528,7 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const actPause   = (id) => mutate(id, { status: "learning", masteredAt: undefined });
   const actReset   = (id) => mutate(id, null);
 
-  const selected = selectedId ? NODE_INDEX[selectedId] : null;
+  const selected = selectedId ? nodeIndex[selectedId] : null;
   const selectedStatus = selected ? deriveStatus(selected, progress) : null;
 
   // 画布尺寸（预留顶部 24 / 底部 40 的呼吸空间；推荐光晕与阴影越界不再被裁切）
@@ -12513,32 +12631,32 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   // 边渲染：只保留双端都在当前视图内的边；cross-module 边用浅指示灰
   const edges = useMemo(() => {
     const list = [];
-    for (const n of SKILL_TREE) {
+    for (const n of treeNodes) {
       for (const d of (n.deps || [])) {
-        const src = NODE_INDEX[d.id];
+        const src = nodeIndex[d.id];
         if (!src) continue;
         if (!visibleIds.has(n.id) || !visibleIds.has(src.id)) continue;
         list.push({ from: src, to: n, kind: d.kind });
       }
     }
     return list;
-  }, [visibleIds]);
+  }, [visibleIds, treeNodes, nodeIndex]);
 
   const edgeColor = (kind, crossCourse, targetStatus) => {
-    if (targetStatus === "locked") return "#E5E7EB";
+    if (targetStatus === "locked") return "#CBD5E1"; // 由 #E5E7EB 加深，让指向"未解锁"的虚线也可辨
     if (crossCourse) return "#818CF8"; // 跨模块一律紫靛
-    if (kind === "peer") return "#CBD5E1";
-    if (kind === "weak") return "#94A3B8";
-    return "#64748B"; // strong
+    if (kind === "peer") return "#94A3B8"; // peer 由 #CBD5E1 加深
+    if (kind === "weak") return "#64748B"; // weak 由 #94A3B8 加深
+    return "#475569"; // strong 由 #64748B 加深 —— 让主学习路径更醒目
   };
 
   const nodeVisual = (status, course) => {
     const c = COURSE_COLORS_TREE[course] || COURSE_COLORS_TREE["数值分析"];
-    if (status === "mastered") return { fill: c.solid,  stroke: c.ink,    strokeW: 2.5, labelColor: "#fff",  symColor: "#fff",     symOpacity: 0.95, dash: "0",   opacity: 1,    shadow: "0 6px 18px " + c.solid + "55" };
-    if (status === "learning") return { fill: c.soft,   stroke: c.solid,  strokeW: 2,   labelColor: c.ink,   symColor: c.solid,    symOpacity: 1,    dash: "0",   opacity: 1,    shadow: "0 4px 12px rgba(15,23,42,0.06)" };
-    if (status === "unlocked") return { fill: "#FFFFFF",stroke: c.solid,  strokeW: 1.75,labelColor: c.ink,   symColor: c.solid,    symOpacity: 0.9,  dash: "0",   opacity: 1,    shadow: "0 2px 8px rgba(15,23,42,0.05)" };
-    // locked
-    return { fill: "#F8FAFC", stroke: "#CBD5E1", strokeW: 1.25, labelColor: "#94A3B8", symColor: "#CBD5E1", symOpacity: 1, dash: "4 4", opacity: 0.85, shadow: "none" };
+    if (status === "mastered") return { fill: c.solid,  stroke: c.ink,    strokeW: 2.5, labelColor: "#fff",    symColor: "#fff",     symOpacity: 0.95, dash: "0",   opacity: 1, shadow: "0 6px 18px " + c.solid + "55" };
+    if (status === "learning") return { fill: c.soft,   stroke: c.solid,  strokeW: 2,   labelColor: c.ink,     symColor: c.solid,    symOpacity: 1,    dash: "0",   opacity: 1, shadow: "0 4px 12px rgba(15,23,42,0.06)" };
+    if (status === "unlocked") return { fill: "#FFFFFF",stroke: c.solid,  strokeW: 1.75,labelColor: c.ink,     symColor: c.solid,    symOpacity: 0.9,  dash: "0",   opacity: 1, shadow: "0 2px 8px rgba(15,23,42,0.05)" };
+    // locked —— 加深对比度以满足 WCAG：底色改为淡灰 + 斜线底纹、边框与文字都用深灰
+    return { fill: "url(#mc-hatch-locked)", stroke: "#94A3B8", strokeW: 1.5, labelColor: "#475569", symColor: "#64748B", symOpacity: 1, dash: "5 4", opacity: 1, shadow: "none" };
   };
 
   const backTarget = (typeof setPage === "function") ? (() => setPage("首页")) : null;
@@ -12561,7 +12679,11 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         {backTarget && <Btn size="sm" onClick={backTarget}>← 返回</Btn>}
         <div>
           <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em", color: "#0F172A", lineHeight: 1.15 }}>知识树</div>
-          <div style={{ fontSize: 13, color: "#94A3B8", marginTop: 4 }}>{SKILL_TREE.length} 个知识点 · {Array.from(new Set(SKILL_TREE.map(n => n.course))).length} 个学科 · 双击节点查看详情</div>
+          <div style={{ fontSize: 13, color: "#94A3B8", marginTop: 4 }}>
+            {treeNodes.length} 个知识点 · {Array.from(new Set(treeNodes.map(n => n.course))).length} 个学科
+            {aiNodes.length > 0 && <> · <span style={{ color: "#7C3AED", fontWeight: 600 }}>✱ {aiNodes.length} 个 AI 抽取</span></>}
+            {" "}· 双击节点看详情 · 悬浮点亮学习路径
+          </div>
         </div>
         {/* 状态徽章作为筛选器（原理 5：装饰数字 → 功能数字） */}
         <div style={{ display: "flex", gap: 8, marginLeft: "auto", flexWrap: "wrap", alignItems: "center" }}>
@@ -12639,17 +12761,26 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
              }}>
           <defs>
             <marker id="mc-arrow-strong" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 Z" fill="#64748B" />
+              <path d="M 0 0 L 10 5 L 0 10 Z" fill="#475569" />
             </marker>
             <marker id="mc-arrow-weak" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 Z" fill="#94A3B8" />
+              <path d="M 0 0 L 10 5 L 0 10 Z" fill="#64748B" />
             </marker>
             <marker id="mc-arrow-cross" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 Z" fill="#818CF8" />
             </marker>
             <marker id="mc-arrow-locked" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-              <path d="M 0 0 L 10 5 L 0 10 Z" fill="#E5E7EB" />
+              <path d="M 0 0 L 10 5 L 0 10 Z" fill="#94A3B8" />
             </marker>
+            {/* 用于悬浮高亮的强化箭头（绿色） */}
+            <marker id="mc-arrow-hi" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 Z" fill="#0F766E" />
+            </marker>
+            {/* locked 节点底纹：斜线 hatch，和纯灰底色比多一层"这是可达但未解锁"的材质感 */}
+            <pattern id="mc-hatch-locked" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+              <rect width="6" height="6" fill="#F1F5F9" />
+              <line x1="0" y1="0" x2="0" y2="6" stroke="#CBD5E1" strokeWidth="1" />
+            </pattern>
           </defs>
 
           <g transform={`translate(0, ${CANVAS_TOP_PAD})`}>
@@ -12657,14 +12788,13 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           {edges.map(({ from, to, kind }, i) => {
             const crossCourse = from.course !== to.course;
             const targetStatus = deriveStatus(to, progress);
-            const color = edgeColor(kind, crossCourse, targetStatus);
+            const baseColor = edgeColor(kind, crossCourse, targetStatus);
 
             const sx = from.x + NODE_W / 2;
             const sy = from.y + NODE_H / 2;
             const tx = to.x + NODE_W / 2;
             const ty = to.y + NODE_H / 2;
 
-            // 收缩两端 (~NODE_H/2) 以免钻进节点
             const dx = tx - sx, dy = ty - sy;
             const len = Math.max(1, Math.hypot(dx, dy));
             const ux = dx / len, uy = dy / len;
@@ -12675,24 +12805,37 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
             const y2 = ty - uy * pad;
 
             let dash = "0";
-            if (targetStatus === "locked") dash = "4 4";
-            else if (kind === "weak") dash = "6 4";
+            if (targetStatus === "locked") dash = "5 4";
+            else if (kind === "weak") dash = "7 4";
             else if (kind === "peer") dash = "2 5";
+
+            // 判定这条边是否在悬浮节点的学习路径上
+            const onHoverPath = highlightSet && highlightSet.has(from.id) && highlightSet.has(to.id);
+            const dimmedByHover = highlightSet && !onHoverPath;
+
+            let color = baseColor;
+            let strokeW = kind === "strong" ? 2.25 : 1.75;
+            if (onHoverPath) { color = "#0F766E"; strokeW = kind === "strong" ? 3 : 2.25; }
 
             const markerEnd = kind === "peer"
               ? null
+              : onHoverPath ? "url(#mc-arrow-hi)"
               : targetStatus === "locked" ? "url(#mc-arrow-locked)"
               : crossCourse ? "url(#mc-arrow-cross)"
               : kind === "weak" ? "url(#mc-arrow-weak)" : "url(#mc-arrow-strong)";
+
+            const baseOpacity = targetStatus === "locked" ? 0.82 : 0.95;
+            const opacity = dimmedByHover ? 0.12 : (onHoverPath ? 1 : baseOpacity);
 
             return (
               <line
                 key={i}
                 x1={x1} y1={y1} x2={x2} y2={y2}
-                stroke={color} strokeWidth={kind === "strong" ? 1.75 : 1.25}
+                stroke={color} strokeWidth={strokeW}
                 strokeDasharray={dash}
                 markerEnd={markerEnd || undefined}
-                opacity={targetStatus === "locked" ? 0.7 : 0.9}
+                opacity={opacity}
+                style={{ transition: "stroke .18s, stroke-width .18s, opacity .18s" }}
               />
             );
           })}
@@ -12703,18 +12846,35 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
             const v = nodeVisual(status, node.course);
             const isRecommended = recommendedSet.has(node.id) && status !== "mastered";
             const isSelected = selectedId === node.id;
+            const isHovered = hoveredId === node.id;
             // 状态筛选：未命中的节点变暗但仍可交互
             const dimmedByFilter = statusFilter && statusFilter !== status;
-            const effectiveOpacity = dimmedByFilter ? 0.25 : v.opacity;
+            // 悬浮高亮：不在路径上的全部暗化
+            const onHoverPath = highlightSet && highlightSet.has(node.id);
+            const dimmedByHover = highlightSet && !onHoverPath;
+            const effectiveOpacity = dimmedByHover ? 0.22 : (dimmedByFilter ? 0.25 : v.opacity);
 
             return (
               <g key={node.id}
                  data-node="1"
                  transform={"translate(" + node.x + "," + node.y + ")"}
                  onMouseDown={(e) => e.stopPropagation()}
+                 onMouseEnter={() => setHoveredId(node.id)}
+                 onMouseLeave={() => setHoveredId(prev => prev === node.id ? null : prev)}
                  onClick={(e) => { e.stopPropagation(); setSelectedId(node.id); }}
                  onDoubleClick={(e) => { e.stopPropagation(); setSelectedId(node.id); setPopoverOpen(true); }}
-                 style={{ cursor: status === "locked" ? "help" : "pointer", opacity: effectiveOpacity, transition: "opacity .25s" }}>
+                 style={{ cursor: status === "locked" ? "help" : "pointer", opacity: effectiveOpacity, transition: "opacity .22s" }}>
+                {/* 悬浮起点：在节点外加一圈高亮描边，直观提示"以这个节点为锚" */}
+                {isHovered && (
+                  <rect x={-4} y={-4} width={NODE_W + 8} height={NODE_H + 8} rx={15}
+                        fill="none" stroke="#0F766E" strokeWidth="2" opacity="0.85"
+                        style={{ filter: "drop-shadow(0 0 8px rgba(15,118,110,0.35))" }} />
+                )}
+                {/* 悬浮路径上的其他节点：细一点的绿色外描，提示"同一学习路径" */}
+                {!isHovered && onHoverPath && (
+                  <rect x={-2} y={-2} width={NODE_W + 4} height={NODE_H + 4} rx={13}
+                        fill="none" stroke="#0F766E" strokeWidth="1.25" opacity="0.55" strokeDasharray="4 3" />
+                )}
                 {/* Recommendation halo */}
                 {isRecommended && (
                   <rect x={-6} y={-6} width={NODE_W + 12} height={NODE_H + 12} rx={16}
@@ -12871,7 +13031,7 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
                   {(selected.deps || []).length === 0 && <span style={{ fontSize: 11, color: "#CBD5E1" }}>入门节点，可直接开始</span>}
                   {(selected.deps || []).map(d => {
-                    const depNode = NODE_INDEX[d.id];
+                    const depNode = nodeIndex[d.id];
                     if (!depNode) return null;
                     const depSt = deriveStatus(depNode, progress);
                     return (
@@ -13018,8 +13178,8 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
             )}
             {cockpitTab === "progress" && (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
-                {Array.from(new Set(SKILL_TREE.map(n => n.course))).map(course => {
-                  const courseNodes = SKILL_TREE.filter(n => n.course === course);
+                {Array.from(new Set(treeNodes.map(n => n.course))).map(course => {
+                  const courseNodes = treeNodes.filter(n => n.course === course);
                   const masteredN = courseNodes.filter(n => progress[n.id]?.status === "mastered").length;
                   const learningN = courseNodes.filter(n => progress[n.id]?.status === "learning").length;
                   const total = courseNodes.length;
