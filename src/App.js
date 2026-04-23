@@ -12612,7 +12612,49 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     setSelectedId(null);
   };
 
-  const resetView = () => { setZoom(DEFAULT_ZOOM); setPan({ x: 0, y: 0 }); };
+  // ══ fitView —— 按画布与内容尺寸自适应：把整棵（筛选后的）树整体居中、完整落入视口
+  //    解决"底部节点被裁切"的问题：之前 resetView 用固定 0.7x，当内容高度 > 容器高度时必然溢出
+  const fitView = useCallback(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 10 || rect.height < 10) return;
+    if (!visibleNodes || visibleNodes.length === 0) return;
+    const xs = visibleNodes.map(n => n.x);
+    const ys = visibleNodes.map(n => n.y);
+    const minX = Math.min(...xs) - 24;
+    const maxXl = Math.max(...xs) + NODE_W + 24;
+    const minY = -16;                                // 顶部给推荐光晕/选中环留呼吸
+    const maxYl = Math.max(...ys) + NODE_H + 24;     // 底部同样留呼吸
+    const contentW = Math.max(maxXl - minX, 400);
+    const contentH = Math.max(maxYl - minY, 300);
+    const padX = 24, padY = 16;
+    const fz = Math.min(
+      (rect.width  - padX * 2) / contentW,
+      (rect.height - padY * 2) / contentH,
+    );
+    const z = Math.max(MIN_ZOOM, Math.min(1.0, fz));
+    const panX = (rect.width  - contentW * z) / 2 - (minX + CANVAS_TOP_PAD * 0) * z;
+    const panY = (rect.height - contentH * z) / 2 - (minY + CANVAS_TOP_PAD) * z;
+    setZoom(z);
+    setPan({ x: panX, y: panY });
+  }, [visibleNodes]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 首次渲染 + 课程筛选切换 + AI 节点数变化 → 自动 fitView
+  useEffect(() => {
+    // 等 DOM layout 完成
+    const t = setTimeout(() => fitView(), 0);
+    return () => clearTimeout(t);
+  }, [fitView]);
+
+  // 视口尺寸变化（侧栏展开/折叠、窗口缩放）→ 重算
+  useEffect(() => {
+    const onResize = () => fitView();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [fitView]);
+
+  const resetView = () => fitView();
   const zoomBy = (factor) => {
     setZoom(prevZoom => {
       const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prevZoom * factor));
