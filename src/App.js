@@ -3653,39 +3653,298 @@ const ProgressBar = ({ value, max = 100, color = G.teal, height = 8 }) => (
 );
 
 // ── Email Confirmed Page ───────────────────────────────────────────────────────
-function EmailConfirmedPage({ onContinue }) {
+// ── Math quotes Easter egg: 每次进入验证页随机展示一条 ────────────────────────
+const MATH_QUOTES = [
+  { text: "In mathematics, the art of proposing a question must be held of higher value than solving it.", by: "Georg Cantor" },
+  { text: "Pure mathematics is, in its way, the poetry of logical ideas.", by: "Albert Einstein" },
+  { text: "Mathematics is the music of reason.", by: "James Joseph Sylvester" },
+  { text: "The essence of mathematics lies in its freedom.", by: "Georg Cantor" },
+  { text: "Mathematics is the language in which God has written the universe.", by: "Galileo Galilei" },
+  { text: "It is impossible to be a mathematician without being a poet in soul.", by: "Sofia Kovalevskaya" },
+  { text: "Mathematics knows no races or geographic boundaries; for mathematics, the cultural world is one country.", by: "David Hilbert" },
+  { text: "An equation means nothing to me unless it expresses a thought of God.", by: "Srinivasa Ramanujan" },
+];
+
+// 几何装饰底纹：两条淡淡的 sin 曲线 + 点阵网格，营造数学氛围
+function MathDecorBg({ accent = "#1D9E75" }) {
+  return (
+    <svg
+      aria-hidden
+      width="100%" height="100%"
+      viewBox="0 0 1440 900"
+      preserveAspectRatio="xMidYMid slice"
+      style={{ position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none", opacity: 0.55 }}
+    >
+      <defs>
+        <pattern id="mc-dot-grid" x="0" y="0" width="36" height="36" patternUnits="userSpaceOnUse">
+          <circle cx="1.5" cy="1.5" r="1.2" fill="#E5E7EB" />
+        </pattern>
+        <linearGradient id="mc-sin-a" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor={accent} stopOpacity="0" />
+          <stop offset="50%" stopColor={accent} stopOpacity="0.35" />
+          <stop offset="100%" stopColor={accent} stopOpacity="0" />
+        </linearGradient>
+        <linearGradient id="mc-sin-b" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#6366F1" stopOpacity="0" />
+          <stop offset="50%" stopColor="#6366F1" stopOpacity="0.28" />
+          <stop offset="100%" stopColor="#6366F1" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <rect x="0" y="0" width="1440" height="900" fill="url(#mc-dot-grid)" />
+      {/* sin(x) 主曲线 */}
+      <path
+        d="M -50 500 Q 180 280, 360 500 T 720 500 T 1080 500 T 1440 500 L 1490 500"
+        fill="none" stroke="url(#mc-sin-a)" strokeWidth="2.5"
+      />
+      {/* cos-like 副曲线（相位偏移） */}
+      <path
+        d="M -50 620 Q 180 420, 360 620 T 720 620 T 1080 620 T 1440 620 L 1490 620"
+        fill="none" stroke="url(#mc-sin-b)" strokeWidth="2"
+      />
+      {/* 数学公式点缀 */}
+      <text x="80" y="180" fontFamily="Georgia, serif" fontStyle="italic" fontSize="20" fill="#CBD5E1">∫ f(x)dx</text>
+      <text x="1240" y="230" fontFamily="Georgia, serif" fontStyle="italic" fontSize="22" fill="#CBD5E1">Q.E.D.</text>
+      <text x="120" y="760" fontFamily="Georgia, serif" fontStyle="italic" fontSize="18" fill="#CBD5E1">e^(iπ) + 1 = 0</text>
+      <text x="1220" y="780" fontFamily="Georgia, serif" fontStyle="italic" fontSize="18" fill="#CBD5E1">∑ 1/n²</text>
+    </svg>
+  );
+}
+
+// 动态打勾 SVG —— 圆圈与勾画一笔一笔描出来
+function AnimatedCheck({ color = "#1D9E75", size = 112 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 120 120" aria-hidden>
+      <defs>
+        <linearGradient id="mc-check-bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.18" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <motion.circle
+        cx="60" cy="60" r="56" fill="url(#mc-check-bg)"
+        initial={{ scale: 0.6, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+      />
+      <motion.circle
+        cx="60" cy="60" r="46" fill="none" stroke={color} strokeWidth="4" strokeLinecap="round"
+        initial={{ pathLength: 0, opacity: 0.4 }}
+        animate={{ pathLength: 1, opacity: 1 }}
+        transition={{ duration: 0.7, ease: "easeInOut", delay: 0.12 }}
+      />
+      <motion.path
+        d="M42 62 L55 75 L80 48"
+        fill="none" stroke={color} strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"
+        initial={{ pathLength: 0 }}
+        animate={{ pathLength: 1 }}
+        transition={{ duration: 0.45, ease: "easeOut", delay: 0.55 }}
+      />
+    </svg>
+  );
+}
+
+// 动态失效图标 —— 断裂链条
+function AnimatedBrokenLink({ color = "#F59E0B", size = 112 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 120 120" aria-hidden>
+      <motion.circle cx="60" cy="60" r="56" fill={color} fillOpacity="0.10"
+        initial={{ scale: 0.7, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.5 }} />
+      <motion.path
+        d="M45 60 q-10 0 -10 10 q0 10 10 10 h8"
+        fill="none" stroke={color} strokeWidth="5" strokeLinecap="round"
+        initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.6, delay: 0.2 }}
+      />
+      <motion.path
+        d="M75 60 q10 0 10 -10 q0 -10 -10 -10 h-8"
+        fill="none" stroke={color} strokeWidth="5" strokeLinecap="round"
+        initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.6, delay: 0.35 }}
+      />
+      <motion.line x1="52" y1="48" x2="68" y2="72" stroke={color} strokeWidth="5" strokeLinecap="round"
+        initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.3, delay: 0.85 }} />
+    </svg>
+  );
+}
+
+// ── 邮箱验证反馈页：成功 / 失败(链接失效) 双状态 ───────────────────────────────
+function EmailVerificationResult({ mode = "success", errorMessage = "", userName = "", onContinue, onResend }) {
+  const isSuccess = mode === "success";
+  const accent = isSuccess ? "#1D9E75" : "#F59E0B";
+
+  const quote = useMemo(() => MATH_QUOTES[Math.floor(Math.random() * MATH_QUOTES.length)], []);
+
+  const [countdown, setCountdown] = useState(isSuccess ? 5 : null);
+  const [autoRedirectOn, setAutoRedirectOn] = useState(isSuccess);
   useEffect(() => {
-    // 清除 Supabase 自动建立的 session，要求用户手动登录
-    supabase.auth.signOut();
-  }, []);
+    if (!autoRedirectOn) return;
+    if (countdown === 0) { onContinue && onContinue(); return; }
+    const t = setTimeout(() => setCountdown(c => (c == null ? c : c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [countdown, autoRedirectOn, onContinue]);
+
+  const [resendEmail, setResendEmail] = useState("");
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendMsg, setResendMsg] = useState("");
+  const handleResendClick = async () => {
+    if (!resendEmail.trim() || !/@/.test(resendEmail)) { setResendMsg("请输入有效邮箱"); return; }
+    setResendLoading(true); setResendMsg("");
+    try {
+      const r = await onResend?.(resendEmail.trim());
+      if (r?.error) setResendMsg("发送失败：" + r.error);
+      else setResendMsg("✓ 新的验证邮件已发送，请查收（也看看垃圾邮件文件夹）");
+    } catch (e) { setResendMsg("发送失败：" + (e?.message || "网络错误")); }
+    setResendLoading(false);
+  };
 
   return (
-    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #f0fdf8 0%, #e8f4ff 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
-      <div style={{ textAlign: "center", maxWidth: 440 }}>
-        {/* 图标 */}
-        <div style={{ width: 88, height: 88, borderRadius: 28, background: G.teal, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 44, margin: "0 auto 28px", boxShadow: "0 8px 32px rgba(29,158,117,0.25)" }}>✅</div>
+    <div style={{
+      position: "relative", minHeight: "100vh", width: "100vw",
+      background: "linear-gradient(180deg, #FAFAFC 0%, #F3F4F6 100%)",
+      overflow: "hidden", display: "flex", flexDirection: "column",
+    }}>
+      <MathDecorBg accent={accent} />
 
-        <div style={{ fontSize: 28, fontWeight: 700, color: "#111", marginBottom: 12, letterSpacing: "-0.5px" }}>邮箱验证成功！</div>
-        <div style={{ fontSize: 16, color: "#555", lineHeight: 1.8, marginBottom: 32 }}>
-          你的账号已完成邮箱确认，可以关闭此页面，<br />回到 MathCore 网站进行登录。
+      <header style={{ position: "relative", zIndex: 2, padding: "24px 32px", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 38, height: 38, borderRadius: 10, background: "#111827", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 4px 14px rgba(17,24,39,0.18)" }}>
+          <span style={{ color: "#fff", fontSize: 18, fontWeight: 800, lineHeight: 1 }}>M</span>
         </div>
+        <span style={{ fontSize: 16, fontWeight: 800, color: "#111827", letterSpacing: "-0.02em" }}>MathCore</span>
+      </header>
 
-        <div style={{ background: "#fff", border: `1.5px solid ${G.teal}33`, borderRadius: 16, padding: "1.2rem 1.5rem", marginBottom: 28, textAlign: "left" }}>
-          <div style={{ fontSize: 13, color: "#666", lineHeight: 1.9 }}>
-            <div>1. 打开 <a href="https://mathcore-theta.vercel.app" style={{ color: G.teal, fontWeight: 600 }}>mathcore-theta.vercel.app</a></div>
-            <div>2. 用你注册时的邮箱和密码登录</div>
-            <div>3. 开始你的数学学习之旅 🎓</div>
-          </div>
-        </div>
-
-        <button
-          onClick={onContinue}
-          style={{ padding: "14px 40px", fontSize: 16, fontWeight: 700, fontFamily: "inherit", background: G.teal, color: "#fff", border: "none", borderRadius: 14, cursor: "pointer", boxShadow: "0 4px 16px rgba(29,158,117,0.3)" }}
+      <main style={{ position: "relative", zIndex: 2, flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px" }}>
+        <motion.div
+          initial={{ opacity: 0, y: 24, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ type: "spring", stiffness: 220, damping: 26 }}
+          style={{
+            maxWidth: 520, width: "100%", textAlign: "center",
+            background: "#FFFFFF", borderRadius: 24,
+            padding: "48px 40px",
+            boxShadow: "0 24px 60px rgba(15,23,42,0.08), 0 4px 16px rgba(15,23,42,0.04)",
+            border: "1px solid rgba(229,231,235,0.6)",
+          }}
         >
-          前往登录 →
-        </button>
-        <div style={{ marginTop: 14, fontSize: 13, color: "#aaa" }}>点击按钮或直接访问网站登录</div>
-      </div>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 24 }}>
+            {isSuccess ? <AnimatedCheck color={accent} /> : <AnimatedBrokenLink color={accent} />}
+          </div>
+
+          <motion.h1
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }}
+            style={{ margin: 0, fontSize: 30, fontWeight: 800, color: "#111827", letterSpacing: "-0.03em", lineHeight: 1.2 }}
+          >
+            {isSuccess ? "验证成功！欢迎来到 MathCore" : "链接已失效"}
+          </motion.h1>
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.85 }}
+            style={{ marginTop: 6, fontSize: 13.5, color: "#9CA3AF", fontWeight: 500, letterSpacing: "0.02em" }}
+          >
+            {isSuccess ? "Verification Successful · Welcome to MathCore" : "Verification Link Expired"}
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.95 }}
+            style={{ marginTop: 22, fontSize: 15.5, color: "#374151", lineHeight: 1.75 }}
+          >
+            {isSuccess ? (
+              <>
+                {userName
+                  ? <>Hi, <b style={{ color: "#111827" }}>{userName}</b>！你的账号已激活，准备好解开下一个难题了吗？</>
+                  : <>您的账号已激活。</>
+                }
+                <br />
+                <span style={{ color: "#6B7280", fontSize: 14 }}>The beauty of logic starts here · 逻辑之美，从这里开始</span>
+              </>
+            ) : (
+              <>
+                出于安全考虑，验证链接在 24 小时后失效，或已被使用过。<br />
+                <span style={{ color: "#6B7280", fontSize: 14 }}>For security, verification links expire after 24 hours.</span>
+                {errorMessage && (
+                  <div style={{ marginTop: 12, fontSize: 12, color: "#9CA3AF", fontFamily: "ui-monospace, monospace", background: "#F9FAFB", padding: "8px 12px", borderRadius: 8, border: "1px solid #F3F4F6", wordBreak: "break-word" }}>
+                    {errorMessage}
+                  </div>
+                )}
+              </>
+            )}
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.1 }}
+            style={{ marginTop: 30 }}
+          >
+            {isSuccess ? (
+              <>
+                <button
+                  onClick={onContinue}
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: 10,
+                    padding: "14px 36px", fontSize: 15.5, fontWeight: 700, fontFamily: "inherit",
+                    background: "#111827", color: "#fff", border: "none", borderRadius: 14,
+                    cursor: "pointer", boxShadow: "0 10px 28px rgba(17,24,39,0.22)",
+                    transition: "transform 0.15s, box-shadow 0.15s",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 14px 32px rgba(17,24,39,0.28)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "0 10px 28px rgba(17,24,39,0.22)"; }}
+                >
+                  立即探索 · Explore Now
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
+                </button>
+                {autoRedirectOn && countdown != null && (
+                  <div style={{ marginTop: 14, fontSize: 13, color: "#9CA3AF" }}>
+                    页面将在 <b style={{ color: accent }}>{countdown}</b> 秒后自动跳转到主页 ·{" "}
+                    <button onClick={() => setAutoRedirectOn(false)} style={{ background: "none", border: "none", color: "#6B7280", textDecoration: "underline", cursor: "pointer", padding: 0, fontFamily: "inherit", fontSize: 13 }}>取消</button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div>
+                <input
+                  type="email" value={resendEmail} onChange={e => setResendEmail(e.target.value)}
+                  placeholder="输入你的注册邮箱"
+                  style={{
+                    width: "100%", padding: "13px 16px", fontSize: 15, fontFamily: "inherit",
+                    border: "1.5px solid #E5E7EB", borderRadius: 12, outline: "none",
+                    color: "#111827", boxSizing: "border-box", marginBottom: 12,
+                  }}
+                  onFocus={(e) => { e.target.style.borderColor = accent; }}
+                  onBlur={(e) => { e.target.style.borderColor = "#E5E7EB"; }}
+                />
+                <button
+                  onClick={handleResendClick}
+                  disabled={resendLoading}
+                  style={{
+                    width: "100%", padding: "13px 0", fontSize: 15, fontWeight: 700, fontFamily: "inherit",
+                    background: resendLoading ? "#E5E7EB" : accent, color: "#fff", border: "none", borderRadius: 12,
+                    cursor: resendLoading ? "not-allowed" : "pointer",
+                    boxShadow: resendLoading ? "none" : "0 8px 22px rgba(245,158,11,0.25)",
+                  }}
+                >
+                  {resendLoading ? "发送中…" : "重新发送验证邮件 · Resend"}
+                </button>
+                {resendMsg && (
+                  <div style={{ marginTop: 12, fontSize: 13, color: resendMsg.startsWith("✓") ? "#065F46" : "#B91C1C" }}>{resendMsg}</div>
+                )}
+                <div style={{ marginTop: 18 }}>
+                  <button onClick={onContinue} style={{ background: "none", border: "none", color: "#6B7280", textDecoration: "underline", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>
+                    返回登录页
+                  </button>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        </motion.div>
+      </main>
+
+      <footer style={{ position: "relative", zIndex: 2, padding: "28px 32px 32px", textAlign: "center" }}>
+        <motion.div
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.4 }}
+          style={{ maxWidth: 620, margin: "0 auto", fontSize: 13, fontFamily: "Georgia, 'Times New Roman', serif", fontStyle: "italic", color: "#6B7280", lineHeight: 1.75 }}
+        >
+          “{quote.text}”
+          <div style={{ marginTop: 4, fontStyle: "normal", fontSize: 12, color: "#9CA3AF", letterSpacing: "0.04em" }}>— {quote.by}</div>
+        </motion.div>
+        <div style={{ marginTop: 22, fontSize: 12, color: "#9CA3AF" }}>
+          有疑问？<a href="mailto:support@mathcore.app" style={{ color: "#6B7280", textDecoration: "underline" }}>联系支持</a>
+        </div>
+      </footer>
     </div>
   );
 }
@@ -3726,7 +3985,9 @@ function AuthPage() {
       email, password,
       options: {
         data: { name, role },
-        emailRedirectTo: "https://mathcore-theta.vercel.app",
+        // 注意：emailRedirectTo 必须位于 Supabase 后台 Redirect URLs 白名单；
+        // 这里用当前 origin，保证本地调试 / 预览环境 / 生产都能正常落回。
+        emailRedirectTo: (typeof window !== "undefined" ? window.location.origin : "https://mathcore-theta.vercel.app"),
       },
     });
     if (error) {
@@ -5793,6 +6054,42 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       <div className="premium-card" style={{ marginBottom: 14, padding: "14px 18px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            {/* 退出当前小测，回到选题初始界面 —— 任何时候都显式可见，避免用户被困在题里 */}
+            <button
+              onClick={() => {
+                const progressed = Object.keys(answerRecords).length > 0;
+                if (progressed) {
+                  const ok = window.confirm("确定返回小测首页吗？当前做题进度不会保存。");
+                  if (!ok) return;
+                }
+                // 回到选题界面：清空所有答题态，但保留题库与章节筛选
+                setQuizMode(null);
+                setFinished(false);
+                setCurrent(0);
+                setSelected(null);
+                setAnswered(false);
+                setScore(0);
+                setWrongList([]);
+                setAnswerRecords({});
+                setRevealedAnswer(false);
+                setDisplayQ([]);
+                setTimer(0);
+              }}
+              title="返回小测首页 · 重新选题"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "5px 10px", fontSize: 12, fontWeight: 600,
+                color: "#4B5563", background: "#F9FAFB",
+                border: "1px solid #E5E7EB", borderRadius: 8,
+                cursor: "pointer", fontFamily: "inherit",
+                transition: "background .15s, border-color .15s, color .15s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#F3F4F6"; e.currentTarget.style.borderColor = "#D1D5DB"; e.currentTarget.style.color = "#111827"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#F9FAFB"; e.currentTarget.style.borderColor = "#E5E7EB"; e.currentTarget.style.color = "#4B5563"; }}
+            >
+              ← 小测首页
+            </button>
+            <span style={{ width: 1, height: 14, background: "#E5E7EB" }} />
             <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-primary)" }}>
               第 {current + 1} / {displayQ.length} 题
             </span>
@@ -12195,6 +12492,8 @@ export default function App() {
   const switchStudyTab = (tab) => setStudyTab(tab);
   const [sessionAnswers, setSessionAnswers] = useState({});
   const [emailJustConfirmed, setEmailJustConfirmed] = useState(false);
+  // 邮箱验证链接失效/出错时的信息（由 URL hash 中的 error / error_description 推出）
+  const [emailVerifyError, setEmailVerifyError] = useState(null); // { message } | null
   const [surface, setSurface] = useState("gateway");
   const springNav = { type: "spring", stiffness: 260, damping: 25 };
   const workspaceMode = useMathStore((s) => s.workspaceMode);
@@ -12250,6 +12549,40 @@ export default function App() {
     // App 挂载后异步拉一次平台 providers 状态，让 popover 一打开就能显示"平台免费"徽章
     fetchPlatformProviders();
 
+    // ── 邮箱验证反馈：解析 URL 上 Supabase 带回的 hash / query 参数 ────────────
+    //   成功链接：  …/#access_token=…&refresh_token=…&type=signup
+    //   失效链接：  …/#error=access_denied&error_code=otp_expired&error_description=…
+    try {
+      const hash = (typeof window !== "undefined" && window.location.hash) || "";
+      const search = (typeof window !== "undefined" && window.location.search) || "";
+      const parseKV = (str) => {
+        const m = {};
+        String(str || "").replace(/^[#?]/, "").split("&").forEach((kv) => {
+          if (!kv) return;
+          const [k, v] = kv.split("=");
+          if (k) m[decodeURIComponent(k)] = decodeURIComponent((v || "").replace(/\+/g, " "));
+        });
+        return m;
+      };
+      const hp = parseKV(hash);
+      const qp = parseKV(search);
+      if (hp.error || qp.error) {
+        const errCode = hp.error_code || qp.error_code || hp.error || qp.error;
+        const errDesc = hp.error_description || qp.error_description || "";
+        setEmailVerifyError({
+          code: errCode || "verify_failed",
+          message: errDesc || errCode || "验证链接无效或已过期",
+        });
+        // 清掉 URL 上的错误标记，避免刷新后仍卡在失败态
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState(null, "", window.location.pathname);
+        }
+      } else if (hp.type === "signup" && hp.access_token) {
+        // 由 onAuthStateChange 的 SIGNED_IN 负责挂起欢迎页，这里只兜底打上 marker
+        localStorage.setItem("mc_confirm_pending", String(Date.now()));
+      }
+    } catch {}
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) loadProfile(session.user.id);
@@ -12257,12 +12590,11 @@ export default function App() {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" || event === "EMAIL_CONFIRMED") {
+      if (event === "SIGNED_IN" || event === "EMAIL_CONFIRMED" || event === "USER_UPDATED") {
         // 判断是否来自邮箱验证（注册时打的标记）
         const pendingTs = localStorage.getItem("mc_confirm_pending");
         if (pendingTs) {
           const age = Date.now() - Number(pendingTs);
-          // 标记有效期 48 小时（用户可能不会立刻点确认链接）
           if (age < 48 * 3600 * 1000) {
             setEmailJustConfirmed(true);
           }
@@ -12276,6 +12608,23 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // 失败页：用户点"重新发送验证邮件"时调用
+  const handleResendVerification = async (email) => {
+    try {
+      const redirectTo = (typeof window !== "undefined" ? window.location.origin : undefined);
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: redirectTo ? { emailRedirectTo: redirectTo } : undefined,
+      });
+      if (error) return { error: error.message };
+      localStorage.setItem("mc_confirm_pending", String(Date.now()));
+      return { ok: true };
+    } catch (e) {
+      return { error: e?.message || "网络错误" };
+    }
+  };
 
   const loadProfile = async (userId) => {
     const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
@@ -12299,7 +12648,27 @@ export default function App() {
     </div>
   );
 
-  if (emailJustConfirmed) return <EmailConfirmedPage onContinue={() => { setEmailJustConfirmed(false); }} />;
+  // 1) 链接失效/出错 —— 只要检测到错误就优先展示（此时 session 可能为空）
+  if (emailVerifyError) {
+    return (
+      <EmailVerificationResult
+        mode="expired"
+        errorMessage={emailVerifyError.message}
+        onContinue={() => setEmailVerifyError(null)}
+        onResend={handleResendVerification}
+      />
+    );
+  }
+  // 2) 邮箱验证刚成功 —— 欢迎礼页面
+  if (emailJustConfirmed) {
+    return (
+      <EmailVerificationResult
+        mode="success"
+        userName={profile?.name || session?.user?.user_metadata?.name || ""}
+        onContinue={() => { setEmailJustConfirmed(false); }}
+      />
+    );
+  }
   if (!session) return <AuthPage />;
 
   // 这些 page 不是 StudyWorkspace 的 tab，也不是 SprintWorkspace 的内置视图 —— 必须当做
