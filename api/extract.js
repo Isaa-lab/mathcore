@@ -4,6 +4,8 @@ export default async function handler(req, res) {
   const {
     text, course, chapter, count = 5,
     userProvider, userKey, userCustomUrl,
+    // 分块管线注入（可选）：让 AI 知道自己在看的是文档片段 N / 共 M，并带上跨片段的引用定义
+    chunkIndex = null, chunkCount = null, refContext = null,
   } = req.body;
 
   const GEMINI_KEY = process.env.GEMINI_KEY;
@@ -42,6 +44,20 @@ export default async function handler(req, res) {
   const englishRatio = (cleanText.match(/[a-zA-Z]/g) || []).length / Math.max(cleanText.length, 1);
   const isEnglish = englishRatio > 0.4;
 
+  const chunkBanner = (typeof chunkIndex === "number" && typeof chunkCount === "number" && chunkCount > 1)
+    ? `【分块信息】本次只看到整本教材中的第 ${chunkIndex + 1} / ${chunkCount} 片段。
+- 不要凭这一小段推测全书结构；只基于本片段里明确出现的定义 / 定理 / 公式出题。
+- 若本片段讨论到"后文会证明"、"参见第 N 章"这类指代，请忽略该线索，不要以它为题源。
+- 若本片段本身没有自包含的知识点，宁可少出题，也不要硬凑。\n\n`
+    : "";
+
+  const refList = Array.isArray(refContext) && refContext.length > 0 ? refContext.slice(0, 8) : [];
+  const refBanner = refList.length > 0
+    ? `【跨片段引用字典】以下是本片段里出现的编号引用在全书中被定义的完整内容：
+${refList.map(r => `- ${r.key} ⇒ ${String(r.body || "").replace(/\s+/g, " ").trim().slice(0, 220)}`).join("\n")}
+规则：题干中若需要引用这些编号（例如 "方程(1)"、"Theorem 2.1"），必须把右边的完整内容抄到题干里，不得只写编号。\n\n`
+    : "";
+
   const prompt = `你是一位专业数学教授，正在为中国大学生制作习题和知识点卡片。教材原文可能是英文，但所有输出内容必须使用中文。
 
 【重要警告】以下文本由 PDF 自动提取，数学符号可能存在乱码：
@@ -49,7 +65,7 @@ export default async function handler(req, res) {
 - "d y / d x" 实为 dy/dx，字母间多余空格是乱码
 - 所有数学公式必须还原为正确标准符号，绝对不能照抄乱码原文
 
-=== 教材原文（${isEnglish ? "英文" : "中文"}教材，输出用中文）===
+${chunkBanner}${refBanner}=== 教材原文（${isEnglish ? "英文" : "中文"}教材，输出用中文）===
 ${cleanText}
 === 原文结束 ===
 

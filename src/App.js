@@ -1491,6 +1491,131 @@ const fetchFileAsBrowserFile = async (url, fallbackName = "material.pdf") => {
   }
 };
 
+// ── 语义分块 + 引用解析（修根：上下文截断导致 AI 摘到"方程(1)"这类悬挂引用）───
+// 目标：长文档切成 ~3500 字的 chunk；相邻 chunk 带 overlap；同时把全文里编号
+// 引用（Equation (N) / 方程(N) / Theorem N / Lemma N）的**真实定义**抽出来，
+// 每个 chunk 再被注入自己引用到的那几条定义，让 LLM 真的"看得到"被引用的内容。
+
+// 抽取编号引用的定义字典：扫描全文里诸如 "(1) dy/dx = xy"、"Theorem 2.1 ..."、
+// "方程(1)：..." 的模式，建立 { "(1)": "dy/dx = xy" } 这样的反查表。
+const extractReferenceDefinitions = (fullText) => {
+  const defs = new Map();
+  if (!fullText) return defs;
+  const paragraphs = fullText.split(/\n{2,}/);
+
+  // 模式 A: 行首 "(1) 公式内容..." / "(1.2) ..." —— 常见于 ODE / Linear Algebra 教材
+  // 模式 B: "Equation (1): ..." / "Eq. (1) ..."
+  // 模式 C: "Theorem 2.1 ..." / "Lemma 4.3. ..." / "Definition 1: ..."
+  // 模式 D: "方程 (1) ..." / "公式 (3): ..." / "定理 2.1 ..."
+  const patterns = [
+    // A
+    { re: /(?:^|\n)\s*(\(\s*\d+(?:[.\-]\d+)?\s*\))\s*[:：.\s]*\s*([^\n]{8,260})/g,  keyGroup: 1, bodyGroup: 2 },
+    // B / D (Equation / 方程 / 公式)
+    { re: /\b(Equation|Eq\.?|Formula)\s*(\(\s*\d+(?:[.\-]\d+)?\s*\))\s*[:：.]?\s*([^\n]{6,220})/gi,
+      keyBuilder: (m) => `(${String(m[2]).replace(/[^\d.\-]/g, "")})`, bodyGroup: 3 },
+    { re: /(方程|公式)\s*[（(]\s*(\d+(?:[.\-]\d+)?)\s*[）)]\s*[:：.]?\s*([^\n]{6,220})/g,
+      keyBuilder: (m) => `(${m[2]})`, bodyGroup: 3 },
+    // C / 定理 / 引理 / 推论 / 定义
+    { re: /\b(Theorem|Lemma|Corollary|Proposition|Definition|Example)\s+(\d+(?:[.\-]\d+)?)\s*[:：.]?\s*([^\n]{6,260})/gi,
+      keyBuilder: (m) => `${m[1][0].toUpperCase() + m[1].slice(1).toLowerCase()} ${m[2]}`, bodyGroup: 3 },
+    { re: /(定理|引理|推论|命题|定义|例题?)\s*(\d+(?:[.\-]\d+)?)\s*[:：.]?\s*([^\n]{6,260})/g,
+      keyBuilder: (m) => `${m[1]} ${m[2]}`, bodyGroup: 3 },
+  ];
+
+  for (const p of patterns) {
+    const re = new RegExp(p.re.source, p.re.flags);
+    let m;
+    while ((m = re.exec(fullText)) !== null) {
+      const key = p.keyBuilder ? p.keyBuilder(m) : String(m[p.keyGroup]).replace(/\s+/g, "");
+      const body = String(m[p.bodyGroup] || "").trim();
+      if (!key || body.length < 4) continue;
+      if (body.length > 260) continue;
+      // 不覆盖已存在的（保留第一次出现的定义——通常也是被后文引用的那一处）
+      if (!defs.has(key)) defs.set(key, body);
+    }
+  }
+  return defs;
+};
+
+// 语义分块：优先按段落边界切，保护行间公式 ($$…$$ / \begin{equation}…\end{equation})
+// 不被切断；相邻 chunk 带 overlap，避免命题跨 chunk 丢失。
+const buildSemanticChunks = (fullText, { target = 3500, overlap = 250, max = 4 } = {}) => {
+  if (!fullText) return [];
+  // 如果全文足够短，直接单 chunk
+  if (fullText.length <= target * 1.2) return [fullText];
+
+  // 先把被 $$...$$ 或 \begin{equation}...\end{equation} 包裹的块抽出来保护
+  const guards = [];
+  const sentinel = (i) => `\u0001MATH_${i}\u0001`;
+  let guarded = fullText.replace(/\$\$[\s\S]+?\$\$|\\begin\{(equation|align|gather|eqnarray)\*?\}[\s\S]+?\\end\{\1\*?\}/g, (m) => {
+    guards.push(m);
+    return sentinel(guards.length - 1);
+  });
+
+  // 按"空行分段"为基本单位，再在段内按句子细分
+  const blocks = guarded.split(/\n{2,}/).flatMap(b => {
+    const s = b.trim();
+    if (!s) return [];
+    if (s.length <= target) return [s];
+    // 长段再按句子分
+    return s.split(/(?<=[。.!?！？])\s+/).filter(x => x.trim());
+  });
+
+  // 贪心拼装到接近 target
+  const rawChunks = [];
+  let buf = "";
+  for (const blk of blocks) {
+    if (!buf) { buf = blk; continue; }
+    if ((buf.length + 1 + blk.length) <= target) {
+      buf += "\n\n" + blk;
+    } else {
+      rawChunks.push(buf);
+      buf = blk;
+    }
+  }
+  if (buf) rawChunks.push(buf);
+
+  // 回填被保护的数学块
+  const unguard = (s) => s.replace(/\u0001MATH_(\d+)\u0001/g, (_, i) => guards[Number(i)] || "");
+  let chunks = rawChunks.map(unguard);
+
+  // 限制 chunk 数量：太多时回并最短的相邻对
+  while (chunks.length > max) {
+    let minIdx = 0, minLen = Infinity;
+    for (let i = 0; i < chunks.length - 1; i++) {
+      const ln = chunks[i].length + chunks[i + 1].length;
+      if (ln < minLen) { minLen = ln; minIdx = i; }
+    }
+    chunks.splice(minIdx, 2, chunks[minIdx] + "\n\n" + chunks[minIdx + 1]);
+  }
+
+  // 加 overlap：下一块开头接上一块末尾的 overlap 字
+  if (overlap > 0 && chunks.length > 1) {
+    chunks = chunks.map((c, i) => {
+      if (i === 0) return c;
+      const prev = chunks[i - 1];
+      const tail = prev.slice(-overlap).replace(/^\S*\s+/, ""); // 从词边界起
+      return tail ? ("…" + tail + "\n\n" + c) : c;
+    });
+  }
+
+  return chunks;
+};
+
+// 给某一块 chunk 找出它真正提到的编号引用，返回需要注入的 "定义条目" 列表
+const findChunkRefContext = (chunk, refDefs) => {
+  if (!refDefs || refDefs.size === 0) return [];
+  const hits = [];
+  for (const [key, body] of refDefs.entries()) {
+    // 把 key 转成宽松正则：支持 "(1)" / "Theorem 2.1" / "定理 2.1"
+    const safeKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const keyRe = new RegExp(safeKey.replace(/\s+/g, "\\s*"), "i");
+    if (keyRe.test(chunk)) hits.push({ key, body });
+    if (hits.length >= 8) break;
+  }
+  return hits;
+};
+
 const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
   const materialId = material?.id;
   if (!materialId) return { topics: [], questions: [], insertedCount: 0, materialLinked: false };
@@ -1592,37 +1717,77 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
   let apiQuotaExceeded = false;
   let apiErrorMsg = "";
 
-  // Step 3: Call /api/extract with the extracted text
+  // Step 3: 语义分块 + 引用解析 → 分批调 /api/extract
+  //   - 短文档（<4200 字）仍走单次调用，不增加请求数
+  //   - 长文档切 2~4 个 chunk，每块出 ceil(genCount / chunks) 题
+  //   - 每块自动注入它引用到的编号定义，解决"方程(1)"这类悬挂引用
   if (hasText) {
-    try {
-      const aiCfg = getAIConfig();
-      const resp = await fetch("/api/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: text.slice(0, 8000),
-          course: material?.course || "数学",
-          chapter,
-          count: genCount,
-          userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
-        }),
-      });
-      const data = await resp.json();
-      if (resp.status === 429 || data.error === "QUOTA_EXCEEDED") {
-        apiQuotaExceeded = true;
-        apiErrorMsg = data.message || "Gemini API 配额已用完，请等待 1 分钟后重试。";
-        console.warn("API quota exceeded:", apiErrorMsg);
-      } else if (!data.error) {
-        topics = Array.isArray(data.topics) ? data.topics : [];
-        questions = Array.isArray(data.questions) ? data.questions : [];
-        usedApi = true;
-      } else {
-        apiErrorMsg = data.error;
-        console.error("API extract error:", data.error);
+    const aiCfg = getAIConfig();
+    const fullText = text.slice(0, 24000); // 上限保护，避免极端长文挤爆
+    const refDefs = extractReferenceDefinitions(fullText);
+    const chunks = buildSemanticChunks(fullText, { target: 3500, overlap: 250, max: 4 });
+    const perChunk = Math.max(2, Math.ceil(genCount / Math.max(chunks.length, 1)));
+
+    const aggregatedTopics = [];
+    const aggregatedQuestions = [];
+    const seenTopicNames = new Set();
+
+    for (let idx = 0; idx < chunks.length; idx++) {
+      const chunk = chunks[idx];
+      const refs = findChunkRefContext(chunk, refDefs);
+      // 每块最多要 perChunk 题；最后一块兜底把剩余额度拉回来
+      const remaining = genCount - aggregatedQuestions.length;
+      const askCount = idx === chunks.length - 1
+        ? Math.max(2, remaining)
+        : perChunk;
+
+      try {
+        const resp = await fetch("/api/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: chunk,
+            course: material?.course || "数学",
+            chapter,
+            count: askCount,
+            chunkIndex: idx,
+            chunkCount: chunks.length,
+            refContext: refs,
+            userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+          }),
+        });
+        const data = await resp.json();
+        if (resp.status === 429 || data.error === "QUOTA_EXCEEDED") {
+          apiQuotaExceeded = true;
+          apiErrorMsg = data.message || "Gemini API 配额已用完，请等待 1 分钟后重试。";
+          console.warn(`API quota exceeded at chunk ${idx + 1}/${chunks.length}`);
+          break; // 不再继续烧额度
+        } else if (!data.error) {
+          const tArr = Array.isArray(data.topics) ? data.topics : [];
+          for (const t of tArr) {
+            const key = String(t?.name || "").trim().toLowerCase();
+            if (!key || seenTopicNames.has(key)) continue;
+            seenTopicNames.add(key);
+            aggregatedTopics.push(t);
+          }
+          const qArr = Array.isArray(data.questions) ? data.questions : [];
+          aggregatedQuestions.push(...qArr);
+          usedApi = true;
+        } else {
+          apiErrorMsg = data.error;
+          console.error(`chunk ${idx + 1} extract error:`, data.error);
+        }
+
+        if (aggregatedQuestions.length >= genCount) break;
+        // 相邻请求间给 LLM 喘口气（也让免费 quota 平滑）
+        if (idx < chunks.length - 1) await new Promise(r => setTimeout(r, 600));
+      } catch (e) {
+        console.error(`chunk ${idx + 1} fetch error:`, e.message);
       }
-    } catch (e) {
-      console.error("API extract fetch error:", e.message);
     }
+
+    topics = aggregatedTopics;
+    questions = aggregatedQuestions.slice(0, genCount);
   }
 
   // Step 4: Fallback sentence-based questions — ONLY when API failed for non-quota reasons
