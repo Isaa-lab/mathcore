@@ -1411,6 +1411,48 @@ const isLowQualityQuestion = (q) => {
     if (optNouns.length >= 2) return true;
   }
 
+  // ——— 残片 / 壳子题（题干只剩卷面模板，没有具体命题）———
+  // 典型垃圾：
+  //   "(10 marks) True or False"
+  //   "Question 3"
+  //   "Exercise 4.1"
+  //   "以下说法是否正确：「(10 marks) True or False」"
+  const trimmed = text.trim();
+  const stripWrapper = trimmed
+    .replace(/^\s*以下说法是否正确[：:]?\s*[「『]?/, "")
+    .replace(/[」』]?\s*$/, "")
+    .trim();
+  const isShellFragment = (s) => {
+    if (!s) return true;
+    if (/^\s*\(?\s*\d{1,3}\s*(?:marks?|分|points?|pts?)\s*\)?[\s，,。.；;:：]*(?:True\s*(?:or|\/)\s*False|T\s*\/\s*F|判断(?:题|对错)?|是否正确)?\s*[。.；;:：]?\s*$/i.test(s)) return true;
+    if (/^(?:Question|Problem|Exercise|Ex\.?|Q|P)\s*[\d.]+\s*[:：.]?\s*$/i.test(s)) return true;
+    if (/^(?:True\s*(?:or|\/)\s*False|T\/F|判断对错|是否正确|判断题)\s*[:：]?\s*$/i.test(s)) return true;
+    if (s.length < 40 && /(?:marks?|points?|pts?)\b/i.test(s) && !/[=+\-×÷<>∫∑∏√∞≤≥≠→∈∉∀∃]|dy\/dx|\\(?:frac|int|sum|sqrt)/i.test(s)) return true;
+    return false;
+  };
+  if (isShellFragment(stripWrapper) || isShellFragment(trimmed)) return true;
+
+  // ——— 悬挂引用 / 未解析指代（AI 没有重构，只摘抄了引用）———
+  // "Equation (1)" / "方程(1)" / "Theorem 2" / "the above" —— 但题干内没有真实公式
+  const hasDanglingRef =
+    /\b(?:Equation|Eq\.?|Formula|Theorem|Lemma|Corollary|Proposition|Definition|Example|Figure|Fig\.?|Table)\s*\(?\s*\d+(?:[.\-]\d+)?\s*\)?/i.test(text) ||
+    /(?:方程|公式|定理|引理|推论|命题|定义|例题?|图|表)\s*[（(]\s*\d+(?:[.\-]\d+)?\s*[）)]/.test(text);
+  const hasRealFormulaInText =
+    /\$[^$]{3,}\$|\$\$[^$]+\$\$/.test(text) ||
+    /\\(?:frac|int|sum|sqrt|prod|lim|partial|alpha|beta|gamma|theta|lambda|sigma|mathbf|mathcal|mathrm|vec|det|rank)/i.test(text) ||
+    /[=<>≤≥≠→∈∉∀∃∫∑∏√].{0,40}[a-zA-Z0-9]|[a-zA-Z]\s*=\s*[^=\s]{2,}|dy\/dx|d\/dt|d\^2/i.test(text);
+  if (hasDanglingRef && !hasRealFormulaInText) return true;
+
+  // "the above / the following / 上述 / 前面" 指代但无内容支撑
+  if (/\b(?:the\s+(?:above|following|preceding)|as\s+(?:above|shown\s+above|before))\b/i.test(text)
+      && text.length < 100 && !hasRealFormulaInText) return true;
+  if (/(?:上述|前面(?:所述|提到|的)|如下(?:所述|所示)?|下面(?:所述|提到|的))[^。.!?]{0,18}(?:所述|命题|结论|内容|说法|情形|公式|方程|定理)/.test(text)
+      && !hasRealFormulaInText && text.length < 120) return true;
+
+  // ——— 以过渡词开头（AI 从长句中摘了中间半段）———
+  if (/^\s*(?:then|therefore|so|thus|hence|furthermore|moreover|consequently|besides|similarly)[,，\s]/i.test(trimmed)) return true;
+  if (/^\s*(?:那么|因此|所以|由此|从而|进而|因而|此外|另外|同理)[,，、]/.test(trimmed)) return true;
+
   return false;
 };
 

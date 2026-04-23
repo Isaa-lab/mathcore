@@ -75,6 +75,27 @@ ${cleanText}
 5. 不含任何具体数学符号/公式/定理/算法名称的判断题。
 每道题必须考查"具体的定义、定理、公式推导、反例、计算步骤或性质判定"，否则不合格。
 
+【自包含铁律 SELF-CONTAINED】题目必须能被任何从未读过原文的学生独立读懂：
+A. 禁止悬挂引用：绝对不得出现 "方程(1)"、"Equation (3)"、"Theorem 2"、"Lemma 4"、
+   "定理 2.1"、"如上所示"、"the above equation"、"前面的公式"、"如下命题" 这类指代。
+   若原文出现 "方程(1)"，你必须在题干里把完整公式抄录出来（例如 "方程 dy/dx = xy" ）后再提问。
+   若上下文不足以还原公式 / 条件，你必须放弃本题，不要硬出。
+B. 禁止残片壳子：绝对不得出现只含 "(10 marks) True or False"、"Question 3"、
+   "Exercise 4.1"、"判断题:"、"True / False:" 这种卷面模板作为题干。
+   题干必须包含一个完整、可判断的命题或问题句。
+C. 禁止过渡词起头：不得以 "then,"、"therefore,"、"so,"、"furthermore,"、
+   "那么,"、"因此,"、"所以," 开头。若需要承接语气，请重写为独立完整句。
+D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条件 / 集合 / 函数名），
+   例如 dy/dx、∫、Ax=b、det(A)、连续可微、Lipschitz 条件等；仅凭文字描述无法
+   构成数学命题的，重写或放弃。
+
+出题流程（CoT 自检，不要把这段抄到输出里，但必须在内部照做）：
+  Step 1. 从原文里挑一个核心概念或定理。
+  Step 2. 判断该概念是否带有 "(n)" 之类的编号引用；若有，先在工作区把被引用的
+          完整内容还原出来。
+  Step 3. 用还原后的完整内容起草题干，不允许出现 Step 2 中的编号本身。
+  Step 4. 再读一遍题干，对照【自包含铁律】A/B/C/D；只要违反任何一条，丢弃重写。
+
 仅输出如下 JSON，不附加任何其他文字或 markdown：
 {
   "topics": [
@@ -247,6 +268,45 @@ ${cleanText}
     : Array.isArray(result.exercises) ? result.exercises
     : [];
 
+  // ── 自包含 / 壳子题 / 悬挂引用的服务端快检（与前端 isLowQualityQuestion 对齐）─
+  const isShellOrDangling = (qText, opts) => {
+    const text = String(qText || "");
+    if (text.length < 10) return true;
+
+    const trimmed = text.trim();
+    const stripWrapper = trimmed
+      .replace(/^\s*以下说法是否正确[：:]?\s*[「『]?/, "")
+      .replace(/[」』]?\s*$/, "")
+      .trim();
+    const isShell = (s) => {
+      if (!s) return true;
+      if (/^\s*\(?\s*\d{1,3}\s*(?:marks?|分|points?|pts?)\s*\)?[\s，,。.；;:：]*(?:True\s*(?:or|\/)\s*False|T\s*\/\s*F|判断(?:题|对错)?|是否正确)?\s*[。.；;:：]?\s*$/i.test(s)) return true;
+      if (/^(?:Question|Problem|Exercise|Ex\.?|Q|P)\s*[\d.]+\s*[:：.]?\s*$/i.test(s)) return true;
+      if (/^(?:True\s*(?:or|\/)\s*False|T\/F|判断对错|是否正确|判断题)\s*[:：]?\s*$/i.test(s)) return true;
+      if (s.length < 40 && /(?:marks?|points?|pts?)\b/i.test(s) && !/[=+\-×÷<>∫∑∏√∞≤≥≠→∈∉∀∃]|dy\/dx|\\(?:frac|int|sum|sqrt)/i.test(s)) return true;
+      return false;
+    };
+    if (isShell(stripWrapper) || isShell(trimmed)) return true;
+
+    const hasDanglingRef =
+      /\b(?:Equation|Eq\.?|Formula|Theorem|Lemma|Corollary|Proposition|Definition|Example|Figure|Fig\.?|Table)\s*\(?\s*\d+(?:[.\-]\d+)?\s*\)?/i.test(text) ||
+      /(?:方程|公式|定理|引理|推论|命题|定义|例题?|图|表)\s*[（(]\s*\d+(?:[.\-]\d+)?\s*[）)]/.test(text);
+    const hasRealFormula =
+      /\$[^$]{3,}\$|\$\$[^$]+\$\$/.test(text) ||
+      /\\(?:frac|int|sum|sqrt|prod|lim|partial|alpha|beta|gamma|theta|lambda|sigma|mathbf|mathcal|mathrm|vec|det|rank)/i.test(text) ||
+      /[=<>≤≥≠→∈∉∀∃∫∑∏√].{0,40}[a-zA-Z0-9]|[a-zA-Z]\s*=\s*[^=\s]{2,}|dy\/dx|d\/dt|d\^2/i.test(text);
+    if (hasDanglingRef && !hasRealFormula) return true;
+    if (/\b(?:the\s+(?:above|following|preceding)|as\s+(?:above|shown\s+above|before))\b/i.test(text)
+        && text.length < 100 && !hasRealFormula) return true;
+    if (/(?:上述|前面(?:所述|提到|的)|如下(?:所述|所示)?|下面(?:所述|提到|的))[^。.!?]{0,18}(?:所述|命题|结论|内容|说法|情形|公式|方程|定理)/.test(text)
+        && !hasRealFormula && text.length < 120) return true;
+
+    if (/^\s*(?:then|therefore|so|thus|hence|furthermore|moreover|consequently|besides|similarly)[,，\s]/i.test(trimmed)) return true;
+    if (/^\s*(?:那么|因此|所以|由此|从而|进而|因而|此外|另外|同理)[,，、]/.test(trimmed)) return true;
+
+    return false;
+  };
+
   const questions = rawQuestions
     .filter(q => q && String(q.question || q.text || q.content || "").length > 5)
     .map(q => {
@@ -260,7 +320,8 @@ ${cleanText}
         type: String(q.type || (opts ? "单选题" : "判断题")),
         chapter: ch,
       };
-    });
+    })
+    .filter(q => !isShellOrDangling(q.question, q.options));
 
   // ── Normalise topics (field name variants across models) ──────────────────
   const rawTopics = Array.isArray(result.topics) ? result.topics
