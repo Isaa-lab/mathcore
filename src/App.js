@@ -1353,6 +1353,26 @@ const isLowQualityQuestion = (q) => {
   if (/关于[《【「『][^》】」』]{1,30}[》】」』][^。]{0,6}(?:说法|态度|方法).{0,6}(?:最合理|最恰当|正确的是)/.test(text)) return true;
   if (/(应同时关注定义|应同时掌握定义|机械套用|通过例题验证理解|学习(方法|态度|策略))/.test(text) && Array.isArray(opts)) return true;
 
+  // ——— 元认知 / 学习方法类垃圾判断题 ———
+  // 典型垃圾："在学习「线性代数」时，先明确概念再做题通常更有效。" 选项 正确 / 错误
+  // 这类题目虽然"不错"，但考的是学习方法本身而非学科知识，应当从题库清除。
+  const stripMath2 = text.replace(/\$[^$]*\$/g, "").replace(/\$\$[^$]*\$\$/g, "");
+  const hasMathSignals = /[=+\-×÷<>∫∑∏√∞≤≥≠→∈∉∀∃\\{}\[\]\^_]|\d+[a-zA-Z]|[a-zA-Z]\d+|dy\/dx|d\/dt|dx|dy|\\frac|\\int|\\sum|\\sqrt|\\mathcal|matrix|vector|eigen|rank|det/.test(text);
+  // 判断题检测（选项为空 或 仅 正确/错误）
+  const boolOpts = !Array.isArray(opts) || (
+    opts.length <= 4 &&
+    opts.every(o => /^(?:[A-Da-d][.、．]\s*)?(?:正确|错误|对|错|True|False|是|否)\s*$/i.test(String(o || "").trim()))
+  );
+  if (boolOpts && !hasMathSignals) {
+    // 学习方法 / 认知节律 / 态度类关键词
+    const metaLearnRe = /在学习[「『《]?[^」』》。，,]{1,30}[」』》]?(?:的?时候|时|过程中)|学好|学会|学习(?:效率|效果|态度|方法|策略)|先明确概念|先(?:看|读|学)(?:概念|定义|书|教材).{0,8}(?:再|后)(?:做题|练习)|(?:做题|练习|复习|预习|笔记).{0,8}(?:更有效|更高效|更有用|更容易|更扎实|更好地|有助于|更有帮助|有帮助|(?:更|较)牢固)|总结(?:错误|错题).{0,8}(?:有助于|更有效|更好)|坚持(?:做题|刷题|练习)/;
+    if (metaLearnRe.test(stripMath2)) return true;
+    // 通用鸡汤式陈述 —— "学习 X 需要...通常更..."且无具体学科术语
+    if (/通常更(?:有效|容易|高效|扎实|好)|往往更(?:有效|容易|高效)/.test(stripMath2) && stripMath2.length < 80) return true;
+    // 题干极短 + 判断题 + 出现 "学习/做题/方法/态度" —— 一律判为元学习题
+    if (stripMath2.length < 60 && /(?:学习|做题|方法|态度|习惯|思路)/.test(stripMath2) && !/(?:定理|引理|公理|定义|矩阵|向量|函数|极限|导数|积分|微分|方程|级数|空间|映射|同构|秩|行列式|特征值|收敛|发散|连续|可微|可导|解|根|集合|概率|期望|方差|分布|随机|样本)/.test(stripMath2)) return true;
+  }
+
   // ——— 人名 / 时间戳 / 元指代 三连兜底 ———
   // 白名单：常见数学家/算法名字，允许出现
   const MATH_PERSON_WHITELIST = new Set([
@@ -1602,8 +1622,19 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
   // Record concrete DB errors so UploadPage can show actionable feedback (RLS, schema, etc.).
   const dbErrors = { questions: null, topics: null };
   if (!apiQuotaExceeded && questions.length > 0) {
+    // 垃圾题过滤：AI 偶尔会生成元学习题 / 学习方法判断题 / 占位模板，拦截在入库前
+    const filteredQuestions = questions.filter(q => !isLowQualityQuestion({
+      question: q.question,
+      options: q.options,
+      explanation: q.explanation,
+      type: q.type,
+    }));
+    if (filteredQuestions.length === 0) {
+      // 全部被过滤掉时也不入库（避免只写入 0 行造成静默"成功"）
+      questions.length = 0;
+    }
     try {
-      const rows = questions.map(q => ({
+      const rows = filteredQuestions.map(q => ({
         chapter: q.chapter || chapter,
         course: material?.course || "数学",
         type: q.type || (q.options ? "单选题" : "判断题"),
@@ -1613,14 +1644,19 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
         explanation: q.explanation || "",
         material_id: materialId,
       }));
-      const { error: e1 } = await supabase.from("questions").insert(rows);
-      if (!e1) { insertedCount = rows.length; materialLinked = true; }
-      else {
-        // Try without material_id if column missing
-        const rows2 = rows.map(({ material_id, ...r }) => r);
-        const { error: e2 } = await supabase.from("questions").insert(rows2);
-        if (!e2) insertedCount = rows2.length;
-        else dbErrors.questions = e2.message || e2.code || String(e2);
+      if (rows.length === 0) {
+        // 全部是垃圾题被过滤：把过滤情况通过 dbErrors 透明化，让 UploadPage 显示「AI 出题质量不达标，已全部过滤」
+        dbErrors.questions = "AI_FILTERED_ALL_LOW_QUALITY";
+      } else {
+        const { error: e1 } = await supabase.from("questions").insert(rows);
+        if (!e1) { insertedCount = rows.length; materialLinked = true; }
+        else {
+          // Try without material_id if column missing
+          const rows2 = rows.map(({ material_id, ...r }) => r);
+          const { error: e2 } = await supabase.from("questions").insert(rows2);
+          if (!e2) insertedCount = rows2.length;
+          else dbErrors.questions = e2.message || e2.code || String(e2);
+        }
       }
     } catch (e) { dbErrors.questions = e?.message || String(e); }
   }
@@ -7993,6 +8029,7 @@ function UploadPage({ setPage, profile }) {
     else parts.push(`知识点 0`);
 
     if (ai.insertedCount > 0) parts.push(`✓ 题目 ${ai.insertedCount}`);
+    else if (ai.dbErrors?.questions === "AI_FILTERED_ALL_LOW_QUALITY") parts.push(`⚠ AI 生成的题目质量不达标（如学习方法判断题），已全部过滤，建议重新补题`);
     else if (ai.dbErrors?.questions) parts.push(`题目入库失败（${ai.dbErrors.questions.slice(0, 60)}）`);
     else if (ai.apiErrorMsg) parts.push(`AI 出题失败：${ai.apiErrorMsg.slice(0, 60)}`);
     else parts.push(`题目 0`);
