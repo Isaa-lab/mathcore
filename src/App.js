@@ -12607,8 +12607,11 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const selected = selectedId ? nodeIndex[selectedId] : null;
   const selectedStatus = selected ? deriveStatus(selected, progress) : null;
 
-  const maxX = Math.max(...visibleNodes.map(n => n.x), 800) + 160;
-  const maxY = Math.max(...visibleNodes.map(n => n.y), 300) + CANVAS_TOP_PAD + CANVAS_BOTTOM_PAD;
+  // SVG 内在尺寸 —— 必须真正覆盖所有节点的右下角 + 装饰（推荐光晕 6px / hover 外描 4px），
+  // 否则即使 CSS transform 缩放到足够小，SVG 自身的 viewport 仍会先把底部切掉。
+  // 之前只算了 y 坐标，漏掉 NODE_H（68），导致 Laplace 变换 这类 y=760 的底部节点被裁掉 ~28px。
+  const maxX = Math.max(...visibleNodes.map(n => n.x), 800) + NODE_W + 40;
+  const maxY = Math.max(...visibleNodes.map(n => n.y), 300) + NODE_H + CANVAS_TOP_PAD + CANVAS_BOTTOM_PAD + 12;
 
   // 画布高度自适应：当树变长（AI 节点注入后）时，画布本身就长一点，避免 fitView 被迫压到太低的 zoom
   // 与"告别固定坐标"配套的"告别固定画布高度"：上限 820px（再高体验会割裂），下限 600px
