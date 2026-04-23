@@ -9659,6 +9659,61 @@ function MaterialsPage({ setPage, profile }) {
   const [deletingId, setDeletingId] = useState(null);
   // 新增：作用域分段 —— 我的 / 公开 / 全部（教师视角）
   const [scope, setScope] = useState("all"); // "all" | "mine" | "public"
+  // 替换缺失文件：{ step: "upload" | "db" | null, msg, error }
+  const [replaceState, setReplaceState] = useState({ step: null, msg: "", error: "" });
+  const replaceInputRef = useRef(null);
+
+  // 判定某个资料的文件是否"孤儿"（元数据有，但 Storage 没文件 / URL 失效）
+  const isOrphanMaterial = (m) => {
+    if (!m) return false;
+    if (!m.file_data || String(m.file_data).trim().length < 8) return true;
+    // 极短的 "大小: 0" 字符串也通常意味着没有真实附件
+    if (String(m.file_size || "").trim() === "0") return true;
+    return false;
+  };
+  const canEditMaterial = (m) => {
+    if (!m || !profile) return false;
+    return profile.role === "teacher" || m.uploaded_by === profile.id;
+  };
+
+  const handleReplaceFile = async (file) => {
+    if (!file || !selected) return;
+    const ext = (file.name.match(/\.[^.]+$/) || [""])[0].toLowerCase();
+    if (![".pdf", ".doc", ".docx", ".ppt", ".pptx"].includes(ext)) {
+      setReplaceState({ step: null, msg: "", error: "仅支持 PDF / DOC / PPT 文件" });
+      return;
+    }
+    if (file.size > 50 * 1024 * 1024) {
+      setReplaceState({ step: null, msg: "", error: "文件超过 50MB" });
+      return;
+    }
+    setReplaceState({ step: "upload", msg: "上传文件中…", error: "" });
+    try {
+      const filePath = `${profile?.id || "anon"}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+      const { error: upErr } = await supabase.storage.from("materials").upload(filePath, file, { upsert: false });
+      if (upErr) throw upErr;
+      const { data: { publicUrl } } = supabase.storage.from("materials").getPublicUrl(filePath);
+
+      setReplaceState({ step: "db", msg: "更新资料记录…", error: "" });
+      const sizeStr = file.size > 1024 * 1024
+        ? (file.size / 1024 / 1024).toFixed(1) + " MB"
+        : (file.size / 1024).toFixed(0) + " KB";
+      const { error: updErr } = await supabase.from("materials").update({
+        file_data: publicUrl,
+        file_name: file.name,
+        file_size: sizeStr,
+      }).eq("id", selected.id);
+      if (updErr) throw updErr;
+
+      setReplaceState({ step: null, msg: "✓ 文件已替换，刷新中…", error: "" });
+      const updated = { ...selected, file_data: publicUrl, file_name: file.name, file_size: sizeStr };
+      setSelected(updated);
+      setMaterials(prev => prev.map(x => x.id === selected.id ? updated : x));
+      setTimeout(() => setReplaceState({ step: null, msg: "", error: "" }), 2000);
+    } catch (e) {
+      setReplaceState({ step: null, msg: "", error: "失败：" + (e?.message || String(e)) });
+    }
+  };
   const loadMaterials = async () => {
     let query = supabase.from("materials").select("*").order("created_at", { ascending: false });
     let dataRows = [];
@@ -9747,10 +9802,64 @@ function MaterialsPage({ setPage, profile }) {
               title={selected.title}
             />
           ) : (
-            <div style={{ height: "75vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#aaa", gap: 14 }}>
-              <div style={{ fontSize: 48 }}>📄</div>
-              <div style={{ fontSize: 16 }}>PDF 文件未上传或已过期</div>
-              <div style={{ fontSize: 13 }}>请联系教师重新上传</div>
+            <div style={{ height: "75vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 28px", textAlign: "center" }}>
+              <div style={{ fontSize: 56, marginBottom: 14 }}>📁</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>这份资料只有卡片，没有文件</div>
+              <div style={{ fontSize: 13.5, color: "#64748B", maxWidth: 460, lineHeight: 1.75, marginBottom: 22 }}>
+                数据库里保留了资料的标题 / 学科 / 描述等元信息，但 Supabase Storage 里没有对应的 PDF。
+                <br />可能的原因：旧数据、存储桶被清空、上传当时文件超限或被拦截。
+              </div>
+              {canEditMaterial(selected) ? (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, width: "100%", maxWidth: 440 }}>
+                  <input
+                    ref={replaceInputRef}
+                    type="file"
+                    accept=".pdf,.doc,.docx,.ppt,.pptx"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleReplaceFile(f);
+                      e.target.value = "";
+                    }}
+                  />
+                  <button
+                    onClick={() => replaceInputRef.current?.click()}
+                    disabled={!!replaceState.step}
+                    style={{
+                      padding: "12px 28px", background: G.teal, color: "#fff",
+                      border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700,
+                      cursor: replaceState.step ? "not-allowed" : "pointer",
+                      fontFamily: "inherit", boxShadow: "0 6px 18px rgba(29,158,117,0.25)",
+                      minWidth: 200,
+                    }}
+                  >
+                    {replaceState.step === "upload" ? "上传中…" :
+                     replaceState.step === "db" ? "更新记录…" :
+                     "📤 上传文件补齐"}
+                  </button>
+                  <button
+                    onClick={() => deleteMaterial(selected).then(() => setSelected(null))}
+                    style={{
+                      padding: "8px 18px", background: "transparent", color: "#B91C1C",
+                      border: "1px solid #FECACA", borderRadius: 10, fontSize: 12.5, fontWeight: 600,
+                      cursor: "pointer", fontFamily: "inherit",
+                    }}
+                  >
+                    🗑 删除这条空记录
+                  </button>
+                  {replaceState.msg && (
+                    <div style={{ fontSize: 12.5, color: "#065F46" }}>{replaceState.msg}</div>
+                  )}
+                  {replaceState.error && (
+                    <div style={{ fontSize: 12.5, color: "#B91C1C", maxWidth: 420, wordBreak: "break-word" }}>{replaceState.error}</div>
+                  )}
+                  <div style={{ fontSize: 11.5, color: "#94A3B8", marginTop: 4 }}>
+                    支持 PDF / DOC / DOCX / PPT / PPTX · 单个文件 ≤ 50 MB
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: "#94A3B8" }}>请联系上传者「{selected.uploader_name || "用户"}」重新上传原文件。</div>
+              )}
             </div>
           )}
         </SectionCard>
@@ -9894,6 +10003,7 @@ function MaterialsPage({ setPage, profile }) {
               {m.chapter && <Badge color="amber">{m.chapter}</Badge>}
               {(m.status || "approved") !== "approved" && <Badge color="red">待审核</Badge>}
               {m.is_public === false && <Badge color="blue">🔒 仅自己</Badge>}
+              {isOrphanMaterial(m) && <Badge color="red">⚠ 文件缺失</Badge>}
             </div>
             <div style={{ fontSize: 12, color: "#aaa", borderTop: "1px solid #f5f5f5", paddingTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span>{m.uploader_name || "用户"} 上传 · {new Date(m.created_at).toLocaleDateString("zh-CN")}</span>
