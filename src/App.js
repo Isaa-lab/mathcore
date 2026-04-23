@@ -1884,8 +1884,15 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
         }));
       if (topicRows.length > 0) {
         const { error: et } = await supabase.from("material_topics").insert(topicRows);
-        if (!et) topicsLinked = topicRows.length;
-        else {
+        if (!et) {
+          topicsLinked = topicRows.length;
+          // 触发全局"知识树/知识点"侧的自动刷新 —— 用户即使正停留在知识树页也能看到新节点出现
+          try {
+            window.dispatchEvent(new CustomEvent("mc:material-topics-updated", {
+              detail: { materialId, count: topicRows.length },
+            }));
+          } catch { /* SSR-safe no-op */ }
+        } else {
           // Common causes: relation does not exist (42P01), column missing, RLS blocked.
           console.warn("[material_topics] insert failed:", et.message || et.code);
           dbErrors.topics = et.message || et.code || String(et);
@@ -12415,9 +12422,12 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   // 从 Supabase `material_topics` 表拉取，合并到树里。节点用 ✱ 标识，自动排版于其归属学科列下方
   const [aiTopics, setAiTopics] = useState([]);
   const [aiTopicsLoaded, setAiTopicsLoaded] = useState(false);
+  const [aiRefreshTick, setAiRefreshTick] = useState(0);
+  const [isRefreshingAi, setIsRefreshingAi] = useState(false);
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (aiRefreshTick > 0) setIsRefreshingAi(true);
       try {
         const { data, error } = await supabase
           .from("material_topics")
@@ -12427,10 +12437,26 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         if (cancelled) return;
         if (!error && Array.isArray(data)) setAiTopics(data);
       } catch { /* 静默：用户未登录 / 无此表时直接用内置树 */ }
-      finally { if (!cancelled) setAiTopicsLoaded(true); }
+      finally {
+        if (!cancelled) { setAiTopicsLoaded(true); setIsRefreshingAi(false); }
+      }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [aiRefreshTick]);
+
+  // 监听资料上传完成事件 —— processMaterialWithAI 写完 material_topics 会 dispatch，
+  // 让正停留在知识树页的用户无需切 tab 也能看到新节点出现
+  useEffect(() => {
+    const onTopicsUpdated = () => setAiRefreshTick(t => t + 1);
+    window.addEventListener("mc:material-topics-updated", onTopicsUpdated);
+    // 窗口重新获得焦点时也刷一下（兜底：用户在别处搞了操作回来）
+    const onFocus = () => { if (aiTopicsLoaded) setAiRefreshTick(t => t + 1); };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("mc:material-topics-updated", onTopicsUpdated);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [aiTopicsLoaded]);
 
   // AI 节点 + 合并后的节点集 / 索引（替代原来的全局 SKILL_TREE / NODE_INDEX）
   const aiNodes = useMemo(() => placeAiTopicsToTree(aiTopics, SKILL_TREE), [aiTopics]);
@@ -12721,10 +12747,26 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         {backTarget && <Btn size="sm" onClick={backTarget}>← 返回</Btn>}
         <div>
           <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em", color: "#0F172A", lineHeight: 1.15 }}>知识树</div>
-          <div style={{ fontSize: 13, color: "#94A3B8", marginTop: 4 }}>
-            {treeNodes.length} 个知识点 · {Array.from(new Set(treeNodes.map(n => n.course))).length} 个学科
-            {aiNodes.length > 0 && <> · <span style={{ color: "#7C3AED", fontWeight: 600 }}>✱ {aiNodes.length} 个 AI 抽取</span></>}
-            {" "}· 双击节点看详情 · 悬浮点亮学习路径
+          <div style={{ fontSize: 13, color: "#94A3B8", marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span>{treeNodes.length} 个知识点 · {Array.from(new Set(treeNodes.map(n => n.course))).length} 个学科</span>
+            {aiNodes.length > 0 ? (
+              <span style={{ color: "#7C3AED", fontWeight: 600 }}>· ✱ {aiNodes.length} 个 AI 抽取</span>
+            ) : aiTopicsLoaded ? (
+              <span style={{ color: "#CBD5E1" }}>· AI 节点将在你上传资料后出现</span>
+            ) : null}
+            <span>· 双击节点看详情 · 悬浮点亮学习路径</span>
+            <button
+              onClick={() => setAiRefreshTick(t => t + 1)}
+              disabled={isRefreshingAi}
+              title="重新读取 material_topics · 刚上传完资料可以点这个立即看到 AI 节点"
+              style={{
+                marginLeft: 4, padding: "2px 9px", fontSize: 11, fontWeight: 600,
+                color: isRefreshingAi ? "#CBD5E1" : "#64748B",
+                background: isRefreshingAi ? "#F8FAFC" : "#fff",
+                border: "1px solid #E2E8F0", borderRadius: 999,
+                cursor: isRefreshingAi ? "wait" : "pointer", fontFamily: "inherit",
+              }}
+            >{isRefreshingAi ? "刷新中…" : "↻ 刷新 AI 节点"}</button>
           </div>
         </div>
         {/* 状态徽章作为筛选器（原理 5：装饰数字 → 功能数字） */}
