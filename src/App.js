@@ -4884,6 +4884,12 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [subjectFocus, setSubjectFocus] = useState(null);          // 当前选中学科（用于层级章节选择）
   const [selectedAbilities, setSelectedAbilities] = useState([]);  // 能力维度筛选
   const [selectedStatuses, setSelectedStatuses] = useState([]);    // 掌握状态筛选
+  // 模拟考试配置：点击意图卡片后打开独立 modal，允许用户选择范围 / 题量 / 时长
+  const [mockOpen, setMockOpen] = useState(false);
+  const [mockScope, setMockScope] = useState([]);                   // 选中的 "course Ch.N" 章节
+  const [mockCount, setMockCount] = useState(30);                   // 题量
+  const [mockMinutes, setMockMinutes] = useState(60);               // 时长（仅用于展示，不强制停题）
+  const [mockSubjectFocus, setMockSubjectFocus] = useState(null);   // modal 内学科侧栏当前选中
   // Quiz state
   const [quizMode, setQuizMode] = useState(null);
   const [displayQ, setDisplayQ] = useState([]);
@@ -5635,10 +5641,14 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         ring: "#DDD6FE",
         icon: "⏱",
         title: "模拟考试",
-        subtitle: `${Math.min(30, poolMock.length)} 题 · 限时`,
+        subtitle: mockScope.length > 0 ? `已选 ${mockScope.length} 章 · 限时` : `选择范围 · 限时`,
         meta: "计时自动开启",
         disabled: poolMock.length < 5,
-        onClick: () => startWithPool(poolMock, Math.min(30, poolMock.length), { timer: true }),
+        onClick: () => {
+          // 打开配置 modal，让用户先选范围 / 题量 / 时长
+          if (!mockSubjectFocus && courseList.length) setMockSubjectFocus(courseList[0]);
+          setMockOpen(true);
+        },
       },
       {
         id: "custom",
@@ -5915,6 +5925,213 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             {materialGenerateMsg}
           </div>
         )}
+
+        {/* ══ 模拟考试配置 Modal ══ */}
+        {mockOpen && (() => {
+          // 根据 mockScope 计算当前可用题池
+          const rangePool = mockScope.length === 0
+            ? allQuestions
+            : allQuestions.filter(q => {
+                if (!q.chapter) return false;
+                const qch = q.chapter.trim();
+                return mockScope.some(c => {
+                  const cTrim = c.trim();
+                  if (qch === cTrim) return true;
+                  if (qch.startsWith(cTrim + " ") || qch.startsWith(cTrim + "·") || qch.startsWith(cTrim + "-")) return true;
+                  return false;
+                });
+              });
+          const maxCount = rangePool.length;
+          const effectiveMockCount = Math.min(mockCount, maxCount);
+          const countOptions = [20, 30, 50, 80].filter(n => n <= maxCount);
+          if (maxCount > 0 && !countOptions.includes(maxCount)) countOptions.push(maxCount);
+          const durationOptions = [30, 45, 60, 90, 120];
+          const subjectCoursesInScope = new Set(mockScope.map(c => (QUIZ_parseChapter(c) || {}).course).filter(Boolean));
+
+          const onConfirmStart = () => {
+            if (rangePool.length < 5) return;
+            const shuffled = [...rangePool].sort(() => Math.random() - 0.5).slice(0, effectiveMockCount);
+            setMockOpen(false);
+            startWithPool(shuffled, effectiveMockCount, { timer: true });
+          };
+
+          return (
+            <div
+              onClick={() => setMockOpen(false)}
+              style={{
+                position: "fixed", inset: 0, zIndex: 1000,
+                background: "rgba(15,23,42,0.45)", backdropFilter: "blur(3px)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                padding: "4vh 16px",
+              }}
+            >
+              <div
+                onClick={e => e.stopPropagation()}
+                style={{
+                  position: "relative", width: "100%", maxWidth: 680,
+                  maxHeight: "92vh", overflow: "hidden",
+                  background: "#fff", borderRadius: 20,
+                  boxShadow: "0 24px 60px rgba(15,23,42,0.18)",
+                  display: "flex", flexDirection: "column",
+                }}
+              >
+                {/* Header */}
+                <div style={{ padding: "20px 24px", borderBottom: "1px solid #EEF2F7", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 12, background: "#F5F3FF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>⏱</div>
+                    <div>
+                      <div style={{ fontSize: 17, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.01em" }}>模拟考试配置</div>
+                      <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>Mock Exam · 选择范围、题量与时长</div>
+                    </div>
+                  </div>
+                  <button onClick={() => setMockOpen(false)} style={{ background: "transparent", border: "none", fontSize: 22, color: "#94A3B8", cursor: "pointer", padding: 4, lineHeight: 1 }}>×</button>
+                </div>
+
+                {/* Body */}
+                <div style={{ padding: "18px 24px", overflowY: "auto", flex: 1 }}>
+
+                  {/* ── 1) 考试范围 ── */}
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 1 · 考试范围（可多选章节）</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "170px 1fr", gap: 12, marginBottom: 18, border: "1px solid #EEF2F7", borderRadius: 12, overflow: "hidden", minHeight: 200 }}>
+                    {/* 学科侧栏 */}
+                    <div style={{ background: "#FAFBFD", borderRight: "1px solid #EEF2F7", overflowY: "auto", maxHeight: 260 }}>
+                      {courseList.length === 0 && <div style={{ padding: 14, fontSize: 12, color: "#94A3B8" }}>暂无题库</div>}
+                      {courseList.map(c => {
+                        const chapters = Object.keys(courseBuckets[c] || {});
+                        const inScope = chapters.filter(ch => mockScope.includes(ch)).length;
+                        const active = mockSubjectFocus === c;
+                        return (
+                          <button key={c} onClick={() => setMockSubjectFocus(c)}
+                            style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 14px",
+                              background: active ? "#fff" : "transparent",
+                              borderLeft: "3px solid " + (active ? (COURSE_COLORS_TREE[c]?.solid || "#8B5CF6") : "transparent"),
+                              border: "none", borderBottom: "1px solid #EEF2F7", cursor: "pointer", fontFamily: "inherit" }}>
+                            <div style={{ fontSize: 13, fontWeight: active ? 800 : 600, color: active ? "#0F172A" : "#475569" }}>{c}</div>
+                            <div style={{ fontSize: 11, color: inScope > 0 ? "#8B5CF6" : "#94A3B8", marginTop: 2, fontWeight: inScope > 0 ? 600 : 500 }}>
+                              {inScope > 0 ? `已选 ${inScope} / ${chapters.length}` : `${chapters.length} 章`}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {/* 章节多选 */}
+                    <div style={{ padding: 12, overflowY: "auto", maxHeight: 260 }}>
+                      {!mockSubjectFocus && <div style={{ fontSize: 12, color: "#94A3B8", padding: 6 }}>请先选择学科</div>}
+                      {mockSubjectFocus && (() => {
+                        const chs = Object.keys(courseBuckets[mockSubjectFocus] || {}).sort((a, b) => {
+                          const na = parseInt(a.match(/Ch\.(\d+)/)?.[1] || 0);
+                          const nb = parseInt(b.match(/Ch\.(\d+)/)?.[1] || 0);
+                          return na - nb;
+                        });
+                        const allSelected = chs.length > 0 && chs.every(c => mockScope.includes(c));
+                        return (
+                          <>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid #EEF2F7" }}>
+                              <button onClick={() => setMockScope(p => allSelected ? p.filter(c => !chs.includes(c)) : Array.from(new Set([...p, ...chs])))}
+                                style={{ padding: "4px 10px", fontSize: 11.5, fontWeight: 700, borderRadius: 999, border: "1px solid #CBD5E1", background: allSelected ? "#EDE9FE" : "#fff", color: "#334155", cursor: "pointer", fontFamily: "inherit" }}>
+                                {allSelected ? "☑ 已全选" : "☐ 全选本门"}
+                              </button>
+                              <span style={{ fontSize: 11, color: "#94A3B8" }}>{chs.length} 章</span>
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                              {chs.map(ch => {
+                                const full = chapterFullName[ch] || ch.replace(/^.+?\s+/, "");
+                                const count = courseBuckets[mockSubjectFocus][ch].length;
+                                const checked = mockScope.includes(ch);
+                                return (
+                                  <label key={ch} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 8px", borderRadius: 7, cursor: "pointer", background: checked ? "#F5F3FF" : "transparent" }}
+                                    onMouseEnter={e => { if (!checked) e.currentTarget.style.background = "#F8FAFC"; }}
+                                    onMouseLeave={e => { if (!checked) e.currentTarget.style.background = "transparent"; }}>
+                                    <input type="checkbox" checked={checked}
+                                      onChange={() => setMockScope(p => checked ? p.filter(x => x !== ch) : [...p, ch])}
+                                      style={{ accentColor: "#8B5CF6" }} />
+                                    <span style={{ flex: 1, fontSize: 13, color: "#0F172A", fontWeight: checked ? 600 : 500 }}>{full}</span>
+                                    <span style={{ fontSize: 11, color: "#94A3B8" }}>{count} 题</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* 快速操作 */}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: -8, marginBottom: 16 }}>
+                    <button onClick={() => {
+                      const all = [];
+                      courseList.forEach(c => all.push(...Object.keys(courseBuckets[c] || {})));
+                      setMockScope(all);
+                    }}
+                      style={{ padding: "5px 12px", fontSize: 11.5, fontWeight: 600, borderRadius: 999, border: "1px dashed #CBD5E1", background: "#fff", color: "#64748B", cursor: "pointer", fontFamily: "inherit" }}>
+                      全部学科全部章节
+                    </button>
+                    <button onClick={() => setMockScope([])}
+                      style={{ padding: "5px 12px", fontSize: 11.5, fontWeight: 600, borderRadius: 999, border: "1px solid #FECACA", background: "#FEF2F2", color: "#B91C1C", cursor: "pointer", fontFamily: "inherit" }}>
+                      清空选择
+                    </button>
+                    <span style={{ fontSize: 11.5, color: "#64748B", padding: "5px 4px" }}>
+                      已选 <strong style={{ color: "#8B5CF6" }}>{subjectCoursesInScope.size}</strong> 门课 · <strong style={{ color: "#8B5CF6" }}>{mockScope.length}</strong> 章 · 可用 <strong style={{ color: "#0F172A" }}>{maxCount}</strong> 题
+                    </span>
+                  </div>
+
+                  {/* ── 2) 题量 ── */}
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 2 · 题量</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+                    {countOptions.length === 0 && <span style={{ fontSize: 12, color: "#EF4444" }}>所选范围内题目不足 5 道，请扩大范围</span>}
+                    {countOptions.map(n => {
+                      const active = effectiveMockCount === n || (n === maxCount && mockCount > maxCount);
+                      return (
+                        <button key={n} onClick={() => setMockCount(n)}
+                          style={{ padding: "7px 16px", borderRadius: 10, border: "1.5px solid " + (active ? "#8B5CF6" : "#E2E8F0"),
+                            background: active ? "#8B5CF6" : "#fff", color: active ? "#fff" : "#334155",
+                            fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                          {n === maxCount ? `全部 ${n} 题` : `${n} 题`}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* ── 3) 时长 ── */}
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 3 · 限时（分钟）</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                    {durationOptions.map(m => {
+                      const active = mockMinutes === m;
+                      return (
+                        <button key={m} onClick={() => setMockMinutes(m)}
+                          style={{ padding: "7px 16px", borderRadius: 10, border: "1.5px solid " + (active ? "#0F172A" : "#E2E8F0"),
+                            background: active ? "#0F172A" : "#fff", color: active ? "#fff" : "#334155",
+                            fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                          {m} min
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 16 }}>仅作为时间参考，计时器会自动启动，不会强制交卷。</div>
+                </div>
+
+                {/* Footer */}
+                <div style={{ padding: "16px 24px", borderTop: "1px solid #EEF2F7", background: "#FAFBFD", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ fontSize: 12.5, color: "#475569" }}>
+                    本次考试：<strong style={{ color: "#0F172A" }}>{effectiveMockCount}</strong> 题 · 限时 <strong style={{ color: "#0F172A" }}>{mockMinutes}</strong> 分钟
+                    {mockScope.length === 0 && <span style={{ marginLeft: 6, color: "#94A3B8" }}>（未选范围 = 全部题库）</span>}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setMockOpen(false)}
+                      style={{ padding: "9px 16px", background: "#fff", color: "#475569", border: "1px solid #E2E8F0", borderRadius: 10, cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
+                      取消
+                    </button>
+                    <button onClick={onConfirmStart} disabled={maxCount < 5}
+                      style={{ padding: "9px 22px", background: maxCount < 5 ? "#CBD5E1" : "#8B5CF6", color: "#fff", border: "none", borderRadius: 10, cursor: maxCount < 5 ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", boxShadow: maxCount < 5 ? "none" : "0 6px 16px rgba(139,92,246,0.28)" }}>
+                      开始模拟考 →
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   }
