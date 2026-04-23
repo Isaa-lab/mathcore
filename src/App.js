@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, Component } from "react";
 import { createClient } from "@supabase/supabase-js";
 import katex from "katex";
 import { AnimatePresence, motion } from "framer-motion";
@@ -12384,6 +12384,56 @@ function computeRecommendations(progress, nodeList = SKILL_TREE) {
 
 const MS_DAY = 86400000;
 
+// 知识树画布常量（模块顶层，避免组件内 TDZ：useMemo/useCallback 在 render 同步执行时会先于组件内 const 声明被读取）
+const NODE_W = 136;
+const NODE_H = 68;
+const CANVAS_TOP_PAD = 24;
+const CANVAS_BOTTOM_PAD = 40;
+
+// 兜底错误边界 —— 防止"整页白屏"：任何 render 期间抛出的异常都会被捕获并可视化
+// 同时在 console 打完整 stack，方便用户把报错贴给我们继续定位
+class TreeErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { err: null, info: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err, info) {
+    this.setState({ info });
+    // eslint-disable-next-line no-console
+    console.error("[KnowledgeTree crashed]", err, info);
+  }
+  render() {
+    if (!this.state.err) return this.props.children;
+    const msg = String(this.state.err?.message || this.state.err);
+    const stack = String(this.state.err?.stack || "").split("\n").slice(0, 8).join("\n");
+    return (
+      <div style={{ padding: 24, maxWidth: 880, margin: "40px auto", background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 14, color: "#7F1D1D" }}>
+        <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8, color: "#B91C1C" }}>知识树渲染出错</div>
+        <div style={{ fontSize: 13, color: "#991B1B", marginBottom: 10 }}>
+          页面没白屏是因为兜底 Boundary 已经把异常接住了。把下面这段复制给开发同学能立刻定位问题。
+        </div>
+        <pre style={{ fontSize: 12, background: "#fff", color: "#7F1D1D", padding: 12, borderRadius: 8, border: "1px solid #FCA5A5", overflow: "auto", whiteSpace: "pre-wrap" }}>
+{msg}
+
+{stack}
+        </pre>
+        <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+          <button
+            onClick={() => { try { localStorage.removeItem("mc_skill_progress_v2"); } catch {} ; window.location.reload(); }}
+            style={{ padding: "6px 14px", background: "#B91C1C", color: "#fff", border: "none", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}
+          >
+            重置本地进度并刷新
+          </button>
+          <button
+            onClick={() => window.location.reload()}
+            style={{ padding: "6px 14px", background: "#fff", color: "#B91C1C", border: "1px solid #FCA5A5", borderRadius: 8, fontWeight: 600, cursor: "pointer" }}
+          >
+            仅刷新
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
 function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTab }) {
   // 新数据模型：{ [id]: { status, updatedAt, masteredAt } }
   // 向后兼容旧的 mc_skill_mastery (number 0/1/2)
@@ -12557,9 +12607,6 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const selected = selectedId ? nodeIndex[selectedId] : null;
   const selectedStatus = selected ? deriveStatus(selected, progress) : null;
 
-  // 画布尺寸（预留顶部 24 / 底部 40 的呼吸空间；推荐光晕与阴影越界不再被裁切）
-  const CANVAS_TOP_PAD = 24;
-  const CANVAS_BOTTOM_PAD = 40;
   const maxX = Math.max(...visibleNodes.map(n => n.x), 800) + 160;
   const maxY = Math.max(...visibleNodes.map(n => n.y), 300) + CANVAS_TOP_PAD + CANVAS_BOTTOM_PAD;
 
@@ -12577,9 +12624,6 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     const neededH = contentH * fitZ + 40;
     return Math.max(600, Math.min(820, Math.ceil(neededH)));
   }, [visibleNodes]);
-
-  const NODE_W = 136;
-  const NODE_H = 68;
 
   // ══ 画布缩放 / 平移 ══
   // 默认 0.7x —— 让整棵树在一屏内概览可见，细看时再用滚轮放大
@@ -13812,7 +13856,7 @@ export default function App() {
     }
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
-    if (page === "技能树") return <SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
+    if (page === "技能树") return <TreeErrorBoundary><SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} /></TreeErrorBoundary>;
     if (page === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} setChapterFilter={setChapterFilter} />;
     if (page === "教师管理") return <TeacherPage setPage={handleSetPage} profile={profile} />;
     return null;
@@ -13822,7 +13866,7 @@ export default function App() {
     if (tab === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
     if (tab === "AI对话") return <MaterialChatPage setPage={handleSetPage} profile={profile} />;
     if (tab === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} setQuizIntent={setQuizIntent} switchStudyTab={switchStudyTab} />;
-    if (tab === "知识树") return <SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} setQuizIntent={setQuizIntent} switchStudyTab={switchStudyTab} />;
+    if (tab === "知识树") return <TreeErrorBoundary><SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} setQuizIntent={setQuizIntent} switchStudyTab={switchStudyTab} /></TreeErrorBoundary>;
     if (tab === "小测") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} autoStartIntent={quizIntent} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
     return null;
   };

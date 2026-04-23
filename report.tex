@@ -1,0 +1,505 @@
+%!TEX program = xelatex
+% ---------------------------------------------------------------
+%  MathCore Project Report
+%  Compile with:  xelatex report.tex  (twice, for TOC)
+%  Or:            latexmk -xelatex report.tex
+% ---------------------------------------------------------------
+\documentclass[11pt,a4paper]{article}
+
+% ---------- Core packages ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[english]{babel}
+
+% ---------- Layout ----------
+\usepackage[a4paper,margin=1in,headheight=14pt]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+\usepackage{parskip}
+\setlength{\parindent}{0pt}
+
+% ---------- Math ----------
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+
+% ---------- Tables / lists / captions ----------
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\setlist{topsep=2pt,itemsep=2pt,parsep=0pt}
+\usepackage[labelfont=bf,font=small]{caption}
+
+% ---------- Graphics / color ----------
+\usepackage{graphicx}
+\usepackage{xcolor}
+\definecolor{mcblue}{HTML}{1D4ED8}
+\definecolor{mcteal}{HTML}{0F766E}
+\definecolor{mcamber}{HTML}{B45309}
+\definecolor{mcred}{HTML}{B91C1C}
+\definecolor{mcslate}{HTML}{334155}
+\definecolor{mcgraybg}{HTML}{F8FAFC}
+\definecolor{mccode}{HTML}{0F172A}
+
+% ---------- Links ----------
+\usepackage[colorlinks=true,
+            linkcolor=mcblue,
+            urlcolor=mcteal,
+            citecolor=mcblue,
+            pdftitle={MathCore: A Personalized Learning OS for University Mathematics},
+            pdfauthor={MathCore Team},
+            pdfsubject={System design report},
+            pdfkeywords={adaptive learning, LLM, knowledge graph, spaced repetition}]{hyperref}
+
+% ---------- Section titles ----------
+\usepackage{titlesec}
+\titleformat{\section}{\Large\bfseries\color{mcslate}}{\thesection.}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries\color{mcslate}}{\thesubsection.}{0.5em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{mcslate}}{\thesubsubsection.}{0.4em}{}
+\titlespacing*{\section}{0pt}{1.4em}{0.6em}
+\titlespacing*{\subsection}{0pt}{1.0em}{0.4em}
+
+% ---------- Header / footer ----------
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{mcslate}MathCore Project Report}
+\fancyhead[R]{\small\color{mcslate}\nouppercase{\leftmark}}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ---------- Code listings ----------
+\usepackage{listings}
+\lstdefinestyle{mccode}{
+  backgroundcolor=\color{mcgraybg},
+  basicstyle=\ttfamily\footnotesize\color{mccode},
+  keywordstyle=\color{mcblue}\bfseries,
+  commentstyle=\itshape\color{gray!70!black},
+  stringstyle=\color{mcamber},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  stepnumber=1,
+  numbersep=8pt,
+  frame=single,
+  rulecolor=\color{gray!30},
+  framesep=5pt,
+  breaklines=true,
+  breakatwhitespace=true,
+  showstringspaces=false,
+  tabsize=2,
+  captionpos=b,
+  xleftmargin=0.4em,
+  xrightmargin=0.4em,
+}
+\lstset{style=mccode}
+
+% ---------- Callout boxes ----------
+\usepackage[most]{tcolorbox}
+\tcbset{
+  callout/.style={
+    enhanced,
+    breakable,
+    colback=mcgraybg,
+    colframe=mcblue!70!black,
+    boxrule=0.6pt,
+    arc=2pt,
+    left=8pt,right=8pt,top=6pt,bottom=6pt,
+    fonttitle=\bfseries,
+    coltitle=white,
+    colbacktitle=mcblue!85!black,
+    attach boxed title to top left={yshift=-2mm,xshift=4mm},
+    boxed title style={arc=2pt,boxrule=0pt},
+  },
+  pitfall/.style={
+    enhanced,
+    breakable,
+    colback=mcred!4,
+    colframe=mcred!70!black,
+    boxrule=0.6pt,
+    arc=2pt,
+    left=8pt,right=8pt,top=6pt,bottom=6pt,
+    fonttitle=\bfseries,
+    coltitle=white,
+    colbacktitle=mcred!75!black,
+    attach boxed title to top left={yshift=-2mm,xshift=4mm},
+    boxed title style={arc=2pt,boxrule=0pt},
+  },
+  principle/.style={
+    enhanced,
+    breakable,
+    colback=mcteal!4,
+    colframe=mcteal,
+    boxrule=0.6pt,
+    arc=2pt,
+    left=8pt,right=8pt,top=6pt,bottom=6pt,
+    fonttitle=\bfseries,
+    coltitle=white,
+    colbacktitle=mcteal,
+    attach boxed title to top left={yshift=-2mm,xshift=4mm},
+    boxed title style={arc=2pt,boxrule=0pt},
+  },
+}
+
+% ---------- Custom commands ----------
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\file}[1]{\textcolor{mcslate}{\texttt{\small #1}}}
+
+% ---------- Title block ----------
+\title{\vspace{-2em}%
+  \color{mcslate}\textbf{\Large MathCore}\\[0.3em]
+  \large A Personalized Learning Operating System for\\
+  \large University-Level Mathematics\\[0.6em]
+  \normalsize\color{mcslate!70}
+  \textit{Motivation, Underlying Logic, and Technical Design}
+}
+\author{MathCore Team}
+\date{\today}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+\begin{abstract}
+\noindent
+University mathematics, unlike most academic subjects, is deeply \emph{prerequisite-chained}: a gap in Chapter 2 quietly poisons Chapters 5 through 12. Traditional learning tools (PDFs, question banks, generic spaced-repetition apps) treat a textbook as a flat document and a student as an undifferentiated user. \textbf{MathCore} is an attempt to treat university mathematics as what it actually is --- a dependency graph of concepts --- and to build a tool around that graph.
+This report documents the project's original motivation, the design principles that emerged during iteration, the system architecture, and a set of concrete algorithmic decisions made to address the hardest problems we encountered: low-quality LLM-generated questions, dangling mathematical references across long documents, and a knowledge tree that must continuously evolve as the user uploads new materials.
+\end{abstract}
+
+\tableofcontents
+\vspace{1em}
+\hrule
+\vspace{1em}
+
+% ================================================================
+\section{Motivation}
+\label{sec:motivation}
+
+\subsection{The Specific Pain of Studying University Mathematics}
+
+Most undergraduate mathematics students share a near-universal experience: sometime between Linear Algebra and Ordinary Differential Equations, they discover that their notes cover everything except \emph{the one thing they currently need}. The question ``can you integrate $\int_0^1 x^2 e^{-x^2}\,\mathrm{d}x$ numerically with three digits of accuracy?'' requires, in principle, a fluent command of numerical integration, elementary calculus, error analysis, and floating-point arithmetic. In practice, most students attempt it with whichever of those four components they happen to remember on the day of the exam.
+
+We identified four concrete failure modes in the existing toolchain:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Linearity of materials.} A PDF forces strictly top-to-bottom reading. The student cannot ask ``show me only what I am weak at.''
+    \item \textbf{Context-free practice.} Generic quiz apps do not know whether a wrong answer was caused by a missing prerequisite or a careless arithmetic slip.
+    \item \textbf{Invisible graph structure.} The prerequisite relations between chapters exist only in the professor's head, not on the student's screen.
+    \item \textbf{Zero feedback between sessions.} Yesterday's mistakes are not automatically rescheduled for today; the user is asked to remember what they do not yet know.
+\end{enumerate}
+
+\subsection{The Thesis}
+
+\begin{tcolorbox}[principle,title=Design Thesis]
+A learning tool for mathematics should behave less like a static book and more like a \emph{living operating system}: one that continuously observes the learner, maintains a mastery model, understands the prerequisite graph of the subject, and uses those two together to decide what the learner should see next.
+\end{tcolorbox}
+
+This thesis drove every subsequent design decision in MathCore.
+
+% ================================================================
+\section{Design Principles}
+\label{sec:principles}
+
+Over the course of iteration we converged on five principles. They are worth stating explicitly because they explain why certain obvious-looking features were deliberately rejected.
+
+\begin{tcolorbox}[principle,title=P1. Model the Graph, Not the Book]
+Concepts, not chapters, are the unit of work. A chapter is simply a convenient container. Practice, progress, and the knowledge tree are all keyed on concept nodes, which means a single concept can belong to multiple chapters without duplicating state.
+\end{tcolorbox}
+
+\begin{tcolorbox}[principle,title=P2. Every Question Must Be Self-Contained]
+A question referencing ``Equation~(1)'' without showing Equation~(1) is not a question; it is a bug. This principle rejects a large class of otherwise plausible LLM outputs and forced us to build the semantic-chunking and reference-resolution pipeline described in Section~\ref{sec:chunking}.
+\end{tcolorbox}
+
+\begin{tcolorbox}[principle,title=P3. Transparent Feedback Loops]
+Wrong answers, dropped tasks, rescheduled reviews, and AI filtering decisions are all surfaced in the UI. The system should never quietly skip content on the user's behalf; it should show what it skipped and why.
+\end{tcolorbox}
+
+\begin{tcolorbox}[principle,title=P4. Progressive Disclosure]
+The default view shows the student what they need \emph{today}. Configuration (exam date, daily time budget, chapter scope) is collapsed by default and reachable in one click. This principle drove the Learning Report redesign described in Section~\ref{sec:learning-report}.
+\end{tcolorbox}
+
+\begin{tcolorbox}[principle,title=P5. The Canvas Must Grow With the Content]
+Anything driven by user uploads (knowledge tree, wrong-question ledger, mastery statistics) must layout dynamically. Hard-coded coordinates were banned after the first sprint.
+\end{tcolorbox}
+
+% ================================================================
+\section{System Architecture}
+\label{sec:architecture}
+
+\subsection{High-Level View}
+
+\begin{figure}[h]
+\centering
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+\textbf{Client} & $\rightarrow$ & \textbf{Serverless APIs} & $\rightarrow$ & \textbf{Data Layer} \\
+\hline
+React (CRA) & & \code{/api/generate} & & Supabase (Postgres) \\
+\code{pdf.js} & & \code{/api/extract} & & Supabase Storage \\
+KaTeX renderer & & \code{/api/analyze-error} & & Supabase Auth \\
+\hline
+\end{tabular}
+\caption{MathCore runtime topology.}
+\end{figure}
+
+\subsection{Data Model}
+
+Table~\ref{tab:schema} summarizes the core tables and their responsibilities. Row-Level Security (RLS) policies in Supabase enforce the ownership rules: students see only their own materials and mastery records; teachers can read and write material topics they uploaded.
+
+\begin{table}[h]
+\centering
+\caption{Core relational schema.}
+\label{tab:schema}
+\small
+\begin{tabularx}{\textwidth}{@{}lX@{}}
+\toprule
+\textbf{Table} & \textbf{Purpose} \\
+\midrule
+\code{profiles} & User metadata, role (\code{student} / \code{teacher}). \\
+\code{materials} & Uploaded files, with \code{uploaded\_by}, \code{visibility}, \code{file\_size}. \\
+\code{material\_topics} & AI-extracted concepts per material: \code{name}, \code{chapter}, \code{course}, \code{prereq\_ids}. \\
+\code{questions} & Generated or authored questions, tied to a topic or material. \\
+\code{topic\_mastery} & Per-user mastery state per topic, driven by the SM-2 scheduler. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Client State}
+
+The client stores ephemeral and device-local data in \code{localStorage} through the thin wrapper in \file{src/utils/storage.js}. This covers:
+
+\begin{itemize}
+    \item The wrong-question ledger (\code{WrongItem}), including SM-2 metadata.
+    \item The personal exam plan (\code{ExamPlan}) and day-keyed completion state.
+    \item User preferences for daily time budget and exam scope.
+\end{itemize}
+
+Everything that must survive across devices --- materials, topics, mastery, authored questions --- lives in Supabase.
+
+% ================================================================
+\section{Key Algorithms}
+\label{sec:algorithms}
+
+\subsection{Semantic Chunking for LLM Question Generation}
+\label{sec:chunking}
+
+The first version of MathCore's question generator simply sliced the uploaded PDF text into fixed-length windows and sent each slice to the model. The result was a steady stream of questions such as ``Is Equation (1) a linear ODE?'' with no Equation (1) in sight. The model was faithfully quoting its input; the input was broken.
+
+We replaced the naïve slicer with a three-stage pipeline:
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{Reference extraction.} A pre-pass scans the full text for numbered definitions, theorems, and equations (\code{Definition 3.1}, \code{Theorem 2}, \code{Equation (4)}, etc.) and records them in a dictionary keyed by the canonical label.
+    \item \textbf{Semantic chunking.} The text is then split into contextually coherent chunks, respecting paragraph boundaries, LaTeX math environments (\code{\textbackslash begin\{equation\}\ldots\textbackslash end\{equation\}}), and numbered-item boundaries. Chunks share a small trailing overlap so that a topic split across a boundary remains addressable.
+    \item \textbf{Reference injection.} For each chunk, the pipeline identifies which numbered references appear inside it and prepends their full text as a \emph{reference context} banner before calling the LLM.
+\end{enumerate}
+
+The upstream prompt was also hardened:
+
+\begin{tcolorbox}[callout,title=Prompt Fragment (\code{api/extract.js})]
+\begin{minipage}{\linewidth}
+\footnotesize
+\textbf{SELF-CONTAINED rule.} Every question must be understandable \emph{on its own}. You must not use dangling references such as ``Equation (1)'', ``Theorem 2'', or ``the above figure'' unless their full content is either (a) present in the reference-context banner above, or (b) inlined into the question. If neither, output \texttt{INSUFFICIENT\_CONTEXT} and skip this question.
+\end{minipage}
+\end{tcolorbox}
+
+A server-side post-filter (\code{isShellOrDangling}) then discards any output that still starts with a continuation word (``therefore, \ldots'') or ends in a bracketed shell fragment (``\ldots (10 marks)''). The same predicate is mirrored on the client as defence in depth.
+
+\subsection{Spaced Repetition: SM-2 for Wrong Questions}
+
+Each wrong answer is treated as a SM-2 flashcard. On each review, the user supplies a quality grade $q \in \{0,1,2,3,4,5\}$, and the scheduler updates the ease factor $E$, interval $I$, and repetition counter $n$:
+
+\begin{align*}
+E' &= \max\bigl(1.3,\; E + 0.1 - (5-q)(0.08 + (5-q)\cdot 0.02)\bigr),\\[2pt]
+I' &=
+\begin{cases}
+1, & n = 0,\\
+6, & n = 1,\\
+\lceil I \cdot E' \rceil, & n \geq 2,
+\end{cases}\\[2pt]
+n' &= \begin{cases} n+1, & q \geq 3,\\ 0, & q < 3.\end{cases}
+\end{align*}
+
+A wrong question with $q < 3$ therefore resets its interval and resurfaces the next day; a consistently correct question drifts quickly outward. This is applied per concept node, not per raw question, so semantically equivalent errors reinforce each other.
+
+\subsection{Knowledge Tree: Dynamic DAG Layout}
+\label{sec:tree}
+
+The knowledge tree is the visual centrepiece of MathCore. It must:
+
+\begin{enumerate}[leftmargin=*,label=(\alph*)]
+    \item display the course's built-in prerequisite graph,
+    \item absorb AI-extracted topics from every newly uploaded document,
+    \item lay both out on the same canvas without hard-coded coordinates, and
+    \item remain legible with 50+ nodes.
+\end{enumerate}
+
+Rather than adopt a heavyweight library (\code{react-flow} + \code{dagre}) we implemented a lightweight column-based DAG layout directly in SVG. Built-in course nodes carry explicit $(x,y)$ placements tuned for the canonical chapters; AI-extracted topics are routed by the helper \code{placeAiTopicsToTree}, which infers the subject from the topic's \code{chapter} field and appends the node to the appropriate subject column, stacking vertically with a fixed step. Unknown subjects open a fresh column on the right.
+
+Three further properties were needed to make the tree usable in practice:
+
+\begin{itemize}
+    \item \textbf{Adaptive canvas height.} A \code{useMemo} computes the content bounding box and clamps the SVG height to $[600, 820]$ pixels. This replaces the previous fixed 620-pixel canvas, which clipped the bottom of the tree whenever AI nodes pushed the content downward.
+    \item \textbf{Fit-to-viewport with safety margin.} \code{fitView} now runs under a double \code{requestAnimationFrame} (so the browser has committed the layout before we measure) and applies a $0.98$ safety factor to the derived zoom. A \code{ResizeObserver} attached to the canvas triggers \code{fitView} whenever the container's real size changes.
+    \item \textbf{Interactive path highlighting.} Hovering a node runs a bidirectional depth-first search along dependency edges, yielding a \code{highlightSet}. Off-path nodes and edges are dimmed to $\sim\!20\%$ opacity; on-path edges switch to a teal stroke and gain a directional arrow marker. This collapses a 50-node canvas into the single learning path that matters for the current question.
+\end{itemize}
+
+\subsection{Real-Time Knowledge Tree Updates}
+
+When a user uploads a new material, the extraction pipeline writes rows to \code{material\_topics}. We do not want the user to refresh the page to see those rows appear in the tree. The fix is a tiny custom DOM event:
+
+\begin{lstlisting}[language=JavaScript,caption={Event-driven refresh, simplified from \file{src/App.js}.}]
+// After successful insert in processMaterialWithAI:
+window.dispatchEvent(
+  new CustomEvent("mc:material-topics-updated", {
+    detail: { materialId, count: topicRows.length },
+  })
+);
+
+// Inside SkillTreePage:
+const [aiRefreshTick, setAiRefreshTick] = useState(0);
+
+useEffect(() => {
+  const bump = () => setAiRefreshTick((t) => t + 1);
+  window.addEventListener("mc:material-topics-updated", bump);
+  window.addEventListener("focus", bump);
+  return () => {
+    window.removeEventListener("mc:material-topics-updated", bump);
+    window.removeEventListener("focus", bump);
+  };
+}, []);
+
+useEffect(() => {
+  // Refetch material_topics from Supabase whenever the tick changes.
+  fetchAiTopics();
+}, [aiRefreshTick]);
+\end{lstlisting}
+
+Combined with a manual \emph{refresh AI nodes} button, the tree now stays within a few hundred milliseconds of the database.
+
+% ================================================================
+\section{Selected User-Facing Features}
+\label{sec:features}
+
+\subsection{Wrong-Question Ledger (\emph{Error Ledger})}
+
+The error ledger abandons the ``spreadsheet of mistakes'' pattern in favour of \emph{fluid diagnostic cards}. Each card shows:
+
+\begin{itemize}
+    \item The question in full, rendered with KaTeX.
+    \item The student's answer versus the correct answer, highlighted.
+    \item An \emph{AI Insight} summary produced by \code{/api/analyze-error}, persisted so repeated views do not re-bill the API.
+    \item The SM-2 next-review date and a single-tap ``review now'' CTA.
+\end{itemize}
+
+\subsection{Personal Exam Plan}
+
+Given (i) the user's selected exam scope, (ii) an exam date, and (iii) a daily time budget, the plan generator (\file{src/utils/planGenerator.js}) produces a day-by-day schedule. Untouched tasks roll over; exceeding the daily budget soft-drops the lowest-priority tasks and surfaces the drop in the UI instead of silently hiding them.
+
+\subsection{Learning Report}
+\label{sec:learning-report}
+
+The Learning Report was redesigned around Principle~P4 (progressive disclosure):
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{First-fold priority.} Current mastery, total answered, and today's plan are pinned at the top. The exam-prep configuration collapses into a one-line summary; a single button expands the full form.
+    \item \textbf{Grouped chapter selector.} Chapters are grouped by subject, with \emph{select-all} per subject and a muted style for unselected tags. This collapses a wall of $\sim\!30$ chips into a scannable hierarchy.
+    \item \textbf{Simpler radar chart.} The radar now shows subject-level mastery only. Chapter granularity moved into a progress-bar panel with hover tooltips showing exact accuracy and count.
+    \item \textbf{Sticky action bar.} A bottom-anchored CTA bar offers \emph{Start Practice} (primary) and \emph{Knowledge Points} (secondary), so the report never ends in a dead-end.
+\end{enumerate}
+
+\subsection{Email-Verification Landing Page}
+
+First-run polish matters. The email-verification page was upgraded from a generic success/failure banner to a dedicated route with:
+
+\begin{itemize}
+    \item Animated SVG checkmark (success) or broken-link glyph (failure).
+    \item A subtle mathematical pattern background (\code{MathDecorBg}) rendered in SVG.
+    \item Personalized copy: the user's display name from the Supabase session, plus a randomly chosen mathematical quotation.
+    \item Countdown auto-redirect to the main workspace, with an explicit ``go now'' button for users who prefer not to wait.
+\end{itemize}
+
+% ================================================================
+\section{Iteration History and Lessons}
+\label{sec:iterations}
+
+\subsection{Low-Quality Question Crisis}
+
+The most instructive defect of the project was the low-quality question stream: questions such as \emph{``When studying Linear Algebra, is it more effective to clarify concepts first and then solve problems?''} --- a study-strategy survey with no mathematical content --- or \emph{``(10 marks) True or False''} with nothing between the parentheses and the stop.
+
+\begin{tcolorbox}[pitfall,title=Pitfall: Trusting the LLM's Own Framing]
+Early prompts simply asked the model to ``generate a question from this text.'' The model obliged even when the text fragment contained no actual content, producing shell-shaped outputs that were syntactically valid but semantically empty.
+\end{tcolorbox}
+
+The fix was three-layered:
+
+\begin{enumerate}[leftmargin=*]
+    \item Client-side \code{isLowQualityQuestion} predicate with pattern families for meta-learning, shell fragments, and dangling references.
+    \item Server-side \code{isShellOrDangling} mirror, so the defence survives even if a future client forgets the filter.
+    \item Prompt hardening with a \emph{strictly forbidden} section and an explicit \code{INSUFFICIENT\_CONTEXT} escape hatch.
+\end{enumerate}
+
+\subsection{Orphaned Materials}
+
+Users reported previously uploaded PDFs appearing in the library with \code{file\_size:~0} and a broken preview. The root cause was a storage-bucket permission drift during deployment: rows had been written to \code{materials} but the corresponding object upload had failed silently.
+
+Rather than hide the broken rows, we surfaced them. The materials page now labels affected entries as \emph{``PDF missing or expired''} and offers, to the owner or a teacher, two actions: re-upload the file (which repairs the storage reference) or delete the orphaned row.
+
+\subsection{Knowledge-Tree Clipping Bug}
+
+The lower portion of the knowledge tree was being clipped in screenshots. The fault was a fixed-height canvas interacting badly with the newly-added AI-extracted column. The fix (Section~\ref{sec:tree}) consisted of adaptive canvas height, a more robust \code{fitView} driven by \code{ResizeObserver} plus double-\code{requestAnimationFrame}, and padding with a $0.98$ safety factor on zoom to avoid sub-pixel clipping.
+
+\subsection{Temporal Dead Zone in \code{SkillTreePage}}
+
+While consolidating the tree into \code{useMemo} calls we produced a subtler bug: the \code{canvasHeight} memo referenced \code{NODE\_W} and \code{NODE\_H} \emph{before} their \code{const} declarations in the same component body. React executes \code{useMemo} factories synchronously during render, so the memo ran inside the TDZ of those constants, threw \code{ReferenceError: Cannot access 'NODE\_W' before initialization}, and the entire tree page failed to mount.
+
+\begin{tcolorbox}[pitfall,title=Pitfall: Hooks in the Temporal Dead Zone]
+\code{const} and \code{let} are not hoisted. A hook whose factory runs during render will see a \code{ReferenceError} if it references any block-scoped binding declared later in the same function body. Prefer module-level constants for values that never depend on component state.
+\end{tcolorbox}
+
+The fix was to promote \code{NODE\_W}, \code{NODE\_H}, \code{CANVAS\_TOP\_PAD}, and \code{CANVAS\_BOTTOM\_PAD} to the module scope. They were pure literals; they never should have been in the component body.
+
+% ================================================================
+\section{Evaluation and Current State}
+
+\subsection{What Works}
+
+\begin{itemize}
+    \item The wrong-question ledger with SM-2 scheduling has been used through several end-to-end review cycles without data loss.
+    \item The semantic-chunking pipeline has visibly eliminated the ``Equation (1)'' class of questions from AI-generated quizzes.
+    \item The knowledge tree now absorbs AI-extracted topics in real time after upload and renders correctly at both small (10-node) and medium (50-node) sizes.
+    \item First-run polish (email verification, empty-state copy, sticky CTAs) has closed several previously reported drop-off points.
+\end{itemize}
+
+\subsection{Known Limitations}
+
+\begin{itemize}
+    \item AI-extracted topics are not yet linked into the prerequisite graph of the built-in curriculum; they form a parallel column rather than weaving into the existing edges.
+    \item Multi-user collaboration on a single material (e.g., a teacher curating a shared topic list) is schema-ready via RLS but has no UI.
+    \item The Socratic coaching drawer relies on per-session LLM state and does not yet survive page reloads.
+\end{itemize}
+
+\subsection{Next Steps}
+
+\begin{enumerate}[leftmargin=*]
+    \item Teach the AI extractor to emit \code{prereq\_ids} against the built-in node set, so new topics can attach to the existing DAG.
+    \item Expose a teacher dashboard for curating \code{material\_topics} and \code{questions} in bulk.
+    \item Persist Socratic-coaching sessions so a user can resume a partial dialogue on another device.
+\end{enumerate}
+
+% ================================================================
+\section{Conclusion}
+
+MathCore started from a simple observation: that university mathematics is a graph, not a stack, and that any tool pretending otherwise will eventually waste the student's time. The path from that observation to a working system required solving a handful of interrelated problems --- self-contained question generation, adaptive graph layout, transparent scheduling, and real-time data flow from upload to knowledge tree --- each of which produced a design principle worth carrying forward.
+
+The project is now at the point where the feedback loop has tightened: a student can upload a document, see their knowledge tree expand within seconds, practice questions that are actually grounded in that document, and have their mistakes scheduled back into view at the right moment. The remaining work is not structural; it is a matter of widening that loop, connecting AI-extracted topics into the existing graph, and extending the same rigor to the social and collaborative layer of the product.
+
+\vspace{1em}
+\hrule
+\vspace{0.6em}
+\begin{center}
+\small\color{mcslate!80}
+\emph{``The only way to learn mathematics is to do mathematics.''} --- Paul Halmos
+\end{center}
+
+\end{document}
