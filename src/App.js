@@ -12563,6 +12563,21 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const maxX = Math.max(...visibleNodes.map(n => n.x), 800) + 160;
   const maxY = Math.max(...visibleNodes.map(n => n.y), 300) + CANVAS_TOP_PAD + CANVAS_BOTTOM_PAD;
 
+  // 画布高度自适应：当树变长（AI 节点注入后）时，画布本身就长一点，避免 fitView 被迫压到太低的 zoom
+  // 与"告别固定坐标"配套的"告别固定画布高度"：上限 820px（再高体验会割裂），下限 600px
+  const canvasHeight = useMemo(() => {
+    if (!visibleNodes || visibleNodes.length === 0) return 620;
+    const approxWidth = 920;
+    const xs = visibleNodes.map(n => n.x);
+    const ys = visibleNodes.map(n => n.y);
+    const contentW = (Math.max(...xs) - Math.min(...xs)) + NODE_W + 48;
+    const contentH = Math.max(...ys) + NODE_H + CANVAS_TOP_PAD + CANVAS_BOTTOM_PAD + 16;
+    // 粗估水平适配缩放，反推需要的高度；钳位 [600, 820]
+    const fitZ = Math.min(1.0, (approxWidth - 48) / contentW);
+    const neededH = contentH * fitZ + 40;
+    return Math.max(600, Math.min(820, Math.ceil(neededH)));
+  }, [visibleNodes]);
+
   const NODE_W = 136;
   const NODE_H = 68;
 
@@ -12648,19 +12663,20 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     if (!visibleNodes || visibleNodes.length === 0) return;
     const xs = visibleNodes.map(n => n.x);
     const ys = visibleNodes.map(n => n.y);
-    const minX = Math.min(...xs) - 24;
-    const maxXl = Math.max(...xs) + NODE_W + 24;
-    const minY = -16;                                // 顶部给推荐光晕/选中环留呼吸
-    const maxYl = Math.max(...ys) + NODE_H + 24;     // 底部同样留呼吸
+    const minX = Math.min(...xs) - 28;
+    const maxXl = Math.max(...xs) + NODE_W + 28;
+    const minY = -20;                                // 顶部给推荐光晕/选中环 + 呼吸
+    const maxYl = Math.max(...ys) + NODE_H + 36;     // 底部同样留呼吸
     const contentW = Math.max(maxXl - minX, 400);
     const contentH = Math.max(maxYl - minY, 300);
-    const padX = 24, padY = 16;
+    const padX = 28, padY = 28; // 底/顶 padding 拉大，彻底防止边缘阴影被裁
     const fz = Math.min(
       (rect.width  - padX * 2) / contentW,
       (rect.height - padY * 2) / contentH,
     );
-    const z = Math.max(MIN_ZOOM, Math.min(1.0, fz));
-    const panX = (rect.width  - contentW * z) / 2 - (minX + CANVAS_TOP_PAD * 0) * z;
+    // 0.98 的安全系数：即便计算误差导致 rect 差 1-2px，也不会把最后一行节点推出画布
+    const z = Math.max(MIN_ZOOM, Math.min(1.0, fz * 0.98));
+    const panX = (rect.width  - contentW * z) / 2 - minX * z;
     const panY = (rect.height - contentH * z) / 2 - (minY + CANVAS_TOP_PAD) * z;
     setZoom(z);
     setPan({ x: panX, y: panY });
@@ -12668,12 +12684,24 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
 
   // 首次渲染 + 课程筛选切换 + AI 节点数变化 → 自动 fitView
   useEffect(() => {
-    // 等 DOM layout 完成
-    const t = setTimeout(() => fitView(), 0);
-    return () => clearTimeout(t);
+    // 等两次 rAF 确保 layout / 字体 / 侧栏都稳定
+    let raf1, raf2;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => fitView());
+    });
+    return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
   }, [fitView]);
 
-  // 视口尺寸变化（侧栏展开/折叠、窗口缩放）→ 重算
+  // 容器尺寸变化（canvas 高度自适应 / 侧栏折叠 / 浏览器缩放）→ 重算 fitView
+  // ResizeObserver 比 window.resize 更可靠 —— 能捕获父容器布局变化导致的 canvas 自身尺寸波动
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => fitView());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [fitView]);
+
   useEffect(() => {
     const onResize = () => fitView();
     window.addEventListener("resize", onResize);
@@ -12829,7 +12857,7 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
       {/* ══ Canvas —— 主角优先：知识树占据最大空间；节点详情以浮层形式收纳到节点交互内
              支持滚轮缩放（以鼠标位置为不动点）+ 左键拖拽平移（空白处） ══ */}
       <div ref={canvasRef}
-           style={{ background: "linear-gradient(180deg,#FAFBFD 0%,#FFFFFF 140px)", borderRadius: 18, border: "1px solid #EEF2F7", padding: 0, overflow: "hidden", height: 620, position: "relative", cursor: dragState.current.dragging ? "grabbing" : "grab", userSelect: "none" }}
+           style={{ background: "linear-gradient(180deg,#FAFBFD 0%,#FFFFFF 140px)", borderRadius: 18, border: "1px solid #EEF2F7", padding: 0, overflow: "hidden", height: canvasHeight, position: "relative", cursor: dragState.current.dragging ? "grabbing" : "grab", userSelect: "none" }}
            onMouseDown={handleMouseDown}
            onMouseMove={handleMouseMove}
            onMouseUp={handleMouseUpOrLeave}
