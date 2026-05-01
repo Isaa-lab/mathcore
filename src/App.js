@@ -601,7 +601,7 @@ function ProviderAvatar({ providerId, size = 30, showRing = false }) {
 // · 已经存过 Key 的：点击即切换，不要求重复输入
 // · 未配置的：展开内嵌输入框填 Key，保存后立刻切换
 // · 切换 provider 不会清空其它 provider 的 Key —— 可以多套 Key 并存
-function ProviderSwitcherPopover({ profile, onClose, onSwitched }) {
+function ProviderSwitcherPopover({ profile, onClose, onSwitched, onLogout }) {
   const [tick, setTick] = useState(0);       // 用于切换后触发重渲染
   const [expanded, setExpanded] = useState(null); // 展开输入框的 provider id
   const [inputKey, setInputKey] = useState("");
@@ -815,11 +815,22 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched }) {
       })}
 
       {/* Footer */}
-      <div style={{ borderTop: "1px solid #F3F4F6", marginTop: 8, paddingTop: 8 }}>
+      <div style={{ borderTop: "1px solid #F3F4F6", marginTop: 8, paddingTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
         <button
           onClick={() => { onClose(); useMathStore.getState().openAISettings(); }}
           style={{ width: "calc(100% - 20px)", margin: "0 10px", padding: "8px 10px", fontSize: 12, fontWeight: 600, background: "#F9FAFB", color: "#4B5563", border: "1px solid #E5E7EB", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
         >⚙️ 打开完整 AI 设置…</button>
+        {onLogout && (
+          <button
+            onClick={() => {
+              if (window.confirm("确定退出当前账号？")) {
+                onClose();
+                onLogout();
+              }
+            }}
+            style={{ width: "calc(100% - 20px)", margin: "0 10px 4px", padding: "8px 10px", fontSize: 12, fontWeight: 700, background: "#FEF2F2", color: "#B91C1C", border: "1px solid #FECACA", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+          >🚪 退出登录</button>
+        )}
       </div>
     </div>
   );
@@ -4659,6 +4670,36 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
     return { total, mastered: masteredAi, pct: total > 0 ? Math.round((masteredAi / total) * 100) : 0 };
   };
 
+  // 删除教材：二次确认 + Supabase 删除 + 本地 state 同步
+  // 注：Supabase 端 RLS 仅允许 uploaded_by === auth.uid() 的用户删，老师 / 自己上传的能删，其他人会被静默拒
+  // questions / material_topics 在 schema 里设了 ON DELETE CASCADE，删 materials 即可级联清理
+  const [deletingId, setDeletingId] = useState(null);
+  const deleteMaterial = async (mat, ev) => {
+    if (ev) { ev.stopPropagation(); ev.preventDefault(); }
+    if (!mat?.id) return;
+    const ok = window.confirm(`确定删除教材「${mat.title || "未命名"}」？\n\n这会同时清理该教材关联的 AI 知识点与题目。该操作不可撤销。`);
+    if (!ok) return;
+    setDeletingId(mat.id);
+    try {
+      // 主删除：materials（schema 上配了级联，会带走 material_topics + questions）
+      const { error } = await supabase.from("materials").delete().eq("id", mat.id);
+      if (error) {
+        alert("删除失败：" + (error.message || "请检查权限"));
+        return;
+      }
+      // 兜底：手动清一遍 material_topics & questions（如果 schema 没配 cascade 就靠这一步）
+      try { await supabase.from("material_topics").delete().eq("material_id", mat.id); } catch {}
+      try { await supabase.from("questions").delete().eq("material_id", mat.id); } catch {}
+      // 同步本地 state，立即把卡片从画廊移除
+      setMaterials((prev) => prev.filter((m) => m.id !== mat.id));
+      setAiTopics((prev) => prev.filter((t) => t.material_id !== mat.id));
+    } catch (e) {
+      alert("删除时出错：" + (e?.message || "未知错误"));
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   return (
     <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 0 50px" }}>
       {showAISettings && <AISettingsModal onClose={() => setShowAISettings(false)} />}
@@ -4721,14 +4762,21 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
         {materials.map((mat) => {
           const c = courseStyle(mat.course);
           const prog = materialProgress(mat);
+          // 仅卡片所有者（学生）/ 老师 才能删，避免学生误删别人的公开资料
+          const canDelete = profile?.role === "teacher" || mat.uploaded_by === profile?.id;
+          const isDeleting = deletingId === mat.id;
           return (
-            <motion.button
+            <motion.div
               key={mat.id}
+              role="button"
+              tabIndex={0}
               layoutId={`material-card-${mat.id}`}
               onClick={() => onEnterMaterial && onEnterMaterial(mat)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEnterMaterial && onEnterMaterial(mat); } }}
               whileHover={{ y: -3, boxShadow: `0 18px 36px ${c.solid}25` }}
               whileTap={{ scale: 0.985 }}
               transition={{ type: "spring", stiffness: 360, damping: 26 }}
+              className="mc-material-card"
               style={{
                 position: "relative", textAlign: "left", padding: 18, minHeight: 184, borderRadius: 18,
                 border: `1.5px solid ${c.solid}33`,
@@ -4736,10 +4784,36 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
                 cursor: "pointer", fontFamily: "inherit", color: "#0F172A",
                 display: "flex", flexDirection: "column", justifyContent: "space-between",
                 overflow: "hidden",
+                opacity: isDeleting ? 0.5 : 1,
+                pointerEvents: isDeleting ? "none" : "auto",
               }}
             >
               {/* 装饰角标 */}
               <div style={{ position: "absolute", top: -22, right: -22, width: 80, height: 80, borderRadius: "50%", background: c.solid, opacity: 0.08 }} />
+              {/* 删除按钮 —— 默认隐藏，hover 时显现，仅卡片所有者可见 */}
+              {canDelete && (
+                <button
+                  type="button"
+                  onClick={(e) => deleteMaterial(mat, e)}
+                  disabled={isDeleting}
+                  title="删除教材"
+                  className="mc-card-delete"
+                  style={{
+                    position: "absolute", top: 10, right: 10, zIndex: 2,
+                    width: 28, height: 28, borderRadius: 8,
+                    background: "rgba(255,255,255,0.95)", color: "#DC2626",
+                    border: "1px solid #FECACA", cursor: isDeleting ? "not-allowed" : "pointer",
+                    fontFamily: "inherit", fontSize: 14, lineHeight: 1, padding: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    opacity: 0, transition: "opacity .15s, background .15s",
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "#FEE2E2"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
+                >
+                  {isDeleting ? "…" : "🗑"}
+                </button>
+              )}
               <div>
                 <div style={{ display: "inline-block", padding: "3px 10px", borderRadius: 999, background: c.solid, color: "#fff", fontSize: 10.5, fontWeight: 800, letterSpacing: "0.04em", marginBottom: 10 }}>
                   {mat.course || "未分类"}
@@ -4761,7 +4835,7 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
                   <span style={{ color: c.ink, fontWeight: 700 }}>进入 →</span>
                 </div>
               </div>
-            </motion.button>
+            </motion.div>
           );
         })}
 
@@ -5169,13 +5243,25 @@ const QUIZ_ABILITY_LABEL = { concept: "概念理解", calc: "计算推演", proo
 const QUIZ_STATUS_LABEL  = { new: "全新题目", wrong: "错题重做", unsure: "不熟复习", mastered: "巩固已会" };
 
 function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setChapterFilter, onAnswer, materialId = null, materialTitle = null, sessionAnswers = {}, isSprint = false, autoStartIntent = null, currentMaterial = null }) {
-  // 沙盒模式下没显式传 materialId 时，自动用当前教材，让 AI 生成的题贴合本教材
-  const effectiveMaterialId = materialId || currentMaterial?.id || null;
-  const effectiveMaterialTitle = materialTitle || currentMaterial?.title || null;
+  // ⚠️ 严格区分两种入口：
+  //   1) 用户从知识点页"进入该资料练习" → setPage("quiz_material_xxx") → 显式传 materialId
+  //      此时锁死到该资料的 questions 表（找不到就走自动补题），符合"专题练这本资料"的意图
+  //   2) 用户在沙盒小测 tab 里直接做题 → 不传 materialId，只传 currentMaterial
+  //      此时不能锁死，否则资料没生成题就卡死在空态。改为按"章节命中本教材 course"软过滤
+  const effectiveMaterialId = materialId || null;
+  const effectiveMaterialTitle = materialTitle || null;
+  // 沙盒小测：题池按 currentMaterial.course 软过滤；selectedChapters 默认填 currentMaterial.chapters
+  const sandboxCourse = !materialId && currentMaterial?.course ? currentMaterial.course : null;
   const [allQuestions, setAllQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
   // Setup state (moved to top - never in conditional)
-  const [selectedChapters, setSelectedChapters] = useState(Array.isArray(chapterFilter) ? chapterFilter : (chapterFilter ? [chapterFilter] : []));
+  // 沙盒小测：默认锁定到 currentMaterial.chapters；用户仍可手动改
+  const [selectedChapters, setSelectedChapters] = useState(() => {
+    if (Array.isArray(chapterFilter)) return chapterFilter;
+    if (chapterFilter) return [chapterFilter];
+    if (Array.isArray(currentMaterial?.chapters) && currentMaterial.chapters.length > 0) return currentMaterial.chapters;
+    return [];
+  });
   const [selectedTypes, setSelectedTypes] = useState([]);
   const [showAIHelp, setShowAIHelp] = useState(false);
   const [aiHelpInput, setAIHelpInput] = useState("");
@@ -5309,11 +5395,20 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         }
       }
       pool = pool.filter((q) => !isLowQualityQuestion(q));
+      // 沙盒小测：再做一层"章节属于本教材 course"的软过滤，让题池贴合教材
+      if (!effectiveMaterialId && sandboxCourse) {
+        const beforeCount = pool.length;
+        const filtered = pool.filter((q) => String(q.chapter || "").includes(sandboxCourse));
+        // 只有在过滤后还有题时才生效，避免把题池过滤空导致整个 setup 页不可用
+        if (filtered.length >= 3) pool = filtered;
+        // beforeCount kept for potential future debug; eslint silenced via void
+        void beforeCount;
+      }
       setAllQuestions(pool.sort(() => Math.random() - 0.5));
       setLoading(false);
     };
     loadQuestions();
-  }, [effectiveMaterialId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [effectiveMaterialId, sandboxCourse]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (timerOn && quizMode && !finished) {
@@ -14200,7 +14295,12 @@ export default function App() {
     setLoading(false);
   };
 
-  const handleLogout = async () => { await supabase.auth.signOut(); setSurface("gateway"); setPage("首页"); };
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setCurrentMaterial(null);
+    setSurface("gateway");
+    setPage("首页");
+  };
 
   const handleSetPage = (p) => {
     if (p !== "题库练习") { setRetryQuestion(null); setChapterFilter(null); setQuizIntent(null); }
@@ -14338,7 +14438,7 @@ export default function App() {
                   ))}
                 </div>
               )}
-              <UserAvatarMenu profile={profile} />
+              <UserAvatarMenu profile={profile} onLogout={handleLogout} />
             </header>
 
             {/* Workspace area —— 全屏页作为 overlay，不改变 workspaceMode */}
@@ -14411,7 +14511,7 @@ function GlobalAISettingsPortal() {
 }
 
 // 顶栏右上头像 —— 点击弹出 ProviderSwitcherPopover
-function UserAvatarMenu({ profile }) {
+function UserAvatarMenu({ profile, onLogout }) {
   const [open, setOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const cfg = getAIConfig();
@@ -14452,6 +14552,7 @@ function UserAvatarMenu({ profile }) {
           profile={profile}
           onClose={() => setOpen(false)}
           onSwitched={() => setTick(t => t + 1)}
+          onLogout={onLogout}
         />
       )}
     </div>
