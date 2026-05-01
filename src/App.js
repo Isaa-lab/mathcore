@@ -2939,6 +2939,308 @@ const KNOWLEDGE_CONTENT = {
   },
 
   // ═══════════════════════════════════════════════════════════════════
+  // 线性代数细化补充（Leon 9th 拆解后的核心知识点）
+  // 这些条目与 CHAPTERS["线性代数"] 中的 topic name 一一对应；其它细化条目
+  // 走 TopicModal 的 AI 兜底（material_topics.summary + definition_anchor）
+  // ═══════════════════════════════════════════════════════════════════
+  "线性方程组的定义与矩阵记号": {
+    intro: "n 个未知数 m 个方程的线性方程组写成矩阵形式 Ax=b，其中 A 为 m×n 系数矩阵、x 为未知向量、b 为右端项。",
+    formulas: [
+      { label: "矩阵形式", tex: "A\\mathbf{x} = \\mathbf{b}" },
+      { label: "增广矩阵", tex: "[A \\,|\\, \\mathbf{b}] = \\begin{bmatrix} a_{11} & \\cdots & a_{1n} & b_1 \\\\ \\vdots & & \\vdots & \\vdots \\\\ a_{m1} & \\cdots & a_{mn} & b_m \\end{bmatrix}" },
+    ],
+    steps: ["把每个方程写成一行，未知数系数填到 A，右端项填到 b", "构造增广矩阵 [A|b] 便于做行变换", "用初等行变换化简到行阶梯形读出解集结构"],
+    note: "齐次方程组 (b=0) 总有平凡解 x=0；非齐次的相容性需要看增广矩阵的秩。",
+    examples: [
+      { problem: "把 2x+3y=5, x−y=1 写成 Ax=b 形式并写出增广矩阵。", steps: ["A=[[2,3],[1,−1]]，b=[5,1]ᵀ", "增广矩阵 [A|b]=[[2,3,5],[1,−1,1]]"], answer: "Ax=b 中 A=[[2,3],[1,−1]], x=[x,y]ᵀ, b=[5,1]ᵀ；增广矩阵把所有信息集中到一张表格。" },
+    ],
+  },
+  "等价线性系统与初等行变换": {
+    intro: "两个线性方程组等价 ⟺ 解集相同。三种初等行变换都把方程组变成等价方程组，是 Gauss 消元的合法操作。",
+    formulas: [
+      { label: "三种初等行变换", tex: "(1)\\;R_i \\leftrightarrow R_j\\quad (2)\\;R_i \\to cR_i\\,(c\\neq 0)\\quad (3)\\;R_i \\to R_i + cR_j" },
+    ],
+    steps: ["R₁↔R₂：交换两行", "cR_i：某行整体乘以非零常数", "R_i+cR_j：把另一行的 c 倍加到本行", "每次记录行变换以便回追"],
+    note: "三种变换都对应可逆的初等矩阵 E，对增广矩阵左乘 E 即可。",
+    examples: [
+      { problem: "用初等行变换把 [[2,4,6],[1,1,2]] 化成上三角形。", steps: ["R₁→R₁/2：[[1,2,3],[1,1,2]]", "R₂→R₂−R₁：[[1,2,3],[0,−1,−1]]"], answer: "化成上三角 [[1,2,3],[0,−1,−1]]，可直接回代。" },
+    ],
+  },
+  "行阶梯形矩阵": {
+    intro: "行阶梯形（Row Echelon Form, REF）：每一行的首非零元（pivot）都严格在上一行 pivot 的右侧；零行全部排在底部。",
+    formulas: [
+      { label: "行阶梯形示意", tex: "\\begin{bmatrix} \\boxed{*} & * & * & * \\\\ 0 & \\boxed{*} & * & * \\\\ 0 & 0 & 0 & \\boxed{*} \\\\ 0 & 0 & 0 & 0 \\end{bmatrix}" },
+    ],
+    steps: ["选最左非零列的 pivot", "用行变换把该列下方化为 0", "对剩余子矩阵递归"],
+    note: "REF 不唯一（pivot 取值可不同）；化简到 RREF 才唯一。Pivot 的个数 = rank(A)。",
+    examples: [
+      { problem: "判断 [[1,2,3],[0,4,5],[0,0,0]] 是否为行阶梯形。", steps: ["第 1 行 pivot 在 col 1；第 2 行 pivot 在 col 2 > col 1 ✓", "第 3 行全零，排在最底 ✓"], answer: "是行阶梯形。pivot 数 = 2，故 rank = 2。" },
+    ],
+  },
+  "简化行阶梯形（RREF）": {
+    intro: "在行阶梯形基础上，进一步要求每个 pivot=1 且其所在列其它元素全为 0；该形式对每个矩阵唯一。",
+    formulas: [
+      { label: "RREF 三条件", tex: "\\text{REF} \\;\\wedge\\; \\text{每个 pivot}=1 \\;\\wedge\\; \\text{pivot 列其余元素}=0" },
+    ],
+    steps: ["先化为 REF", "把每个 pivot 行除以 pivot，使 pivot=1", "用该 pivot 把其所在列的上下其它元素都消为 0"],
+    note: "RREF 的列空间结构最清晰：pivot 列对应的原矩阵列就是列空间的一组基。",
+    examples: [
+      { problem: "把 [[1,2,3],[2,4,8]] 化为 RREF。", steps: ["R₂→R₂−2R₁：[[1,2,3],[0,0,2]]", "R₂→R₂/2：[[1,2,3],[0,0,1]]", "R₁→R₁−3R₂：[[1,2,0],[0,0,1]]"], answer: "RREF 为 [[1,2,0],[0,0,1]]。pivot 在 col 1, col 3，第 2 列是自由变量列。" },
+    ],
+  },
+  "Gauss 消去法": {
+    intro: "Gauss 消去通过初等行变换把增广矩阵化为行阶梯形（前向消元），再用回代求解。是 Ax=b 最基础的直接方法。",
+    formulas: [
+      { label: "前向消元乘子", tex: "m_{ik} = \\frac{a_{ik}^{(k)}}{a_{kk}^{(k)}}\\quad (i>k)" },
+      { label: "回代", tex: "x_i = \\frac{1}{u_{ii}}\\Big(b_i - \\sum_{j>i} u_{ij} x_j\\Big)" },
+      { label: "运算量", tex: "\\frac{n^3}{3} + O(n^2)\\;\\text{次乘除}" },
+    ],
+    steps: ["对增广矩阵从左到右选 pivot（必要时换行避免 0 主元）", "用 pivot 把下方各行该列消为 0", "得到行阶梯形后从最后一行回代"],
+    note: "若主元为 0 必须换行（行交换），否则一律失败；选最大主元能改善数值稳定性。",
+    examples: [
+      { problem: "解 2x+y=5, 4x+3y=11。", steps: ["m₂₁=4/2=2，R₂←R₂−2R₁：得 0x+y=1", "回代 y=1，2x=5−1=4 → x=2"], answer: "x=2, y=1。Gauss 消元 = 把方程组逐次「剥去」未知数。" },
+    ],
+  },
+  "Gauss-Jordan 消去": {
+    intro: "Gauss-Jordan 是 Gauss 消去的强化版：除了把 pivot 下方消零，还把 pivot 上方也消零，最终得到 RREF，可直接读出解。",
+    formulas: [
+      { label: "目标", tex: "[A\\,|\\,\\mathbf{b}] \\;\\xrightarrow{\\text{行变换}}\\; [I\\,|\\,\\mathbf{x}]\\;\\text{(若 A 可逆)}" },
+    ],
+    steps: ["前向消元到 REF（同 Gauss）", "对每个 pivot 行除以 pivot 使 pivot=1", "用该 pivot 把其所在列上下都消为 0"],
+    note: "运算量约 n³/2，比 Gauss 消去 (n³/3) 略大；好处是不用回代、可同时求逆矩阵。",
+    examples: [
+      { problem: "用 Gauss-Jordan 解 x+y=3, 2x−y=0。", steps: ["[[1,1,3],[2,−1,0]]", "R₂←R₂−2R₁：[[1,1,3],[0,−3,−6]]", "R₂←R₂/(−3)：[[1,1,3],[0,1,2]]", "R₁←R₁−R₂：[[1,0,1],[0,1,2]]"], answer: "x=1, y=2，直接从最终 RREF 读出。" },
+    ],
+  },
+  "矩阵乘法": {
+    intro: "矩阵乘法 C=AB 中 C 的 (i,j) 元为 A 的第 i 行与 B 的第 j 列的标量积；要求 A 列数 = B 行数。",
+    formulas: [
+      { label: "元素公式", tex: "(AB)_{ij} = \\sum_{k=1}^n a_{ik} b_{kj}" },
+      { label: "结合 / 分配律", tex: "A(BC)=(AB)C,\\quad A(B+C)=AB+AC" },
+      { label: "不可交换", tex: "AB \\neq BA\\;(\\text{一般情况})" },
+    ],
+    steps: ["检查维度：A 是 m×n，B 是 n×p，则 AB 是 m×p", "对每个 (i,j)：取 A 的 i 行 dot B 的 j 列", "可视化：把 B 看成 p 个列向量，AB 就是 A 把每个列向量再线性变换一次"],
+    note: "矩阵乘法对应「线性变换的合成」：先做 B 再做 A 等于做 AB。",
+    examples: [
+      { problem: "求 [[1,2],[3,4]]·[[5,6],[7,8]]。", steps: ["(1,1)=1·5+2·7=19", "(1,2)=1·6+2·8=22", "(2,1)=3·5+4·7=43", "(2,2)=3·6+4·8=50"], answer: "[[19,22],[43,50]]。注意 [[5,6],[7,8]]·[[1,2],[3,4]]=[[23,34],[31,46]]≠原结果，体现非交换性。" },
+    ],
+  },
+  "单位矩阵与逆矩阵": {
+    intro: "单位矩阵 Iₙ 主对角线为 1、其余为 0；逆矩阵 A⁻¹ 满足 AA⁻¹=A⁻¹A=I。只有方阵且 det(A)≠0 才可逆。",
+    formulas: [
+      { label: "定义", tex: "AA^{-1} = A^{-1}A = I" },
+      { label: "二阶逆", tex: "\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}^{-1} = \\frac{1}{ad-bc}\\begin{bmatrix} d & -b \\\\ -c & a \\end{bmatrix}" },
+      { label: "可逆等价条件", tex: "\\det(A)\\neq 0 \\iff \\text{rank}(A)=n \\iff Ax=b\\text{ 有唯一解}" },
+    ],
+    steps: ["验 A 是方阵", "算 det(A)；若为 0，停止（不可逆）", "用伴随矩阵公式 A⁻¹ = (1/det)·adj(A) 或 [A|I]→[I|A⁻¹] 行变换法"],
+    note: "(AB)⁻¹=B⁻¹A⁻¹（次序反），(Aᵀ)⁻¹=(A⁻¹)ᵀ。",
+    examples: [
+      { problem: "求 [[2,1],[3,4]] 的逆。", steps: ["det=2·4−1·3=5", "A⁻¹=(1/5)·[[4,−1],[−3,2]]"], answer: "A⁻¹=[[0.8,−0.2],[−0.6,0.4]]。验证 AA⁻¹=[[1,0],[0,1]] ✓" },
+    ],
+  },
+  "初等矩阵": {
+    intro: "初等矩阵 E 是对单位矩阵做一次初等行变换得到的矩阵；左乘 E 等价于对原矩阵做对应的行变换。",
+    formulas: [
+      { label: "三类对应", tex: "E_{R_i\\leftrightarrow R_j},\\;E_{cR_i},\\;E_{R_i+cR_j}" },
+      { label: "可逆性", tex: "E^{-1}\\text{ 也是同类初等矩阵}" },
+    ],
+    steps: ["把单位矩阵做一次初等行变换 → E", "EA = 对 A 做同样的行变换", "若 A 可逆，则可写成有限多个初等矩阵之积：A=E_k…E_2 E_1"],
+    note: "Gauss 消去 + 求逆都可解读为「用一连串初等矩阵把 A 变成 I」。",
+    examples: [
+      { problem: "写出把 [[1,0],[2,1]] 化为单位矩阵的初等矩阵 E。", steps: ["要做 R₂→R₂−2R₁ 把 (2,1) 元消零", "对应初等矩阵 E=[[1,0],[−2,1]]", "验证：EA=[[1,0],[−2,1]]·[[1,0],[2,1]]=[[1,0],[0,1]]=I ✓"], answer: "E=[[1,0],[−2,1]]，A=E⁻¹=[[1,0],[2,1]]（这恰好是 LU 分解里的 L）。" },
+    ],
+  },
+  "n 阶行列式的递归定义": {
+    intro: "n 阶行列式可按任一行（或列）展开：选定第 i 行后，det(A) 为该行各元素与对应代数余子式的乘积之和。",
+    formulas: [
+      { label: "按第 i 行展开", tex: "\\det(A) = \\sum_{j=1}^n a_{ij} C_{ij},\\quad C_{ij} = (-1)^{i+j} M_{ij}" },
+      { label: "递归基础", tex: "\\det\\begin{bmatrix} a \\end{bmatrix} = a" },
+    ],
+    steps: ["选 0 元素最多的一行（或列）按其展开，减少计算量", "对每个 a_ij 写出余子式 M_ij = 划掉第 i 行第 j 列后的子行列式", "代入符号 (−1)^{i+j} 求和"],
+    note: "Laplace 展开是定义；实际计算大行列式应先用行变换化为三角形再取对角积，复杂度从 O(n!) 降到 O(n³)。",
+    examples: [
+      { problem: "用按第一行展开计算 det[[1,2,3],[4,5,6],[7,8,9]]。", steps: ["1·det[[5,6],[8,9]] − 2·det[[4,6],[7,9]] + 3·det[[4,5],[7,8]]", "= 1·(45−48) − 2·(36−42) + 3·(32−35)", "= 1·(−3) − 2·(−6) + 3·(−3) = −3+12−9 = 0"], answer: "det=0。该矩阵奇异（rank<3），三行线性相关：R₁+R₃=2R₂。" },
+    ],
+  },
+  "Laplace 按行 / 按列展开": {
+    intro: "Laplace 展开把 n 阶行列式拆成 n 个 (n−1) 阶子行列式之和；可按任意一行或任意一列展开，结果相同。",
+    formulas: [
+      { label: "按第 i 行", tex: "\\det(A) = \\sum_{j=1}^n (-1)^{i+j} a_{ij} M_{ij}" },
+      { label: "按第 j 列", tex: "\\det(A) = \\sum_{i=1}^n (-1)^{i+j} a_{ij} M_{ij}" },
+    ],
+    steps: ["挑零元素最多的行 / 列减少子行列式数量", "符号矩阵按棋盘格 +/− 排列：(1,1) 为 +", "递归到 2 阶用 ad−bc"],
+    note: "对于稀疏矩阵或包含大量零的矩阵，Laplace 展开比化简法更直接。",
+  },
+  "向量空间的定义": {
+    intro: "向量空间 V 是一个集合 + 加法 + 数乘，满足 8 条公理：加法封闭 / 交换 / 结合 / 零元 / 反元、数乘封闭 / 分配（对向量、对标量）/ 结合 / 1 是单位。",
+    formulas: [
+      { label: "加法封闭", tex: "\\mathbf{u},\\mathbf{v}\\in V \\Rightarrow \\mathbf{u}+\\mathbf{v}\\in V" },
+      { label: "数乘封闭", tex: "c\\in\\mathbb{R},\\mathbf{u}\\in V \\Rightarrow c\\mathbf{u}\\in V" },
+    ],
+    steps: ["验封闭性（加法、数乘后仍在 V 内）", "验零向量存在", "验反向量存在", "其余结合 / 交换 / 分配律一般继承自 ℝ"],
+    note: "常见向量空间：ℝⁿ、矩阵集合、多项式集合 Pₙ、函数空间 C[a,b]。",
+    examples: [
+      { problem: "判断 V={(x,y)∈ℝ²: x+y=1} 是否为 ℝ² 的子空间。", steps: ["取 u=(1,0)∈V, v=(0,1)∈V", "u+v=(1,1)；x+y=2≠1，不在 V 中", "加法不封闭"], answer: "不是子空间。子空间必须过原点，「x+y=1」是仿射超平面，不过原点。" },
+    ],
+  },
+  "线性独立与线性相关": {
+    intro: "向量组 {v₁,…,vₖ} 线性独立 ⟺ c₁v₁+…+cₖvₖ=0 仅有平凡解 c₁=…=cₖ=0；否则称线性相关。",
+    formulas: [
+      { label: "独立判别", tex: "c_1 \\mathbf{v}_1 + \\cdots + c_k \\mathbf{v}_k = \\mathbf{0} \\Rightarrow c_1=\\cdots=c_k=0" },
+      { label: "矩阵判别", tex: "\\text{独立} \\iff \\text{rank}([v_1\\,\\cdots\\,v_k]) = k" },
+    ],
+    steps: ["把 v_i 排成矩阵列 A=[v₁ | v₂ | … | vₖ]", "对 A 做行化简，数 pivot 个数 r", "r=k → 独立；r<k → 相关，pivot 列为最大独立子集"],
+    note: "若向量个数 > 维数（k>n），一定线性相关；若 v_i 中有零向量，必相关。",
+    examples: [
+      { problem: "判断 [1,2,3]ᵀ, [4,5,6]ᵀ, [7,8,9]ᵀ 是否独立。", steps: ["A=[[1,4,7],[2,5,8],[3,6,9]]", "化简：R₂−2R₁,R₃−3R₁ → [[1,4,7],[0,−3,−6],[0,−6,−12]]", "R₃−2R₂ → [[1,4,7],[0,−3,−6],[0,0,0]]", "rank=2 < 3"], answer: "线性相关。第三个向量等于前两个的某种线性组合：v₃=2v₂−v₁。" },
+    ],
+  },
+  "列空间 Col(A)": {
+    intro: "列空间 Col(A) = A 的所有列向量的所有线性组合所张成的子空间；也就是值域 {Ax: x∈ℝⁿ}。",
+    formulas: [
+      { label: "定义", tex: "\\mathrm{Col}(A) = \\mathrm{span}\\{\\mathbf{a}_1, \\ldots, \\mathbf{a}_n\\} = \\{A\\mathbf{x}: \\mathbf{x}\\in\\mathbb{R}^n\\}" },
+      { label: "维数 = rank", tex: "\\dim \\mathrm{Col}(A) = \\mathrm{rank}(A)" },
+      { label: "可解条件", tex: "A\\mathbf{x}=\\mathbf{b}\\text{ 有解} \\iff \\mathbf{b}\\in \\mathrm{Col}(A)" },
+    ],
+    steps: ["对 A 做行化简到 RREF，记下哪些列含 pivot", "原矩阵中相应的 pivot 列就是 Col(A) 的一组基", "维数 = pivot 数 = rank(A)"],
+    note: "注意：Col(A) 的基取自原矩阵的列，不是 RREF 的列。",
+  },
+  "零空间 Null(A)": {
+    intro: "零空间 Null(A) = {x: Ax=0} = 齐次方程组的解集；它是 ℝⁿ 的子空间，维数 = n − rank(A)。",
+    formulas: [
+      { label: "定义", tex: "\\mathrm{Null}(A) = \\{\\mathbf{x}\\in\\mathbb{R}^n : A\\mathbf{x}=\\mathbf{0}\\}" },
+      { label: "维数（零度）", tex: "\\dim \\mathrm{Null}(A) = n - \\mathrm{rank}(A)" },
+    ],
+    steps: ["把 A 化为 RREF", "标出 pivot 列与自由列", "对每个自由变量赋一次 1（其它取 0）求出一个解 → 这些解构成 Null(A) 的基"],
+    note: "Null(A) 描述了 Ax=b 解的「自由度」：通解 = 一个特解 + Null(A) 中任意向量。",
+    examples: [
+      { problem: "求 A=[[1,2,3],[2,4,6]] 的零空间。", steps: ["RREF：[[1,2,3],[0,0,0]]", "pivot 在 col 1；col 2、col 3 自由", "x₁=−2x₂−3x₃；自由 x₂=s, x₃=t → x=s[−2,1,0]ᵀ + t[−3,0,1]ᵀ"], answer: "Null(A)=span{[−2,1,0]ᵀ,[−3,0,1]ᵀ}，dim=2，验证 3−rank(1)=2 ✓" },
+    ],
+  },
+  "秩-零度定理": {
+    intro: "秩-零度定理（Rank-Nullity）：对任意 m×n 矩阵 A，rank(A) + nullity(A) = n（列数）。同等价于 dim(Col A) + dim(Null A) = n。",
+    formulas: [
+      { label: "核心公式", tex: "\\mathrm{rank}(A) + \\mathrm{nullity}(A) = n" },
+      { label: "线性变换形式", tex: "\\dim\\mathrm{Range}(T) + \\dim\\mathrm{Ker}(T) = \\dim(V)" },
+    ],
+    steps: ["rank(A) = pivot 数", "nullity(A) = 自由变量数", "两者和恒等于 A 的列数 n"],
+    note: "这是 Ax=b 求解理论的基石：自由变量越多 → 解空间越大 → 矩阵的「信息」越少。",
+    examples: [
+      { problem: "若 A 是 4×6 矩阵且 rank(A)=3，nullity(A)=?", steps: ["n=6（列数）", "nullity = 6 − 3 = 3"], answer: "nullity(A)=3。说明 Ax=0 有 3 个自由参数，解空间是 ℝ⁶ 的 3 维子空间。" },
+    ],
+  },
+  "线性变换的定义与例子": {
+    intro: "线性变换 T:V→W 满足两条：T(u+v)=T(u)+T(v)（加法）和 T(cu)=cT(u)（数乘）；等价地 T(au+bv)=aT(u)+bT(v)。",
+    formulas: [
+      { label: "线性条件", tex: "T(a\\mathbf{u}+b\\mathbf{v}) = aT(\\mathbf{u}) + bT(\\mathbf{v})" },
+      { label: "矩阵表示", tex: "T_A(\\mathbf{x}) = A\\mathbf{x},\\quad A\\in\\mathbb{R}^{m\\times n}" },
+    ],
+    steps: ["验 T(0)=0（必要条件，常用作快速排除）", "验加法保持", "验数乘保持", "若是 ℝⁿ→ℝᵐ 的线性变换，必可表示为某矩阵 A"],
+    note: "常见例子：旋转、反射、剪切、投影、求导（C¹→C）、积分（C[a,b]→ℝ）。",
+    examples: [
+      { problem: "判断 T(x,y)=(x+1,y) 是否线性。", steps: ["T(0,0)=(1,0)≠(0,0)", "线性变换必满足 T(0)=0"], answer: "不是线性变换（这是仿射变换）。一般 T(x,y)=(x+a,y+b) 当 (a,b)≠0 时不是线性的。" },
+    ],
+  },
+  "相似矩阵": {
+    intro: "若存在可逆矩阵 P 使 B=P⁻¹AP，则称 A、B 相似。相似变换是同一个线性变换在不同基下的矩阵表示。",
+    formulas: [
+      { label: "定义", tex: "A \\sim B \\iff \\exists P\\,(\\det P\\neq 0):\\; B = P^{-1}AP" },
+      { label: "不变量", tex: "\\det(A)=\\det(B),\\;\\mathrm{tr}(A)=\\mathrm{tr}(B),\\;\\mathrm{rank}(A)=\\mathrm{rank}(B),\\;\\text{特征多项式相同}" },
+    ],
+    steps: ["选好 P", "计算 P⁻¹", "做 P⁻¹AP", "验 trace、det、rank 等不变量是否一致"],
+    note: "对角化就是寻找一个 P 使 P⁻¹AP=Λ 是对角矩阵；P 的列由特征向量构成。",
+  },
+  "Cauchy-Schwarz 不等式": {
+    intro: "在任意内积空间中：|⟨u,v⟩| ≤ ‖u‖·‖v‖，等号成立 ⟺ u, v 共线（线性相关）。",
+    formulas: [
+      { label: "Cauchy-Schwarz", tex: "|\\langle \\mathbf{u},\\mathbf{v}\\rangle| \\leq \\|\\mathbf{u}\\|\\,\\|\\mathbf{v}\\|" },
+      { label: "等价形式 (Rⁿ)", tex: "\\Big(\\sum_{i=1}^n u_i v_i\\Big)^2 \\leq \\Big(\\sum u_i^2\\Big)\\Big(\\sum v_i^2\\Big)" },
+    ],
+    steps: ["定义夹角余弦 cosθ=⟨u,v⟩/(‖u‖‖v‖)", "因 |cosθ|≤1，立得不等式", "等号 ⟺ θ=0 或 π ⟺ u‖v"],
+    note: "Cauchy-Schwarz 是三角不等式 ‖u+v‖ ≤ ‖u‖+‖v‖ 的基础。",
+  },
+  "正交投影到子空间": {
+    intro: "把向量 b 投影到子空间 W 上：找 b̂∈W 使 b−b̂⊥W；这是最小二乘的几何解释。",
+    formulas: [
+      { label: "投影到列空间", tex: "\\hat{\\mathbf{b}} = A(A^\\top A)^{-1} A^\\top \\mathbf{b}" },
+      { label: "投影矩阵", tex: "P = A(A^\\top A)^{-1} A^\\top,\\quad P^2=P,\\;P^\\top=P" },
+    ],
+    steps: ["把 W 写成某个 A 的列空间", "构造 P=A(AᵀA)⁻¹Aᵀ", "b̂=Pb 即为投影"],
+    note: "若 A 列已正交标准化为 Q（QᵀQ=I），则 P=QQᵀ，省去求逆。",
+  },
+  "投影矩阵": {
+    intro: "投影矩阵 P 满足 P²=P（幂等）和 Pᵀ=P（对称）；它把任意向量投影到 P 的列空间上。",
+    formulas: [
+      { label: "幂等 + 对称", tex: "P^2 = P,\\quad P^\\top = P" },
+      { label: "互补投影", tex: "I - P\\;\\text{投影到 }\\mathrm{Col}(P)\\text{ 的正交补}" },
+    ],
+    steps: ["验证 P²=P：投影两次等于投影一次", "验证 Pᵀ=P：保证投影沿正交方向", "Col(P) 即为投影目标子空间"],
+    note: "实对称投影矩阵的特征值只能是 0 或 1（投到的方向→1，正交方向→0）。",
+  },
+  "法方程 AᵀA x = Aᵀb": {
+    intro: "线性最小二乘 minₓ‖Ax−b‖² 的最优解满足残差与 Col(A) 正交，即 Aᵀ(Ax−b)=0；整理得法方程 AᵀAx=Aᵀb。",
+    formulas: [
+      { label: "最小化目标", tex: "\\min_{\\mathbf{x}} \\|A\\mathbf{x} - \\mathbf{b}\\|_2^2" },
+      { label: "法方程", tex: "A^\\top A\\,\\mathbf{x} = A^\\top \\mathbf{b}" },
+      { label: "唯一解条件", tex: "A\\text{ 列满秩} \\iff A^\\top A\\text{ 可逆}" },
+    ],
+    steps: ["建超定方程 Ax≈b", "求 AᵀA 与 Aᵀb", "解 AᵀAx=Aᵀb（Cholesky 或 LU）"],
+    note: "AᵀA 的条件数 = κ(A)²，数值不稳；推荐用 QR 或 SVD 解。",
+    examples: [
+      { problem: "拟合直线 y=a+bx 通过 (0,1),(1,2),(2,3.5)。", steps: ["A=[[1,0],[1,1],[1,2]]，b=[1,2,3.5]ᵀ", "AᵀA=[[3,3],[3,5]]，Aᵀb=[6.5,9]ᵀ", "解：a=0.833, b=1.25"], answer: "拟合直线 y≈0.833+1.25x，最小化 Σ(y_i−a−bx_i)²。" },
+    ],
+  },
+  "QR 分解": {
+    intro: "把 A 分解为 A=QR，Q 列正交（QᵀQ=I），R 上三角；对应 Gram-Schmidt 的矩阵化结果，最小二乘可直接 Rx=Qᵀb 求解。",
+    formulas: [
+      { label: "QR 分解", tex: "A = QR,\\quad Q^\\top Q = I,\\;R\\;\\text{上三角}" },
+      { label: "解最小二乘", tex: "R\\mathbf{x} = Q^\\top \\mathbf{b}" },
+    ],
+    steps: ["对 A 各列做 Gram-Schmidt 得到 Q", "R 由投影系数填上三角", "若 A 列满秩，R 可逆，回代求 x"],
+    note: "QR 比法方程 AᵀAx=Aᵀb 数值上更稳；条件数 κ(R)=κ(A) 而非 κ(A)²。",
+  },
+  "二次型": {
+    intro: "二次型是 q(x)=xᵀAx（A 对称），是关于 x 的二次齐次多项式；正定 / 负定 / 不定 由 A 的特征值符号决定。",
+    formulas: [
+      { label: "标准形式", tex: "q(\\mathbf{x}) = \\mathbf{x}^\\top A\\mathbf{x},\\quad A=A^\\top" },
+      { label: "主轴定理", tex: "A=Q\\Lambda Q^\\top \\Rightarrow q(\\mathbf{x}) = \\sum_i \\lambda_i y_i^2,\\;\\mathbf{y}=Q^\\top\\mathbf{x}" },
+    ],
+    steps: ["把 q(x) 写成 xᵀAx，A 取对称形（系数 a_ij 平分到 i,j 两侧）", "对 A 做正交对角化得 A=QΛQᵀ", "换元 y=Qᵀx 把二次型化为标准形 Σλᵢyᵢ²"],
+    note: "正定（所有 λᵢ>0）⟺ q(x)>0,∀x≠0；几何上等值面 q(x)=c 是椭球；主轴方向 = 特征向量方向。",
+  },
+  "正定 / 负定 / 不定矩阵": {
+    intro: "对称矩阵 A 称为正定 ⟺ ∀x≠0, xᵀAx>0；负定要 <0；不定既能正也能负。等价用特征值或主子式判断。",
+    formulas: [
+      { label: "Sylvester 准则（正定）", tex: "\\text{所有顺序主子式}\\;\\Delta_k>0,\\;k=1,\\ldots,n" },
+      { label: "特征值刻画", tex: "A\\succ 0 \\iff \\text{所有 }\\lambda_i > 0" },
+    ],
+    steps: ["对称化 A（若不对称就取 (A+Aᵀ)/2）", "求顺序主子式 Δ_k", "全>0 → 正定；负定看 (−1)^k·Δ_k>0；其他情形为不定或半定"],
+    note: "正定矩阵一定可逆且 A⁻¹ 也正定；正定矩阵的 Cholesky 分解 A=LLᵀ 存在且唯一。",
+    examples: [
+      { problem: "判断 A=[[2,−1],[−1,2]] 是否正定。", steps: ["Δ₁=2>0", "Δ₂=det=2·2−(−1)·(−1)=3>0", "两个主子式均正"], answer: "正定。特征值 λ=1,3 都>0，验证一致。" },
+    ],
+  },
+  "矩阵条件数与误差放大": {
+    intro: "条件数 κ(A)=‖A‖·‖A⁻¹‖ 度量「右端 b 微小扰动对解 x 的相对误差放大倍数」；κ 越大问题越病态。",
+    formulas: [
+      { label: "定义", tex: "\\kappa(A) = \\|A\\|\\cdot\\|A^{-1}\\|" },
+      { label: "误差放大估计", tex: "\\frac{\\|\\delta\\mathbf{x}\\|}{\\|\\mathbf{x}\\|} \\leq \\kappa(A)\\,\\frac{\\|\\delta\\mathbf{b}\\|}{\\|\\mathbf{b}\\|}" },
+      { label: "2-范数下", tex: "\\kappa_2(A) = \\sigma_{\\max}/\\sigma_{\\min}\\;\\text{(SVD 奇异值之比)}" },
+    ],
+    steps: ["选范数（常用 2-范数）", "计算 ‖A‖、‖A⁻¹‖", "两者乘积即 κ(A)"],
+    note: "κ=1 是正交矩阵（最佳）；κ=10⁶ 表明解可能损失 6 位有效数字。",
+  },
+  "幂法求最大特征值": {
+    intro: "幂法（Power Method）从随机 x₀ 出发反复 x_{k+1}=Ax_k/‖Ax_k‖，向最大模特征值对应的特征向量收敛。",
+    formulas: [
+      { label: "迭代", tex: "\\mathbf{x}_{k+1} = \\frac{A\\mathbf{x}_k}{\\|A\\mathbf{x}_k\\|}" },
+      { label: "Rayleigh 商", tex: "\\lambda_{\\max} \\approx \\frac{\\mathbf{x}_k^\\top A\\mathbf{x}_k}{\\mathbf{x}_k^\\top \\mathbf{x}_k}" },
+    ],
+    steps: ["取任意非零初始向量 x₀（最好不与 v₁ 正交）", "迭代 x_{k+1}=Ax_k 并归一化", "Rayleigh 商收敛到最大特征值 λ₁"],
+    note: "收敛速率取决于 |λ₂/λ₁|；越接近 1 越慢。反幂法（用 A⁻¹）可求最小特征值。",
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
   // 概率论补充内容
   // ═══════════════════════════════════════════════════════════════════
   "样本空间与事件": {
@@ -3516,9 +3818,19 @@ const KNOWLEDGE_CONTENT = {
 };
 
 // ── Topic Modal ───────────────────────────────────────────────────────────────
-function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, course }) {
+// TopicModal · 知识点详情弹窗
+//   · topic（必传）：知识点显示名（字符串）
+//   · aiTopic（可选）：material_topics 表里抽到的 AI 知识点对象，用来在 KNOWLEDGE_CONTENT 缺失时兜底
+//       { name, summary, kind, depth, prerequisites, definition_anchor, generated_by, ai_model, material_id }
+//   · materialId / setQuizIntent / switchStudyTab（可选）：传了就显示"进入此章节小测"按钮，
+//       直接把意图打到 QuizPage 里，免得用户再去手动选范围
+function TopicModal({
+  topic, aiTopic, onClose, setPage, setChapterFilter, chapterNum, course,
+  materialId, setQuizIntent, switchStudyTab,
+}) {
   const content = KNOWLEDGE_CONTENT[topic];
   const vizKey = content?.viz;
+  // sandbox（教材内）的章节走 chapter 字符串本身；全局视图沿用 course + chapterNum
   const chapterStr = (course && course !== "数值分析") ? `${course} ${chapterNum}` : chapterNum;
 
   const relatedQs = useMemo(() => {
@@ -3532,6 +3844,10 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
     "数值分析": G.teal, "最优化": G.purple, "线性代数": G.blue,
     "概率论": G.amber, "数理统计": G.red, "ODE": "#8B5CF6",
   }[course] || G.teal;
+
+  // 如果 KNOWLEDGE_CONTENT 没收录但 AI 抽到了，走"AI 兜底"分支
+  // 把 anchor 当成核心公式（KaTeX 渲染），summary 当 intro，prereqs 列在底部
+  const aiFallback = !content && aiTopic && (aiTopic.summary || aiTopic.definition_anchor);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,20,40,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: "1rem" }} onClick={onClose}>
@@ -3551,13 +3867,79 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
 
         {/* ══ Body ══ */}
         <div style={{ padding: "1.6rem" }}>
-          {!content ? (
+          {!content && !aiFallback ? (
             <div style={{ padding: "3rem 2rem", textAlign: "center" }}>
               <div style={{ fontSize: 40, marginBottom: 14 }}>📝</div>
               <div style={{ fontSize: 16, fontWeight: 600, color: "#374151", marginBottom: 8 }}>内容正在完善中</div>
-              <div style={{ fontSize: 14, color: "#9ca3af" }}>该知识点的详细讲解内容即将上线</div>
+              <div style={{ fontSize: 14, color: "#9ca3af" }}>该知识点的详细讲解即将上线，可点"细化分析"让 AI 立即补全。</div>
               {relatedQs.length > 0 && <div style={{ fontSize: 13, color: G.blue, marginTop: 16 }}>可以先做下方相关题目练习 ↓</div>}
             </div>
+          ) : aiFallback ? (
+            // ── AI 兜底：summary 当 intro / definition_anchor 当公式 / prerequisites 当依赖 ──
+            <>
+              {/* AI 标识带 */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, padding: "8px 14px", background: "linear-gradient(90deg,#faf5ff,#fff)", borderRadius: 10, border: "1px solid #ede9fe" }}>
+                <span style={{ background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 999, letterSpacing: "0.06em" }}>🤖 AI 抽取</span>
+                <span style={{ fontSize: 11.5, color: "#6b21a8", fontWeight: 600 }}>
+                  {aiTopic.generated_by ? `${aiTopic.generated_by}${aiTopic.ai_model ? ` · ${aiTopic.ai_model}` : ""}` : "AI 生成"}
+                </span>
+                {aiTopic.kind && <span style={{ fontSize: 10.5, color: "#374151", background: "#fff", padding: "2px 7px", borderRadius: 999, fontWeight: 700, border: "1px solid #e5e7eb" }}>{({definition:"定义",theorem:"定理",method:"方法",formula:"公式",example:"例题",pitfall:"易错点"})[aiTopic.kind] || aiTopic.kind}</span>}
+                {Number.isFinite(aiTopic.depth) && <span style={{ fontSize: 10.5, color: "#fff", background: ["#34d399","#3b82f6","#a855f7"][aiTopic.depth - 1] || "#94a3b8", padding: "2px 7px", borderRadius: 999, fontWeight: 700 }}>层级 {aiTopic.depth}</span>}
+              </div>
+
+              {/* §1 概念摘要（来自 AI summary） */}
+              {aiTopic.summary && (
+                <section style={{ marginBottom: 24 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: courseColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📖</div>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>核心概念</span>
+                  </div>
+                  <div style={{ fontSize: 15, color: "#374151", lineHeight: 1.9, padding: "16px 20px", background: "#f8fafc", borderRadius: 12, borderLeft: `4px solid ${courseColor}` }}>
+                    <MathText text={aiTopic.summary} />
+                  </div>
+                </section>
+              )}
+
+              {/* §2 公式锚点（来自 AI definition_anchor，KaTeX 渲染） */}
+              {aiTopic.definition_anchor && (
+                <section style={{ marginBottom: 24 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: G.purple, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📐</div>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>关键公式 / 定义锚点</span>
+                    <span style={{ fontSize: 11, color: "#9ca3af" }}>· 来自原文摘录</span>
+                  </div>
+                  <div style={{ padding: "16px 20px", background: "#faf5ff", borderRadius: 12, border: "1px solid #e9d5ff", fontSize: 15, color: "#3b0764", lineHeight: 1.9 }}>
+                    <MathText text={aiTopic.definition_anchor} />
+                  </div>
+                </section>
+              )}
+
+              {/* §3 前置依赖 */}
+              {Array.isArray(aiTopic.prerequisites) && aiTopic.prerequisites.length > 0 && (
+                <section style={{ marginBottom: 24 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: "#0ea5e9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🔗</div>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>需要先掌握</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {aiTopic.prerequisites.slice(0, 8).map((p, i) => (
+                      <span key={i} style={{ fontSize: 12.5, padding: "6px 12px", borderRadius: 999, background: "#f0f9ff", color: "#075985", fontWeight: 600, border: "1px solid #bae6fd" }}>
+                        ← {p}
+                      </span>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* §4 提示：详细解题步骤 + 例题需要"细化分析"或换 AI */}
+              <div style={{ marginBottom: 24, display: "flex", gap: 12, padding: "14px 18px", background: "#fffbeb", borderRadius: 12, border: "1px solid #fcd34d", alignItems: "flex-start" }}>
+                <span style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>💡</span>
+                <div style={{ fontSize: 13, color: "#78350f", lineHeight: 1.75 }}>
+                  <strong>想要更详细的解题步骤和例题？</strong>回到教材沙盒顶部点 <strong>🔬 细化分析</strong>，
+                  AI 会基于本知识点重写解释、列公式推导、给典型例题；或换一个 AI 引擎让它给另一种角度。
+                </div>
+              </div>
+            </>
           ) : (
             <>
               {/* §1 核心概念 */}
@@ -3725,13 +4107,29 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
         </div>
 
         {/* ══ Footer ══ */}
-        <div style={{ padding: "1rem 1.6rem", borderTop: "1px solid #f3f4f6", display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center", background: "#fafafa", borderRadius: "0 0 20px 20px" }}>
-          {setPage && setChapterFilter && chapterStr && (
-            <button onClick={() => { setChapterFilter(chapterStr); onClose(); setPage("题库练习"); }}
-              style={{ padding: "9px 18px", background: G.blueLight, color: G.blue, border: `1.5px solid ${G.blue}44`, borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-              ✏️ 进入题库练习 →
-            </button>
-          )}
+        <div style={{ padding: "1rem 1.6rem", borderTop: "1px solid #f3f4f6", display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center", background: "#fafafa", borderRadius: "0 0 20px 20px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {/* 沙盒模式：直接打到当前教材 + 当前章节的小测，免得用户再去手选范围 */}
+            {materialId && setQuizIntent && switchStudyTab && (
+              <button
+                onClick={() => {
+                  setQuizIntent({ source: "knowledge_point", materialId, topicName: topic, chapter: chapterStr || null, count: 5 });
+                  if (chapterStr && setChapterFilter) setChapterFilter(chapterStr);
+                  onClose();
+                  switchStudyTab("小测");
+                }}
+                style={{ padding: "9px 18px", background: courseColor + "15", color: courseColor, border: `1.5px solid ${courseColor}55`, borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                🧩 进入此章节小测 →
+              </button>
+            )}
+            {/* 全局视图：沿用旧的"题库练习"入口 */}
+            {!materialId && setPage && setChapterFilter && chapterStr && (
+              <button onClick={() => { setChapterFilter(chapterStr); onClose(); setPage("题库练习"); }}
+                style={{ padding: "9px 18px", background: G.blueLight, color: G.blue, border: `1.5px solid ${G.blue}44`, borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                ✏️ 进入题库练习 →
+              </button>
+            )}
+          </div>
           <button onClick={onClose} style={{ padding: "9px 22px", background: courseColor, color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
             完成学习 ✓
           </button>
@@ -3975,25 +4373,147 @@ const CHAPTERS = [
   { id: 10, course: "最优化", num: "Ch.1", name: "优化模型概论", topics: ["最小二乘数据拟合", "线性 vs 非线性模型", "残差向量与范数", "非线性规划定义"] },
   { id: 11, course: "最优化", num: "Ch.1b", name: "非线性规划应用", topics: ["设施选址问题", "球缺体积最优化", "投资组合选择 (Markowitz)", "交通流最小化", "最大似然估计", "SVM 分类"] },
   // ── 线性代数 (Leon 9th) ──────────────────────────────────────────────────
-  { id: 12, course: "线性代数", num: "Ch.1", name: "矩阵与线性方程组", topics: ["矩阵运算与初等变换", "Gauss-Jordan 消去", "向量的线性组合", "矩阵的秩"] },
-  { id: 13, course: "线性代数", num: "Ch.2", name: "行列式", topics: ["行列式定义与性质", "余子式与代数余子式", "Cramer 法则", "行列式的几何意义"] },
-  { id: 14, course: "线性代数", num: "Ch.3", name: "向量空间", topics: ["子空间", "基与维数", "列空间与零空间", "坐标变换"] },
-  { id: 15, course: "线性代数", num: "Ch.4", name: "正交性与最小二乘", topics: ["内积与正交", "Gram-Schmidt 正交化", "QR 分解", "正交投影与最小二乘"] },
-  { id: 16, course: "线性代数", num: "Ch.5", name: "特征值与 SVD", topics: ["特征方程", "对角化", "对称矩阵的谱定理", "SVD 奇异值分解"] },
+  // 章节按 Leon "Linear Algebra with Applications" 9th 的实际目录展开；
+  // 每章 12~18 个细粒度知识点，把宏观概念拆到可单独练习的最小单元
+  // 例：Gauss 消去 → "等价行变换 / 行阶梯形 / 简化行阶梯形 / Gauss 消去 / Gauss-Jordan / 自由变量"
+  { id: 12, course: "线性代数", num: "Ch.1", name: "矩阵与线性方程组", topics: [
+    "线性方程组的定义与矩阵记号",
+    "等价线性系统与初等行变换",
+    "行阶梯形矩阵",
+    "简化行阶梯形（RREF）",
+    "Gauss 消去法",
+    "Gauss-Jordan 消去",
+    "自由变量与基本解",
+    "齐次与非齐次方程组的解集",
+    "矩阵加法与数乘",
+    "矩阵乘法",
+    "矩阵转置与对称矩阵",
+    "单位矩阵与逆矩阵",
+    "求逆矩阵的初等行变换法",
+    "初等矩阵",
+    "矩阵的 LU 分解",
+    "PA=LU 分解（带行交换）",
+    "分块矩阵",
+    "矩阵方程 AX=B",
+  ] },
+  { id: 13, course: "线性代数", num: "Ch.2", name: "行列式", topics: [
+    "二阶与三阶行列式",
+    "n 阶行列式的递归定义",
+    "余子式与代数余子式",
+    "Laplace 按行 / 按列展开",
+    "行列式的基本性质（行变换效应）",
+    "三角矩阵的行列式",
+    "矩阵乘积的行列式 det(AB)",
+    "转置的行列式",
+    "伴随矩阵与逆矩阵公式",
+    "Cramer 法则",
+    "行列式与可逆性判别",
+    "行列式的几何意义（面积 / 体积）",
+  ] },
+  { id: 14, course: "线性代数", num: "Ch.3", name: "向量空间", topics: [
+    "向量空间的定义",
+    "子空间的判定",
+    "线性组合与张成 (span)",
+    "线性独立与线性相关",
+    "线性独立性的矩阵判别",
+    "基的定义",
+    "维数的定义与唯一性",
+    "标准基",
+    "坐标向量",
+    "过渡矩阵与坐标变换",
+    "行空间 Row(A)",
+    "列空间 Col(A)",
+    "零空间 Null(A)",
+    "矩阵的秩与零度",
+    "秩-零度定理",
+    "行空间与列空间维数相等",
+    "解空间结构（齐次 / 非齐次）",
+    "列空间作为 Ax=b 可解条件",
+  ] },
+  { id: 15, course: "线性代数", num: "Ch.4", name: "线性变换", topics: [
+    "线性变换的定义与例子",
+    "矩阵变换",
+    "旋转 / 反射 / 剪切的变换矩阵",
+    "线性变换的核 Ker",
+    "线性变换的像 Range",
+    "像与列空间的对应",
+    "一对一与满射的判别",
+    "线性变换的合成",
+    "矩阵表示与基的选取",
+    "基变换对矩阵表示的影响",
+    "相似矩阵",
+    "相似矩阵的不变量（det / tr / rank）",
+    "线性变换的同构与维数",
+    "线性变换的可逆性",
+  ] },
+  { id: 16, course: "线性代数", num: "Ch.5", name: "正交性与最小二乘", topics: [
+    "Rⁿ 的标量积",
+    "一般内积空间",
+    "范数与距离",
+    "Cauchy-Schwarz 不等式",
+    "正交向量与正交集",
+    "标准正交集",
+    "正交补空间",
+    "四个基本子空间的正交关系",
+    "正交投影到子空间",
+    "投影矩阵",
+    "最小二乘问题",
+    "法方程 AᵀA x = Aᵀb",
+    "Gram-Schmidt 正交化",
+    "修正 Gram-Schmidt",
+    "QR 分解",
+    "用 QR 解最小二乘",
+    "正交矩阵的性质",
+    "正交多项式（Legendre / Chebyshev）",
+  ] },
+  { id: 17, course: "线性代数", num: "Ch.6", name: "特征值与对角化", topics: [
+    "特征值与特征向量的定义",
+    "特征多项式",
+    "求特征值的代数方法",
+    "特征空间",
+    "代数重数与几何重数",
+    "矩阵的相似与对角化",
+    "对角化的判定条件",
+    "对角化在求矩阵幂中的应用",
+    "复特征值与复特征向量",
+    "Hermite 矩阵与共轭转置",
+    "实对称矩阵的谱定理",
+    "实对称矩阵的正交对角化",
+    "二次型",
+    "二次型的标准化（主轴定理）",
+    "正定 / 负定 / 不定矩阵",
+    "Sylvester 准则",
+    "奇异值分解 SVD",
+    "SVD 的低秩近似与应用",
+  ] },
+  { id: 18, course: "线性代数", num: "Ch.7", name: "数值线性代数", topics: [
+    "浮点运算与舍入误差",
+    "向量与矩阵范数",
+    "矩阵条件数与误差放大",
+    "主元选择策略",
+    "部分主元 LU 分解",
+    "完全主元 LU 分解",
+    "Cholesky 分解（对称正定）",
+    "Jacobi 迭代法",
+    "Gauss-Seidel 迭代法",
+    "SOR 松弛法",
+    "幂法求最大特征值",
+    "反幂法求最小特征值",
+  ] },
   // ── 概率论 ───────────────────────────────────────────────────────────────
-  { id: 17, course: "概率论", num: "Ch.1", name: "概率基础", topics: ["样本空间与事件", "概率公理", "条件概率", "全概率公式与 Bayes 定理"] },
-  { id: 18, course: "概率论", num: "Ch.2", name: "随机变量与分布", topics: ["离散型随机变量", "连续型随机变量", "分布函数", "常见分布（Bernoulli/Poisson/正态/指数）"] },
-  { id: 19, course: "概率论", num: "Ch.3", name: "期望与矩", topics: ["数学期望", "方差与标准差", "协方差与相关系数", "矩母函数"] },
-  { id: 20, course: "概率论", num: "Ch.4", name: "极限定理", topics: ["大数定律（弱/强）", "中心极限定理", "收敛性概念", "正态近似应用"] },
+  { id: 19, course: "概率论", num: "Ch.1", name: "概率基础", topics: ["样本空间与事件", "概率公理", "条件概率", "全概率公式与 Bayes 定理"] },
+  { id: 20, course: "概率论", num: "Ch.2", name: "随机变量与分布", topics: ["离散型随机变量", "连续型随机变量", "分布函数", "常见分布（Bernoulli/Poisson/正态/指数）"] },
+  { id: 21, course: "概率论", num: "Ch.3", name: "期望与矩", topics: ["数学期望", "方差与标准差", "协方差与相关系数", "矩母函数"] },
+  { id: 22, course: "概率论", num: "Ch.4", name: "极限定理", topics: ["大数定律（弱/强）", "中心极限定理", "收敛性概念", "正态近似应用"] },
   // ── 数理统计 (Bijma 2016) ─────────────────────────────────────────────────
-  { id: 21, course: "数理统计", num: "Ch.1", name: "统计基础与抽样分布", topics: ["总体与样本", "统计量", "χ² 分布 / t 分布 / F 分布", "正态总体抽样定理"] },
-  { id: 22, course: "数理统计", num: "Ch.2", name: "参数估计", topics: ["矩估计法", "最大似然估计 MLE", "估计量优良性（无偏/有效/相合）", "置信区间"] },
-  { id: 23, course: "数理统计", num: "Ch.3", name: "假设检验", topics: ["检验框架（H₀/H₁/α/β）", "t 检验", "χ² 拟合优度检验", "p 值与检验功效"] },
+  { id: 23, course: "数理统计", num: "Ch.1", name: "统计基础与抽样分布", topics: ["总体与样本", "统计量", "χ² 分布 / t 分布 / F 分布", "正态总体抽样定理"] },
+  { id: 24, course: "数理统计", num: "Ch.2", name: "参数估计", topics: ["矩估计法", "最大似然估计 MLE", "估计量优良性（无偏/有效/相合）", "置信区间"] },
+  { id: 25, course: "数理统计", num: "Ch.3", name: "假设检验", topics: ["检验框架（H₀/H₁/α/β）", "t 检验", "χ² 拟合优度检验", "p 值与检验功效"] },
   // ── ODE ──────────────────────────────────────────────────────────────────
-  { id: 24, course: "ODE", num: "Ch.1", name: "一阶方程", topics: ["分离变量法", "线性方程与积分因子", "Bernoulli 方程", "存在唯一性定理"] },
-  { id: 25, course: "ODE", num: "Ch.2", name: "高阶线性方程", topics: ["特征方程法", "叠加原理与 Wronskian", "待定系数法", "常数变易法"] },
-  { id: 26, course: "ODE", num: "Ch.3", name: "Laplace 变换", topics: ["Laplace 变换定义与性质", "逆变换与部分分式", "卷积定理", "用 Laplace 变换求解 IVP"] },
-  { id: 27, course: "ODE", num: "Ch.4", name: "线性方程组与稳定性", topics: ["线性方程组的矩阵解法", "相平面与轨迹", "平衡点类型与稳定性", "Lyapunov 稳定性"] },
+  { id: 26, course: "ODE", num: "Ch.1", name: "一阶方程", topics: ["分离变量法", "线性方程与积分因子", "Bernoulli 方程", "存在唯一性定理"] },
+  { id: 27, course: "ODE", num: "Ch.2", name: "高阶线性方程", topics: ["特征方程法", "叠加原理与 Wronskian", "待定系数法", "常数变易法"] },
+  { id: 28, course: "ODE", num: "Ch.3", name: "Laplace 变换", topics: ["Laplace 变换定义与性质", "逆变换与部分分式", "卷积定理", "用 Laplace 变换求解 IVP"] },
+  { id: 29, course: "ODE", num: "Ch.4", name: "线性方程组与稳定性", topics: ["线性方程组的矩阵解法", "相平面与轨迹", "平衡点类型与稳定性", "Lyapunov 稳定性"] },
 ];
 
 // ── Shared UI ─────────────────────────────────────────────────────────────────
@@ -4911,8 +5431,6 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
   const providerLabel = { groq: "Groq", gemini: "Gemini", deepseek: "DeepSeek", kimi: "Kimi", custom: "自定义" }[aiCfg.provider] || "Groq";
 
   const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); return d.days || 1; } catch { return 1; } })();
-  const badgeStats = getBadgeStats();
-  const unlockedIds = new Set(BADGES.filter(b => b.check(badgeStats)).map(b => b.id));
 
   // 教材列表（跟着用户的可见性规则走：teacher 全部、学生只看自己 + 公开已审核）
   const [materials, setMaterials] = useState([]);
@@ -4926,12 +5444,12 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
       try {
         let { data, error } = await supabase
           .from("materials")
-          .select("id,title,course,uploaded_by,status,is_public,created_at")
+          .select("id,title,course,file_data,uploaded_by,status,is_public,created_at")
           .order("created_at", { ascending: false })
           .limit(60);
         // status 列尚未迁移时退化查询
         if (error && /column .* status/i.test(error.message || "")) {
-          const fb = await supabase.from("materials").select("id,title,course,uploaded_by,created_at").order("created_at", { ascending: false }).limit(60);
+          const fb = await supabase.from("materials").select("id,title,course,file_data,uploaded_by,created_at").order("created_at", { ascending: false }).limit(60);
           data = fb.data;
         }
         const rows = data || [];
@@ -5025,7 +5543,6 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
         <div style={{ display: "flex", gap: 14 }}>
           {[
             { title: "连续学习", val: `${streak}` , unit: "天" },
-            { title: "徽章", val: `${unlockedIds.size}`, unit: `/${BADGES.length}` },
             { title: "题库", val: `${ALL_QUESTIONS.length}`, unit: "+" },
           ].map(i => (
             <div key={i.title} style={{ textAlign: "right", minWidth: 70 }}>
@@ -5198,31 +5715,6 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
         </div>
       </SectionCard>
 
-      {/* ④ 成就墙（精简版）—— 保留正反馈，但不再喧宾夺主 */}
-      <SectionCard style={{ padding: "1rem 1.2rem" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "#334155", letterSpacing: "0.04em" }}>🏅 成就墙</div>
-          <div style={{ fontSize: 11, color: "#94A3B8" }}>{unlockedIds.size} / {BADGES.length} 已解锁</div>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 10 }}>
-          {BADGES.map(b => {
-            const unlocked = unlockedIds.has(b.id);
-            return (
-              <div key={b.id} title={b.desc} style={{
-                background: unlocked ? "#fffbe6" : "#fff",
-                border: unlocked ? "1.5px solid #facc15" : `1px solid ${T.border}`,
-                borderRadius: 12, padding: "10px 6px",
-                display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
-                opacity: unlocked ? 1 : 0.45,
-              }}>
-                <span style={{ fontSize: 22, filter: unlocked ? "none" : "grayscale(1)" }}>{b.emoji}</span>
-                <div style={{ fontSize: 11.5, fontWeight: 700, color: unlocked ? "#78350f" : "#999", textAlign: "center" }}>{b.name}</div>
-              </div>
-            );
-          })}
-        </div>
-      </SectionCard>
-
       {/* PDF 预览 modal —— 由教材卡 hover 后的 📖 按钮唤出 */}
       {previewing && <PdfPreviewModal material={previewing} onClose={() => setPreviewing(null)} />}
     </div>
@@ -5248,13 +5740,21 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     setMaterials(list);
 
     // Real AI-extracted topics (material_topics schema from sql/learning_mvp_schema.sql)
-    // Silent fallback if table missing / RLS blocks — KnowledgePage still shows hardcoded CHAPTERS.
+    // 拉全字段（含 v2 细化 + v3 来源）以支持兜底详情弹窗 / AI 来源过滤器；
+    // 任一字段缺失（旧 schema）都会被 try/catch 兜住，KnowledgePage 仍显示硬编码 CHAPTERS。
     try {
-      const tRes = await supabase
+      let tRes = await supabase
         .from("material_topics")
-        .select("id,material_id,name,summary,chapter,created_at")
+        .select("id,material_id,name,summary,chapter,kind,depth,prerequisites,definition_anchor,generated_by,ai_model,created_at")
         .order("created_at", { ascending: false })
         .limit(800);
+      if (tRes.error && /column .* does not exist|Could not find the .* column/i.test(tRes.error.message || "")) {
+        tRes = await supabase
+          .from("material_topics")
+          .select("id,material_id,name,summary,chapter,created_at")
+          .order("created_at", { ascending: false })
+          .limit(800);
+      }
       setAiTopics(Array.isArray(tRes.data) ? tRes.data : []);
     } catch (e) {
       setAiTopics([]);
@@ -5319,10 +5819,18 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
 
   const [selectedTopic, setSelectedTopic] = useState(null);
   const [selectedTopicMeta, setSelectedTopicMeta] = useState(null);
+  // AI 来源过滤器：null = 显示全部 AI；'groq' / 'gemini' / ... = 只显示该 AI 出的卡片
+  const [aiSourceFilter, setAiSourceFilter] = useState(null);
+  const [aiSourceMenuOpen, setAiSourceMenuOpen] = useState(false);
 
   const openTopic = (t, mat) => {
     setSelectedTopic(t.name);
-    setSelectedTopicMeta({ chapterNum: t.chapterNum, course: mat?.course });
+    setSelectedTopicMeta({
+      chapterNum: t.chapterNum,
+      course: mat?.course,
+      // 如果是 AI 抽取的 topic，把整条对象塞进 meta 让 TopicModal 兜底渲染
+      aiTopic: t.__isAi ? t.__raw : null,
+    });
   };
 
   const selectedMaterial = materials.find((m) => m.id === selectedMaterialId) || null;
@@ -5352,11 +5860,15 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
       {selectedTopic && (
         <TopicModal
           topic={selectedTopic}
+          aiTopic={selectedTopicMeta?.aiTopic || null}
           onClose={() => { setSelectedTopic(null); setSelectedTopicMeta(null); }}
           setPage={routeSetPage}
           setChapterFilter={setChapterFilter}
           chapterNum={selectedTopicMeta?.chapterNum}
           course={selectedTopicMeta?.course}
+          materialId={currentMaterial ? selectedMaterialId : null}
+          setQuizIntent={setQuizIntent}
+          switchStudyTab={switchStudyTab}
         />
       )}
       <div style={{ padding: "0 0 18px", maxWidth: 1200, margin: "0 auto" }}>
@@ -5381,22 +5893,108 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
             </div>
           </div>
 
-          {/* ── AI extracted topics (material_topics) for this material ── */}
-          {aiTopicsForMaterial.length > 0 && (
+          {/* ── AI extracted topics (material_topics) for this material ──
+              Header 包含一个 AI 来源切换器：用户在多个 AI 间切换可看到不同 AI 的知识点解读
+              （需要先用「双 AI 对比」或不同 provider 各跑一次"细化分析"产出多套数据） */}
+          {aiTopicsForMaterial.length > 0 && (() => {
+            // 统计本教材里出现过的 AI providers
+            const providerCounts = aiTopicsForMaterial.reduce((acc, t) => {
+              const p = t.generated_by || "unknown";
+              acc[p] = (acc[p] || 0) + 1;
+              return acc;
+            }, {});
+            const providers = Object.keys(providerCounts);
+            const visibleAi = aiSourceFilter
+              ? aiTopicsForMaterial.filter(t => (t.generated_by || "unknown") === aiSourceFilter)
+              : aiTopicsForMaterial;
+            return (
             <div style={{ marginBottom: 28 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                <span style={{ background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 800, letterSpacing: "0.06em" }}>🤖 AI 抽取</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+                {/* AI 来源切换器：展开当前教材里所有出现过的 provider */}
+                <div style={{ position: "relative" }}>
+                  <button
+                    onClick={() => setAiSourceMenuOpen(v => !v)}
+                    title="切换 AI 引擎查看不同的知识点解读"
+                    style={{
+                      background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff",
+                      borderRadius: 8, padding: "5px 12px", fontSize: 11, fontWeight: 800,
+                      letterSpacing: "0.06em", border: "none", cursor: "pointer",
+                      fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6,
+                    }}
+                  >
+                    🤖 {aiSourceFilter ? `仅看 ${aiSourceFilter}` : "全部 AI"}
+                    <span style={{ fontSize: 9, opacity: 0.85 }}>▼</span>
+                  </button>
+                  {aiSourceMenuOpen && (
+                    <div style={{
+                      position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 20,
+                      minWidth: 220, background: "#fff", borderRadius: 10,
+                      boxShadow: "0 10px 30px rgba(15,23,42,0.15)", border: "1px solid #e5e7eb",
+                      padding: "6px", display: "flex", flexDirection: "column", gap: 2,
+                    }}>
+                      <button
+                        onClick={() => { setAiSourceFilter(null); setAiSourceMenuOpen(false); }}
+                        style={{
+                          padding: "8px 12px", textAlign: "left", borderRadius: 8,
+                          background: aiSourceFilter === null ? "#ede9fe" : "transparent",
+                          color: aiSourceFilter === null ? "#6d28d9" : "#374151",
+                          border: "none", cursor: "pointer", fontFamily: "inherit",
+                          fontSize: 13, fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8,
+                        }}
+                      >
+                        <span>🌐 全部 AI</span>
+                        <span style={{ fontSize: 11, color: "#9ca3af" }}>{aiTopicsForMaterial.length}</span>
+                      </button>
+                      <div style={{ height: 1, background: "#f3f4f6", margin: "2px 4px" }} />
+                      {providers.map(p => (
+                        <button
+                          key={p}
+                          onClick={() => { setAiSourceFilter(p); setAiSourceMenuOpen(false); }}
+                          style={{
+                            padding: "8px 12px", textAlign: "left", borderRadius: 8,
+                            background: aiSourceFilter === p ? "#ede9fe" : "transparent",
+                            color: aiSourceFilter === p ? "#6d28d9" : "#374151",
+                            border: "none", cursor: "pointer", fontFamily: "inherit",
+                            fontSize: 13, fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8,
+                          }}
+                        >
+                          <span>{({groq:"⚡ Groq",gemini:"💎 Gemini",deepseek:"🐳 DeepSeek",kimi:"🌙 Kimi",anthropic:"🪐 Claude",custom:"🔧 自定义"})[p] || `🤖 ${p}`}</span>
+                          <span style={{ fontSize: 11, color: "#9ca3af" }}>{providerCounts[p]}</span>
+                        </button>
+                      ))}
+                      {providers.length <= 1 && (
+                        <div style={{ padding: "8px 12px", fontSize: 11, color: "#9ca3af", lineHeight: 1.5 }}>
+                          想看其他 AI 的解读？回画廊顶部菜单切换 AI，再点「🔬 细化分析」让另一家 AI 也跑一遍。
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <span style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>本资料 AI 提取的核心知识点</span>
-                <span style={{ fontSize: 12, color: "#9ca3af" }}>{aiTopicsForMaterial.length} 个</span>
+                <span style={{ fontSize: 12, color: "#9ca3af" }}>{visibleAi.length} 个</span>
                 <div style={{ flex: 1, height: 1, background: "#f3f4f6" }} />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
-                {aiTopicsForMaterial.map(t => {
+                {visibleAi.map(t => {
                   const mastery = topicMastery[t.id]?.status || "todo";
+                  // 把 AI topic 包成 KnowledgePage 内部统一的 topic 形态，复用 openTopic
+                  const wrapped = {
+                    id: t.id,
+                    name: t.name,
+                    chapterNum: t.chapter || (selectedMaterial?.course || ""),
+                    chapterName: t.chapter || "",
+                    intro: t.summary,
+                    __isAi: true,
+                    __raw: t,
+                  };
                   return (
                     <div
                       key={t.id}
-                      style={{ border: `1.5px solid ${mastery === "done" ? G.teal + "55" : "#ede9fe"}`, borderRadius: 14, padding: "16px", background: mastery === "done" ? "#f0fdf4" : "linear-gradient(180deg,#faf5ff 0%,#ffffff 80%)", display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease" }}
+                      onClick={() => openTopic(wrapped, selectedMaterial)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openTopic(wrapped, selectedMaterial); } }}
+                      style={{ border: `1.5px solid ${mastery === "done" ? G.teal + "55" : "#ede9fe"}`, borderRadius: 14, padding: "16px", background: mastery === "done" ? "#f0fdf4" : "linear-gradient(180deg,#faf5ff 0%,#ffffff 80%)", display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease", cursor: "pointer" }}
                       onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 6px 20px rgba(124,58,237,0.15)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
                       onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
                     >
@@ -5408,17 +6006,26 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                         {t.summary || "（AI 未给出摘要）"}
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 10, color: "#7c3aed", background: "#ede9fe", padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>🤖 AI 生成</span>
+                        {t.generated_by ? (
+                          <span style={{ fontSize: 10, color: "#7c3aed", background: "#ede9fe", padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>
+                            🤖 {({groq:"Groq",gemini:"Gemini",deepseek:"DeepSeek",kimi:"Kimi",anthropic:"Claude",custom:"自定义"})[t.generated_by] || t.generated_by}
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 10, color: "#7c3aed", background: "#ede9fe", padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>🤖 AI 生成</span>
+                        )}
+                        {t.kind && <span style={{ fontSize: 10, color: "#374151", background: "#f3f4f6", padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>{({definition:"定义",theorem:"定理",method:"方法",formula:"公式",example:"例题",pitfall:"易错"})[t.kind] || t.kind}</span>}
                         {t.chapter && <span style={{ fontSize: 10, color: G.blue, background: G.blueLight, padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>{t.chapter}</span>}
                       </div>
                       <div style={{ display: "flex", gap: 7, marginTop: 2 }}>
                         <button
-                          onClick={() => {
-                            // 按资料 + topic 出题：跳到该资料的专属题池
+                          onClick={(e) => {
+                            e.stopPropagation(); // 不触发卡片整体的 openTopic
                             if (typeof setQuizIntent === "function") {
                               setQuizIntent({ source: "ai_topic", materialId: selectedMaterialId, topicName: t.name, count: 5 });
                             }
-                            if (selectedMaterial) {
+                            if (typeof switchStudyTab === "function") {
+                              switchStudyTab("小测");
+                            } else if (selectedMaterial) {
                               setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
                             }
                           }}
@@ -5427,7 +6034,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                           ✏️ 按此知识点做题
                         </button>
                         <button
-                          onClick={() => markTopicMastery(t, mastery === "done" ? "todo" : "done")}
+                          onClick={(e) => { e.stopPropagation(); markTopicMastery(t, mastery === "done" ? "todo" : "done"); }}
                           title={mastery === "done" ? "取消掌握" : "标记已掌握"}
                           style={{ padding: "7px 10px", fontSize: 15, background: mastery === "done" ? G.tealLight : "#f9fafb", border: `1.5px solid ${mastery === "done" ? G.teal : "#e5e7eb"}`, borderRadius: 8, cursor: "pointer", lineHeight: 1 }}
                         >
@@ -5439,7 +6046,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                 })}
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* Knowledge topic cards grouped by chapter */}
           {courseTopics.length === 0 && aiTopicsForMaterial.length === 0 ? (
@@ -13096,11 +13704,14 @@ const SKILL_TREE = [
   { id: "diff",   label: "数值微分",   sym: "Δ",    course: "数值分析", x: 240,  y: 480, estMin: 30, bullet: "前向 / 中心差分 · 截断分析",          chapter: "数值分析 Ch.5", topics: ["有限差分公式"],                                          deps: [{ id: "interp", kind: "strong" }] },
 
   // ── 线性代数（单列垂直链）──────────────────────────────────
-  { id: "mat",    label: "矩阵运算",   sym: "A·B",  course: "线性代数", x: 520,  y: 70,  estMin: 30, bullet: "加减乘 · 转置 · 逆",                 chapter: "线性代数 Ch.1", topics: ["矩阵运算与初等变换", "Gauss-Jordan 消去", "矩阵的秩"],   deps: [] },
-  { id: "det",    label: "行列式",     sym: "|A|",  course: "线性代数", x: 520,  y: 200, estMin: 25, bullet: "展开式 · 性质 · Cramer",             chapter: "线性代数 Ch.2", topics: ["行列式定义与性质", "余子式与代数余子式", "Cramer 法则"], deps: [{ id: "mat", kind: "strong" }] },
-  { id: "linsys", label: "线性方程组", sym: "Ax=b", course: "线性代数", x: 520,  y: 340, estMin: 45, bullet: "高斯消元 · 可解性判定",              chapter: "线性代数 Ch.1", topics: ["Gauss-Jordan 消去", "向量的线性组合", "矩阵的秩"],      deps: [{ id: "det", kind: "strong" }, { id: "mat", kind: "strong" }] },
-  { id: "vspace", label: "向量空间",   sym: "V",    course: "线性代数", x: 520,  y: 480, estMin: 50, bullet: "基 · 维数 · 线性变换",                chapter: "线性代数 Ch.3", topics: ["子空间", "基与维数", "列空间与零空间", "坐标变换"],     deps: [{ id: "linsys", kind: "strong" }] },
-  { id: "eigen",  label: "特征值",     sym: "λv",   course: "线性代数", x: 520,  y: 620, estMin: 55, bullet: "特征多项式 · 对角化",                 chapter: "线性代数 Ch.5", topics: ["特征方程", "对角化", "对称矩阵的谱定理"],               deps: [{ id: "vspace", kind: "strong" }, { id: "det", kind: "weak" }] },
+  // ▼ Leon 9th 拆出 7 章，骨干节点保持 5 个但描述更细；跨学科连线集中在 mat / vspace / eigen 三处
+  { id: "mat",    label: "矩阵运算",   sym: "A·B",  course: "线性代数", x: 520,  y: 70,  estMin: 30, bullet: "加减乘 · 转置 · 逆 · LU",            chapter: "线性代数 Ch.1", topics: ["矩阵加法与数乘", "矩阵乘法", "矩阵转置与对称矩阵", "单位矩阵与逆矩阵", "初等矩阵", "矩阵的 LU 分解"], deps: [] },
+  { id: "det",    label: "行列式",     sym: "|A|",  course: "线性代数", x: 520,  y: 200, estMin: 25, bullet: "展开式 · 性质 · Cramer",             chapter: "线性代数 Ch.2", topics: ["行列式定义与性质", "余子式与代数余子式", "Laplace 按行 / 按列展开", "Cramer 法则"], deps: [{ id: "mat", kind: "strong" }] },
+  { id: "linsys", label: "线性方程组", sym: "Ax=b", course: "线性代数", x: 520,  y: 340, estMin: 45, bullet: "Gauss / RREF · 可解性判定",          chapter: "线性代数 Ch.1", topics: ["Gauss 消去法", "Gauss-Jordan 消去", "行阶梯形矩阵", "简化行阶梯形（RREF）", "齐次与非齐次方程组的解集"], deps: [{ id: "det", kind: "strong" }, { id: "mat", kind: "strong" }] },
+  { id: "vspace", label: "向量空间",   sym: "V",    course: "线性代数", x: 520,  y: 480, estMin: 50, bullet: "基 · 维数 · 列空间 / 零空间",         chapter: "线性代数 Ch.3", topics: ["向量空间的定义", "子空间的判定", "线性独立与线性相关", "基的定义", "维数的定义与唯一性", "列空间 Col(A)", "零空间 Null(A)", "秩-零度定理"], deps: [{ id: "linsys", kind: "strong" }] },
+  { id: "lintr",  label: "线性变换",   sym: "T(x)", course: "线性代数", x: 520,  y: 620, estMin: 40, bullet: "Ker / Range · 矩阵表示 · 相似",       chapter: "线性代数 Ch.4", topics: ["线性变换的定义与例子", "矩阵变换", "线性变换的核 Ker", "线性变换的像 Range", "矩阵表示与基的选取", "相似矩阵"], deps: [{ id: "vspace", kind: "strong" }] },
+  { id: "ortho",  label: "正交与最小二乘", sym: "Q", course: "线性代数", x: 520,  y: 760, estMin: 50, bullet: "Gram-Schmidt · QR · 投影 · 最小二乘", chapter: "线性代数 Ch.5", topics: ["正交向量与正交集", "Gram-Schmidt 正交化", "QR 分解", "正交投影到子空间", "投影矩阵", "法方程 AᵀA x = Aᵀb", "最小二乘问题"], deps: [{ id: "vspace", kind: "strong" }] },
+  { id: "eigen",  label: "特征值 / SVD", sym: "λv",  course: "线性代数", x: 520,  y: 900, estMin: 55, bullet: "特征多项式 · 对角化 · 谱定理 · SVD",   chapter: "线性代数 Ch.6", topics: ["特征方程", "特征值与特征向量的定义", "对角化", "对称矩阵的谱定理", "二次型", "正定 / 负定 / 不定矩阵", "奇异值分解 SVD"], deps: [{ id: "lintr", kind: "strong" }, { id: "ortho", kind: "weak" }, { id: "det", kind: "weak" }] },
 
   // ── ODE ──────────────────────────────────────────────────
   { id: "ode1",   label: "一阶 ODE",     sym: "y'",   course: "ODE",      x: 780,  y: 70,  estMin: 30, bullet: "IVP · 存在唯一性",                  chapter: "ODE Ch.1", topics: ["存在唯一性定理"],                                                       deps: [] },
@@ -13112,8 +13723,17 @@ const SKILL_TREE = [
   // ── 概率论 ────────────────────────────────────────────────
   { id: "prob",   label: "概率基础",   sym: "P(A)", course: "概率论",   x: 1060, y: 70,  estMin: 25, bullet: "样本空间 · 条件概率 · 独立",         chapter: "概率论 Ch.1", topics: ["样本空间与事件", "概率公理", "条件概率", "全概率公式与 Bayes 定理"], deps: [] },
   { id: "rv",     label: "随机变量",   sym: "X",    course: "概率论",   x: 1060, y: 200, estMin: 35, bullet: "分布律 · 密度 · 联合分布",           chapter: "概率论 Ch.2", topics: ["离散型随机变量", "连续型随机变量", "分布函数", "常见分布（Bernoulli/Poisson/正态/指数）"], deps: [{ id: "prob", kind: "strong" }] },
-  { id: "ev",     label: "期望方差",   sym: "𝔼",   course: "概率论",   x: 1060, y: 340, estMin: 40, bullet: "线性性 · 独立性 · 协方差",            chapter: "概率论 Ch.3", topics: ["数学期望", "方差与标准差", "协方差与相关系数", "矩母函数"],       deps: [{ id: "rv", kind: "strong" }] },
-  { id: "lln",    label: "大数定律",   sym: "n→∞", course: "概率论",   x: 1060, y: 480, estMin: 45, bullet: "弱/强 LLN · CLT",                    chapter: "概率论 Ch.4", topics: ["大数定律（弱/强）", "中心极限定理", "收敛性概念", "正态近似应用"], deps: [{ id: "ev", kind: "strong" }] },
+  // ⚡跨学科：协方差矩阵、Gram 矩阵都需要"线性代数·矩阵运算"作为前置
+  { id: "ev",     label: "期望方差",   sym: "𝔼",   course: "概率论",   x: 1060, y: 340, estMin: 40, bullet: "线性性 · 独立性 · 协方差矩阵",         chapter: "概率论 Ch.3", topics: ["数学期望", "方差与标准差", "协方差与相关系数", "矩母函数"],       deps: [{ id: "rv", kind: "strong" }, { id: "mat", kind: "weak" }] },
+  // ⚡跨学科：CLT 的正态近似 / 矩母函数与 Laplace 变换 / 数值积分都有联系
+  { id: "lln",    label: "大数定律",   sym: "n→∞", course: "概率论",   x: 1060, y: 480, estMin: 45, bullet: "弱/强 LLN · CLT · Monte Carlo",        chapter: "概率论 Ch.4", topics: ["大数定律（弱/强）", "中心极限定理", "收敛性概念", "正态近似应用"], deps: [{ id: "ev", kind: "strong" }, { id: "lap", kind: "weak" }] },
+
+  // ── 数理统计（Bijma 2016）──────────────────────────────────
+  // 数理统计三个支柱节点；前置都跨到「概率论·期望方差」与「线性代数·矩阵运算」
+  // —— 体现"统计 = 概率（数据生成模型）+ 线性代数（设计矩阵 / 协方差结构）"
+  { id: "samp",   label: "抽样分布",   sym: "Tₙ",   course: "数理统计", x: 1320, y: 200, estMin: 40, bullet: "χ² · t · F · 正态总体抽样",          chapter: "数理统计 Ch.1", topics: ["总体与样本", "统计量", "χ² 分布 / t 分布 / F 分布", "正态总体抽样定理"], deps: [{ id: "rv", kind: "strong" }, { id: "ev", kind: "strong" }] },
+  { id: "est",    label: "参数估计",   sym: "θ̂",   course: "数理统计", x: 1320, y: 340, estMin: 50, bullet: "矩 / MLE · 无偏 · CI",               chapter: "数理统计 Ch.2", topics: ["矩估计法", "最大似然估计 MLE", "估计量优良性（无偏/有效/相合）", "置信区间"], deps: [{ id: "samp", kind: "strong" }, { id: "ortho", kind: "weak" }] },
+  { id: "hyp",    label: "假设检验",   sym: "H₀",   course: "数理统计", x: 1320, y: 480, estMin: 50, bullet: "α / β · t / χ² · p 值 · 功效",       chapter: "数理统计 Ch.3", topics: ["检验框架（H₀/H₁/α/β）", "t 检验", "χ² 拟合优度检验", "p 值与检验功效"], deps: [{ id: "est", kind: "strong" }, { id: "lln", kind: "weak" }] },
 ];
 
 const NODE_INDEX = Object.fromEntries(SKILL_TREE.map(n => [n.id, n]));
@@ -14332,8 +14952,6 @@ function LegendItem({ kind, text }) {
 function GatewayPage({ profile, onMaterial, onExam }) {
   const spring = { type: "spring", stiffness: 300, damping: 25 };
   const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); return d.days || 1; } catch { return 1; } })();
-  const badgeStats = getBadgeStats();
-  const unlocked = BADGES.filter(b => b.check(badgeStats)).length;
   const displayName = profile?.name || "ISAA";
 
   const IconZap = ({ size = 16, color }) => (
@@ -14341,9 +14959,6 @@ function GatewayPage({ profile, onMaterial, onExam }) {
   );
   const IconDatabase = ({ size = 16, color }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4 3 9 3s9-1.34 9-3v-6"/></svg>
-  );
-  const IconTrophy = ({ size = 16, color }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
   );
   const IconSmartphone = ({ size = 28, color, style }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
@@ -14355,11 +14970,11 @@ function GatewayPage({ profile, onMaterial, onExam }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
   );
 
+  // 用户要求：成就墙整体下线，不再展示"徽章 X/Y"格子（保留 BADGES 数据但不在 UI 暴露）
   const stats = [
     { label: "连续学习", value: streak + " 天", icon: <IconZap color="#F59E0B" /> },
     { label: "题库规模", value: ALL_QUESTIONS.length + "+", icon: <IconDatabase color="#3B82F6" /> },
     { label: "记忆卡", value: String(FLASHCARDS.length), icon: <IconTarget size={16} color="#F43F5E" strokeWidth={2.5} /> },
-    { label: "徽章", value: unlocked + "/" + BADGES.length, icon: <IconTrophy color="#F43F5E" /> },
   ];
 
   const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1 } } };
@@ -14596,6 +15211,24 @@ export default function App() {
       else localStorage.removeItem("mc_current_material");
     } catch {}
   }, [currentMaterial]);
+  // 兼容旧缓存：以前 localStorage 里可能只存了 {id,title,course,chapters}，没有 file_data，
+  // 会导致沙盒顶部看不到「📖 查看 PDF」按钮。这里按 id 回填一次 file_data。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!currentMaterial?.id || currentMaterial?.file_data) return;
+      try {
+        const { data } = await supabase
+          .from("materials")
+          .select("id,file_data")
+          .eq("id", currentMaterial.id)
+          .single();
+        if (cancelled || !data?.file_data) return;
+        setCurrentMaterial(prev => (prev && prev.id === data.id) ? { ...prev, file_data: data.file_data } : prev);
+      } catch { /* silent fallback */ }
+    })();
+    return () => { cancelled = true; };
+  }, [currentMaterial?.id, currentMaterial?.file_data]);
   // 进入教材沙盒：根据 material 推算 chapters，并跳到默认 tab
   const enterMaterial = useCallback((mat) => {
     if (!mat) return;

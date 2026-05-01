@@ -914,24 +914,24 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
       providerDiag.push("anthropic(server): skipped(budget_exhausted)");
     } else {
       const t0 = Date.now();
-      try {
+    try {
         const anthropicMessages = isChatMode
           ? messages.filter(m => m.role !== "system").map(m => ({ role: m.role, content: m.content }))
           : [{ role: "user", content: prompt }];
         const r = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
-          method: "POST",
+        method: "POST",
           headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
-          body: JSON.stringify({
-            model: "claude-haiku-4-5-20251001",
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
             max_tokens: 1500,
             system: isChatMode ? systemPrompt : undefined,
             messages: anthropicMessages,
-          }),
+        }),
         }, budget);
         const dt = Date.now() - t0;
-        if (r.ok) {
-          const d = await r.json();
-          responseText = d.content?.map(b => b.text || "").join("") || "";
+      if (r.ok) {
+        const d = await r.json();
+        responseText = d.content?.map(b => b.text || "").join("") || "";
           providerDiag.push(`anthropic(server): ok(${dt}ms, ${responseText.length}ch)`);
         } else {
           providerDiag.push(`anthropic(server): http_${r.status}(${dt}ms)`);
