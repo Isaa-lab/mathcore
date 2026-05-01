@@ -4557,7 +4557,34 @@ function JoinClassCard({ profile }) {
   );
 }
 
-function HomePage({ setPage, profile }) {
+// ── 教材画廊 (HomePage) ────────────────────────────────────────────────────
+//
+// 重构核心：用户进入应用看到的不再是双栏 CTA，而是一墙横向滚动的"教材卡片"。
+// 每张卡 = 一本教材，点开即进入对应教材的"沙盒"工作台（KnowledgePage / SkillTreePage / 复习
+// 等所有 tab 都默认绑定到这本教材）。
+//
+// 这一改造解决的是老师反馈的最核心痛点：
+//   "每次进哪个 tab 都得重新选教材，太烦"
+// 现在教材选择只发生在画廊一处，沙盒内不再问。
+//
+// ── 设计原则 ───────────────────────────────────────────────────────────────
+// · 教材卡：course 色块 + 标题 + 进度条 (mastered / total) + 章节数
+// · 第一张永远是 "+ 上传新教材"（点击直接进入 UploadPage）
+// · 点击教材卡：framer-motion layoutId 同名（"material-card-{id}"）→ 在 StudyWorkspace 顶部
+//   的横幅徽章上自动 morph，给人"卡片放大成横幅"的感觉
+// · 顶部保留"连续学习/题库规模/徽章"四宫格作轻量条带；不再放双卡片 CTA
+// ── ─────────────────────────────────────────────────────────────────────────
+const COURSE_PALETTE_HOME = {
+  "数值分析": { solid: "#1D9E75", soft: "#ECFDF5", ink: "#047857" },
+  "线性代数": { solid: "#3B82F6", soft: "#EFF6FF", ink: "#1D4ED8" },
+  "ODE":      { solid: "#8B5CF6", soft: "#F5F3FF", ink: "#5B21B6" },
+  "概率论":   { solid: "#F59E0B", soft: "#FFFBEB", ink: "#B45309" },
+  "数理统计": { solid: "#EF4444", soft: "#FEF2F2", ink: "#B91C1C" },
+  "最优化":   { solid: "#0EA5E9", soft: "#F0F9FF", ink: "#0369A1" },
+};
+const courseStyle = (course) => COURSE_PALETTE_HOME[course] || { solid: "#64748B", soft: "#F1F5F9", ink: "#334155" };
+
+function HomePage({ setPage, profile, onEnterMaterial }) {
   const [showAISettings, setShowAISettings] = useState(false);
   const aiCfg = getAIConfig();
   const hasUserKey = aiCfg.key.length > 4;
@@ -4567,192 +4594,252 @@ function HomePage({ setPage, profile }) {
   const badgeStats = getBadgeStats();
   const unlockedIds = new Set(BADGES.filter(b => b.check(badgeStats)).map(b => b.id));
 
+  // 教材列表（跟着用户的可见性规则走：teacher 全部、学生只看自己 + 公开已审核）
+  const [materials, setMaterials] = useState([]);
+  const [loadingMats, setLoadingMats] = useState(true);
+  const [topicMastery, setTopicMastery] = useState({});
+  const [aiTopics, setAiTopics] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        let { data, error } = await supabase
+          .from("materials")
+          .select("id,title,course,uploaded_by,status,is_public,created_at")
+          .order("created_at", { ascending: false })
+          .limit(60);
+        // status 列尚未迁移时退化查询
+        if (error && /column .* status/i.test(error.message || "")) {
+          const fb = await supabase.from("materials").select("id,title,course,uploaded_by,created_at").order("created_at", { ascending: false }).limit(60);
+          data = fb.data;
+        }
+        const rows = data || [];
+        const visible = profile?.role === "teacher"
+          ? rows
+          : rows.filter(m => m.uploaded_by === profile?.id || ((m.status || "approved") === "approved" && m.is_public !== false));
+        if (!cancelled) setMaterials(visible);
+
+        // 拉一次本人 topic_mastery 用于算每本教材的"已掌握"占比
+        const uid = (await supabase.auth.getUser())?.data?.user?.id;
+        if (uid) {
+          const { data: mdata } = await supabase
+            .from("topic_mastery")
+            .select("topic_id,status")
+            .eq("user_id", uid);
+          const map = {};
+          (mdata || []).forEach((r) => { map[r.topic_id] = r.status; });
+          if (!cancelled) setTopicMastery(map);
+        }
+        // AI 抽取的 topics 用于精准算每本教材的总知识点数
+        const tRes = await supabase
+          .from("material_topics")
+          .select("id,material_id")
+          .limit(2000);
+        if (!cancelled) setAiTopics(Array.isArray(tRes.data) ? tRes.data : []);
+      } catch {
+        // 静默：未登录或表缺失时画廊仍可显示空态
+      } finally {
+        if (!cancelled) setLoadingMats(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [profile?.id, profile?.role]);
+
+  // 给每本教材算一个"进度"概览：course 章节默认 topic 数 + 该教材 AI topic 数 → mastered 比例
+  const materialProgress = (mat) => {
+    const courseTopicCount = CHAPTERS
+      .filter(ch => ch.course === mat.course)
+      .reduce((acc, ch) => acc + (ch.topics?.length || 0), 0);
+    const aiTopicIds = aiTopics.filter(t => t.material_id === mat.id).map(t => t.id);
+    const aiCount = aiTopicIds.length;
+    const total = courseTopicCount + aiCount;
+    // mastery 只能精确到 AI topic（因为 hardcoded topic 没真实 UUID）
+    const masteredAi = aiTopicIds.filter(id => topicMastery[id] === "done").length;
+    return { total, mastered: masteredAi, pct: total > 0 ? Math.round((masteredAi / total) * 100) : 0 };
+  };
+
   return (
-    <div style={{ maxWidth: 1120, margin: "0 auto", padding: "0 0 50px" }}>
+    <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 0 50px" }}>
       {showAISettings && <AISettingsModal onClose={() => setShowAISettings(false)} />}
 
-      <SectionCard style={{ padding: "1.35rem", marginBottom: 16, background: "linear-gradient(145deg,#0f172a,#1e293b)", border: "none", color: "#fff" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 18 }}>
-          <div>
-            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8, letterSpacing: "0.08em" }}>MODERN LEARNING OPERATING SYSTEM</div>
-            <div style={{ fontSize: 34, fontWeight: 900, lineHeight: 1.15, letterSpacing: "-0.03em", marginBottom: 10 }}>欢迎回来，{profile?.name || "同学"}</div>
-            <div style={{ fontSize: 14, opacity: 0.82, lineHeight: 1.8, maxWidth: 560 }}>
-              一个页面完成两条主线：上传资料并生成知识结构，按考试时间线执行 AI 引导复习。
+      {/* ① 紧凑欢迎条带 —— 取代原"双卡片 CTA"，把首屏 vertical real-estate 让给画廊 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 22px", marginBottom: 18, borderRadius: 18, background: "linear-gradient(135deg,#0f172a,#1e293b)", color: "#fff" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, opacity: 0.65, letterSpacing: "0.1em", marginBottom: 4 }}>WELCOME BACK</div>
+          <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.02em" }}>{profile?.name || "同学"}，今天专攻哪一门？</div>
+          <div style={{ fontSize: 12.5, opacity: 0.72, marginTop: 4 }}>选一本教材进入，所有学习与练习都将围绕它展开。</div>
+        </div>
+        <div style={{ display: "flex", gap: 14 }}>
+          {[
+            { title: "连续学习", val: `${streak}` , unit: "天" },
+            { title: "徽章", val: `${unlockedIds.size}`, unit: `/${BADGES.length}` },
+            { title: "题库", val: `${ALL_QUESTIONS.length}`, unit: "+" },
+          ].map(i => (
+            <div key={i.title} style={{ textAlign: "right", minWidth: 70 }}>
+              <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.1 }}>{i.val}<span style={{ fontSize: 13, opacity: 0.7, fontWeight: 600 }}>{i.unit}</span></div>
+              <div style={{ fontSize: 11, opacity: 0.65, marginTop: 2 }}>{i.title}</div>
             </div>
-            <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-              <button onClick={() => setPage("资料库")} style={{ padding: "10px 16px", borderRadius: 10, background: "#fff", color: "#0f172a", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>进入资料学习</button>
-              <button onClick={() => setPage("学习报告")} style={{ padding: "10px 16px", borderRadius: 10, background: "rgba(255,255,255,0.14)", color: "#fff", border: "1px solid rgba(255,255,255,0.28)", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>进入备考计划</button>
-              <button onClick={() => setShowAISettings(true)} style={{ padding: "10px 16px", borderRadius: 10, background: "rgba(255,255,255,0.12)", color: "#fff", border: "1px solid rgba(255,255,255,0.24)", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>AI 设置 {hasUserKey ? `(${providerLabel})` : ""}</button>
-            </div>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {[{ title: "连续学习", val: `${streak} 天` }, { title: "题库规模", val: `${ALL_QUESTIONS.length}+` }, { title: "记忆卡", val: `${FLASHCARDS.length}` }, { title: "徽章", val: `${unlockedIds.size}/${BADGES.length}` }].map(i => (
-              <div key={i.title} style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: 12, padding: "12px 10px" }}>
-                <div style={{ fontSize: 20, fontWeight: 900 }}>{i.val}</div>
-                <div style={{ fontSize: 12, opacity: 0.72 }}>{i.title}</div>
+          ))}
+          <button onClick={() => setShowAISettings(true)} title="AI 设置" style={{ padding: "8px 14px", borderRadius: 10, background: "rgba(255,255,255,0.12)", color: "#fff", border: "1px solid rgba(255,255,255,0.22)", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12 }}>AI 设置 {hasUserKey ? `· ${providerLabel}` : ""}</button>
+        </div>
+      </div>
+
+      {/* ② 教材画廊 —— 主角 */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.01em" }}>选择教材进入学习</div>
+          <div style={{ fontSize: 13, color: "#64748B", marginTop: 4 }}>一次专注一门 · 学习沙盒里所有功能都自动绑定到所选教材</div>
+        </div>
+        <div style={{ fontSize: 12, color: "#94A3B8" }}>{loadingMats ? "加载中…" : `共 ${materials.length} 本`}</div>
+      </div>
+
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+        gap: 14,
+        marginBottom: 24,
+      }}>
+        {/* + 上传新教材 卡 —— 永远第一张 */}
+        <button
+          onClick={() => setPage("上传资料")}
+          style={{
+            padding: "22px 16px", minHeight: 184, borderRadius: 18,
+            border: "2px dashed #CBD5E1", background: "#FAFBFC", cursor: "pointer",
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            gap: 10, color: "#475569", fontFamily: "inherit", transition: "all .18s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "#1D9E75"; e.currentTarget.style.background = "#F0FDF4"; e.currentTarget.style.color = "#047857"; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = "#CBD5E1"; e.currentTarget.style.background = "#FAFBFC"; e.currentTarget.style.color = "#475569"; }}
+        >
+          <div style={{ width: 48, height: 48, borderRadius: 14, background: "#fff", border: "1.5px solid #E2E8F0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>＋</div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>上传新教材</div>
+          <div style={{ fontSize: 11.5, lineHeight: 1.5, textAlign: "center", maxWidth: 200 }}>支持 PDF / DOC / PPT · 上传后 AI 自动抽取知识点</div>
+        </button>
+
+        {/* 教材卡 */}
+        {materials.map((mat) => {
+          const c = courseStyle(mat.course);
+          const prog = materialProgress(mat);
+          return (
+            <motion.button
+              key={mat.id}
+              layoutId={`material-card-${mat.id}`}
+              onClick={() => onEnterMaterial && onEnterMaterial(mat)}
+              whileHover={{ y: -3, boxShadow: `0 18px 36px ${c.solid}25` }}
+              whileTap={{ scale: 0.985 }}
+              transition={{ type: "spring", stiffness: 360, damping: 26 }}
+              style={{
+                position: "relative", textAlign: "left", padding: 18, minHeight: 184, borderRadius: 18,
+                border: `1.5px solid ${c.solid}33`,
+                background: `linear-gradient(160deg, ${c.soft} 0%, #ffffff 70%)`,
+                cursor: "pointer", fontFamily: "inherit", color: "#0F172A",
+                display: "flex", flexDirection: "column", justifyContent: "space-between",
+                overflow: "hidden",
+              }}
+            >
+              {/* 装饰角标 */}
+              <div style={{ position: "absolute", top: -22, right: -22, width: 80, height: 80, borderRadius: "50%", background: c.solid, opacity: 0.08 }} />
+              <div>
+                <div style={{ display: "inline-block", padding: "3px 10px", borderRadius: 999, background: c.solid, color: "#fff", fontSize: 10.5, fontWeight: 800, letterSpacing: "0.04em", marginBottom: 10 }}>
+                  {mat.course || "未分类"}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, lineHeight: 1.35, letterSpacing: "-0.01em", color: "#0F172A", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 42 }}>
+                  {mat.title || "未命名资料"}
+                </div>
               </div>
-            ))}
+              <div style={{ marginTop: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11, color: c.ink, fontWeight: 600, marginBottom: 6 }}>
+                  <span>掌握度</span>
+                  <span>{prog.total > 0 ? `${prog.mastered} / ${prog.total}` : "—"}</span>
+                </div>
+                <div style={{ height: 6, borderRadius: 999, background: "#fff", overflow: "hidden", border: `1px solid ${c.solid}22` }}>
+                  <div style={{ height: "100%", width: `${prog.pct}%`, background: c.solid, borderRadius: 999, transition: "width .25s" }} />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 11, color: "#94A3B8" }}>
+                  <span>{prog.total} 个知识点</span>
+                  <span style={{ color: c.ink, fontWeight: 700 }}>进入 →</span>
+                </div>
+              </div>
+            </motion.button>
+          );
+        })}
+
+        {/* 空态：除上传卡外没有任何教材 */}
+        {!loadingMats && materials.length === 0 && (
+          <div style={{ gridColumn: "span 3", padding: "32px 24px", textAlign: "center", border: "1.5px dashed #E2E8F0", borderRadius: 18, color: "#64748B", background: "#FAFBFC" }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>📚</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#334155", marginBottom: 4 }}>还没有教材</div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.6 }}>点击左侧的 "+ 上传新教材" 卡，把你的第一本课件上传上来</div>
           </div>
+        )}
+      </div>
+
+      {/* ③ 快捷工具（精简版）—— 教师管理 / 错题本 / 学习报告 这类跨教材入口 */}
+      <SectionCard style={{ padding: "1rem 1.2rem", marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#334155", letterSpacing: "0.04em" }}>跨教材工具</div>
+          <div style={{ fontSize: 11, color: "#94A3B8" }}>不依赖具体教材的全局视图</div>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          {[
+            { icon: "📊", label: "学习报告", page: "学习报告", color: G.amber, bg: G.amberLight },
+            { icon: "❌", label: "全部错题", page: "错题本", color: G.red, bg: G.redLight },
+            { icon: "🌳", label: "总览技能树", page: "技能树", color: G.teal, bg: G.tealLight },
+            { icon: "🃏", label: "记忆卡片", page: "记忆卡片", color: G.purple, bg: G.purpleLight },
+          ].map(t => (
+            <button key={t.label} onClick={() => setPage(t.page)} style={{ padding: "8px 16px", background: t.bg, color: t.color, border: "1px solid " + t.color + "30", borderRadius: 999, fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
+              <span>{t.icon}</span>{t.label}
+            </button>
+          ))}
         </div>
       </SectionCard>
 
-      {/* ───────── TWO CORE WORKFLOW CARDS ───────── */}
-      <div>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:16 }}>
-
-          {/* Card 1: 资料学习 */}
-          <SectionCard style={{ padding:"1.2rem" }}>
-            <div style={{ paddingBottom:12, borderBottom:"1px solid #e6edf5" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
-                <div style={{ width:44, height:44, borderRadius:14, background:G.teal, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>📚</div>
-                <div>
-                  <div style={{ fontSize:20, fontWeight:800, color:"#064e3b" }}>资料学习</div>
-                  <div style={{ fontSize:12, color:"#065f46", fontWeight:500 }}>Upload → Analyze → Practice</div>
-                </div>
-              </div>
-              <div style={{ fontSize:14, color:"#065f46", lineHeight:1.7 }}>
-                上传课件、作业、真题，AI 自动提取知识点结构、生成题库、配套记忆卡片
-              </div>
-            </div>
-            <div style={{ paddingTop:12 }}>
-              <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:16 }}>
-                {[
-                  { icon:"⬆️", text:"上传资料", sub:"支持 PDF、图片、文字", page:"资料库" },
-                  { icon:"🧠", text:"AI 知识分析", sub:"自动展开知识点卡片", page:"知识点" },
-                  { icon:"✏️", text:"掰对应题库", sub:"AI 为每个知识点出题", page:"题库练习" },
-                ].map(item => (
-                  <div key={item.text} onClick={() => setPage(item.page)} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", borderRadius:12, cursor:"pointer", background:"#f8fffe", border:"1px solid #e0faf4", transition:"background .15s" }}
-                    onMouseEnter={e => e.currentTarget.style.background="#ecfdf5"}
-                    onMouseLeave={e => e.currentTarget.style.background="#f8fffe"}
-                  >
-                    <span style={{ fontSize:18, width:28, textAlign:"center" }}>{item.icon}</span>
-                    <div style={{ flex:1 }}>
-                      <div style={{ fontSize:14, fontWeight:700, color:"#111" }}>{item.text}</div>
-                      <div style={{ fontSize:12, color:"#888" }}>{item.sub}</div>
-                    </div>
-                    <span style={{ color:"#aaa", fontSize:14 }}>›</span>
-                  </div>
-                ))}
-              </div>
-              <button onClick={() => setPage("资料库")} style={{ width:"100%", padding:"12px", background:"#0f172a", color:"#fff", border:"none", borderRadius:12, fontSize:15, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>
-                开始学习 →
-              </button>
-            </div>
-          </SectionCard>
-
-          {/* Card 2: 备考复习 */}
-          <SectionCard style={{ padding:"1.2rem" }}>
-            <div style={{ paddingBottom:12, borderBottom:"1px solid #e6edf5" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
-                <div style={{ width:44, height:44, borderRadius:14, background:G.blue, display:"flex", alignItems:"center", justifyContent:"center", fontSize:22 }}>🎯</div>
-                <div>
-                  <div style={{ fontSize:20, fontWeight:800, color:"#1e3a5f" }}>期末备考</div>
-                  <div style={{ fontSize:12, color:"#1e40af", fontWeight:500 }}>Plan → AI Review → Track</div>
-                </div>
-              </div>
-              <div style={{ fontSize:14, color:"#1e3a5f", lineHeight:1.7 }}>
-                设定考试日期和范围，生成倍计划，AI 小核逐章引导复习、即时检验、分析薄弱点
-              </div>
-            </div>
-            <div style={{ paddingTop:12 }}>
-              <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:16 }}>
-                {[
-                  { icon:"📅", text:"制定备考计划", sub:"设考试日期指定范围和章节", page:"学习报告" },
-                  { icon:"🤖", text:"AI 助教带领复习", sub:"必考/高频项目分级教学", page:"资料对话" },
-                  { icon:"❌", text:"错题本强化", sub:"将错题转化为巳掌握的知识点", page:"错题本" },
-                ].map(item => (
-                  <div key={item.text} onClick={() => setPage(item.page)} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", borderRadius:12, cursor:"pointer", background:"#f8faff", border:"1px solid #e0eaff", transition:"background .15s" }}
-                    onMouseEnter={e => e.currentTarget.style.background="#eff6ff"}
-                    onMouseLeave={e => e.currentTarget.style.background="#f8faff"}
-                  >
-                    <span style={{ fontSize:18, width:28, textAlign:"center" }}>{item.icon}</span>
-                    <div style={{ flex:1 }}>
-                      <div style={{ fontSize:14, fontWeight:700, color:"#111" }}>{item.text}</div>
-                      <div style={{ fontSize:12, color:"#888" }}>{item.sub}</div>
-                    </div>
-                    <span style={{ color:"#aaa", fontSize:14 }}>›</span>
-                  </div>
-                ))}
-              </div>
-              <button onClick={() => setPage("资料对话")} style={{ width:"100%", padding:"12px", background:"#0f172a", color:"#fff", border:"none", borderRadius:12, fontSize:15, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>
-                开始备考 →
-              </button>
-            </div>
-          </SectionCard>
+      {/* ④ 成就墙（精简版）—— 保留正反馈，但不再喧宾夺主 */}
+      <SectionCard style={{ padding: "1rem 1.2rem" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: "#334155", letterSpacing: "0.04em" }}>🏅 成就墙</div>
+          <div style={{ fontSize: 11, color: "#94A3B8" }}>{unlockedIds.size} / {BADGES.length} 已解锁</div>
         </div>
-
-        {/* ───────── QUICK TOOLS ───────── */}
-        <SectionCard style={{ marginBottom:16 }}>
-          <div style={{ fontSize:12, fontWeight:700, color:"#aaa", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:12 }}>快捷工具</div>
-          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-            {[
-              { icon:"🏃", label:"记忆卡片", page:"记忆卡片", color:G.purple, bg:G.purpleLight },
-              { icon:"📊", label:"学习报告", page:"学习报告", color:G.amber, bg:G.amberLight },
-              { icon:"🌳", label:"技能树", page:"技能树", color:G.teal, bg:G.tealLight },
-              { icon:"📚", label:"知识点", page:"知识点", color:G.blue, bg:G.blueLight },
-              { icon:"⬆️", label:"上传资料", page:"上传资料", color:"#666", bg:"#f5f5f5" },
-            ].map(t => (
-              <button key={t.label} onClick={() => setPage(t.page)} style={{ padding:"9px 18px", background:t.bg, color:t.color, border:"1px solid " + t.color + "30", borderRadius:20, fontSize:13, fontWeight:600, fontFamily:"inherit", cursor:"pointer", display:"flex", alignItems:"center", gap:7 }}>
-                <span>{t.icon}</span>{t.label}
-              </button>
-            ))}
-          </div>
-        </SectionCard>
-
-        <JoinClassCard profile={profile} />
-
-        {/* ───────── BADGE GALLERY ───────── */}
-        <SectionCard style={{ marginTop:16 }}>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
-            <div style={{ fontSize:16, fontWeight:800, color:"#111" }}>🏅 成就墙</div>
-            <div style={{ fontSize:12, color:"#bbb" }}>{unlockedIds.size}/{BADGES.length} 已解锁</div>
-          </div>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:10 }}>
-            {BADGES.map(b => {
-              const unlocked = unlockedIds.has(b.id);
-              return (
-                <div key={b.id} title={b.desc} style={{
-                  background: unlocked ? "#fffbe6" : "#fff",
-                  border: unlocked ? "1.5px solid #facc15" : `1px solid ${T.border}`,
-                  borderRadius:12, padding:"12px 8px",
-                  display:"flex", flexDirection:"column", alignItems:"center", gap:8,
-                  opacity: unlocked ? 1 : 0.45,
-                  boxShadow: "none",
-                  transition:"all .2s",
-                }}>
-                  <span style={{ fontSize:26, filter: unlocked ? "none" : "grayscale(1)" }}>{b.emoji}</span>
-                  <div style={{ fontSize:12, fontWeight:700, color: unlocked ? "#78350f" : "#999", textAlign:"center", lineHeight:1.3 }}>{b.name}</div>
-                  <div style={{ fontSize:10, color: unlocked ? "#92400e" : "#ccc", textAlign:"center", lineHeight:1.4 }}>{b.desc}</div>
-                  {unlocked && <div style={{ fontSize:9, background:"#0f172a", color:"#fff", padding:"2px 8px", borderRadius:20, fontWeight:700 }}>已解锁</div>}
-                </div>
-              );
-            })}
-          </div>
-        </SectionCard>
-      </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 10 }}>
+          {BADGES.map(b => {
+            const unlocked = unlockedIds.has(b.id);
+            return (
+              <div key={b.id} title={b.desc} style={{
+                background: unlocked ? "#fffbe6" : "#fff",
+                border: unlocked ? "1.5px solid #facc15" : `1px solid ${T.border}`,
+                borderRadius: 12, padding: "10px 6px",
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+                opacity: unlocked ? 1 : 0.45,
+              }}>
+                <span style={{ fontSize: 22, filter: unlocked ? "none" : "grayscale(1)" }}>{b.emoji}</span>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: unlocked ? "#78350f" : "#999", textAlign: "center" }}>{b.name}</div>
+              </div>
+            );
+          })}
+        </div>
+      </SectionCard>
     </div>
   );
 }
 
-function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTab }) {
+function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTab, currentMaterial }) {
   // 在学习工作台中，"题库练习"页并不会被渲染；此时应切 StudyWorkspace 的"小测"tab
   const routeSetPage = (p) => {
     if (p === "题库练习" && typeof switchStudyTab === "function") switchStudyTab("小测");
     else if (typeof setPage === "function") setPage(p);
   };
+  // 沙盒模式下教材已在画廊里选定，不再让用户从下拉里选；如果是 legacy 调用（没传 currentMaterial），
+  // 退化为最近一份资料兜底，保持向后兼容
   const [materials, setMaterials] = useState([]);
-  const [selectedMaterialId, setSelectedMaterialId] = useState(null);
   const [aiTopics, setAiTopics] = useState([]);
   const [topicMastery, setTopicMastery] = useState({});
+  const selectedMaterialId = currentMaterial?.id || (materials[0]?.id || null);
 
   const reloadKnowledge = useCallback(async () => {
     const mRes = await supabase.from("materials").select("id,title,course,chapter,created_at").order("created_at", { ascending: false }).limit(80);
     const list = mRes.data || [];
     setMaterials(list);
-    setSelectedMaterialId((prev) => {
-      if (prev && list.some((m) => m.id === prev)) return prev;
-      return list.length > 0 ? list[0].id : null;
-    });
 
     // Real AI-extracted topics (material_topics schema from sql/learning_mvp_schema.sql)
     // Silent fallback if table missing / RLS blocks — KnowledgePage still shows hardcoded CHAPTERS.
@@ -4866,36 +4953,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           course={selectedTopicMeta?.course}
         />
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16, padding: "0 0 18px", maxWidth: 1200, margin: "0 auto" }}>
-        <div style={{ ...s.card, padding: "1rem 0", height: "fit-content" }}>
-          <div style={{ padding: "8px 14px 12px", borderBottom: "1px solid #f0f0f0", marginBottom: 8 }}>
-            <div style={{ fontSize: 13, color: "#666", fontWeight: 700 }}>资料知识库</div>
-            <div style={{ fontSize: 12, color: "#999", marginTop: 4 }}>点击资料查看对应课程知识点</div>
-          </div>
-          {materials.map((m) => {
-            const active = selectedMaterialId === m.id;
-            const cnt = CHAPTERS.filter(ch => ch.course === m.course).flatMap(ch => ch.topics).length;
-            return (
-              <div
-                key={m.id}
-                onClick={() => setSelectedMaterialId(m.id)}
-                style={{
-                  padding: "10px 14px",
-                  cursor: "pointer",
-                  borderLeft: `3px solid ${active ? getCourseBorderColor(m.course) : "transparent"}`,
-                  background: active ? G.tealLight : "transparent",
-                }}
-              >
-                <div style={{ fontSize: 14, fontWeight: active ? 700 : 500, color: active ? G.tealDark : "#222" }}>{m.title}</div>
-                <div style={{ fontSize: 11, color: "#888", marginTop: 3 }}>
-                  {m.course || "未分类"} · {cnt > 0 ? `${cnt} 个知识点` : "暂无"}
-                </div>
-              </div>
-            );
-          })}
-          {materials.length === 0 && <div style={{ padding: "12px 14px", color: "#999", fontSize: 13 }}>暂无资料，请先上传 PDF</div>}
-        </div>
-
+      <div style={{ padding: "0 0 18px", maxWidth: 1200, margin: "0 auto" }}>
         <div style={{ ...s.card }}>
           {/* Header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, paddingBottom: 16, borderBottom: "1px solid #f3f4f6" }}>
@@ -5110,7 +5168,10 @@ const QUIZ_buckets = (n) => {
 const QUIZ_ABILITY_LABEL = { concept: "概念理解", calc: "计算推演", proof: "证明书写", application: "综合应用" };
 const QUIZ_STATUS_LABEL  = { new: "全新题目", wrong: "错题重做", unsure: "不熟复习", mastered: "巩固已会" };
 
-function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setChapterFilter, onAnswer, materialId = null, materialTitle = null, sessionAnswers = {}, isSprint = false, autoStartIntent = null }) {
+function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setChapterFilter, onAnswer, materialId = null, materialTitle = null, sessionAnswers = {}, isSprint = false, autoStartIntent = null, currentMaterial = null }) {
+  // 沙盒模式下没显式传 materialId 时，自动用当前教材，让 AI 生成的题贴合本教材
+  const effectiveMaterialId = materialId || currentMaterial?.id || null;
+  const effectiveMaterialTitle = materialTitle || currentMaterial?.title || null;
   const [allQuestions, setAllQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
   // Setup state (moved to top - never in conditional)
@@ -5208,8 +5269,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   useEffect(() => {
     const loadQuestions = async () => {
       let dbQs = [];
-      if (materialId) {
-        const byMaterial = await supabase.from("questions").select("*").eq("material_id", materialId);
+      if (effectiveMaterialId) {
+        const byMaterial = await supabase.from("questions").select("*").eq("material_id", effectiveMaterialId);
         if (byMaterial.error && isMissingQuestionsMaterialIdColumn(byMaterial.error)) {
           setMaterialFilterFallback(true);
           const fallback = await supabase.from("questions").select("*").order("created_at", { ascending: false }).limit(80);
@@ -5222,7 +5283,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         dbQs = normal.data || [];
       }
       let pool;
-      if (materialId) {
+      if (effectiveMaterialId) {
         // Only questions from this material (no sample questions mixed in)
         pool = dbQs;
       } else {
@@ -5230,16 +5291,16 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         const uniqueSamples = ALL_QUESTIONS.filter(q => !dbTexts.has(q.question));
         pool = [...dbQs, ...uniqueSamples];
       }
-      if (initialQuestion && !materialId) {
+      if (initialQuestion && !effectiveMaterialId) {
         const rest = pool.filter(q => q.id !== initialQuestion.id).sort(() => Math.random() - 0.5);
         pool = [initialQuestion, ...rest];
       }
-      if (materialId && pool.length === 0 && !autoGenTriedRef.current) {
+      if (effectiveMaterialId && pool.length === 0 && !autoGenTriedRef.current) {
         autoGenTriedRef.current = true;
-        const regen = await tryGenerateQuestionsForMaterial(materialId);
+        const regen = await tryGenerateQuestionsForMaterial(effectiveMaterialId);
         if (regen.ok) {
           // Re-query once after generation
-          const retry = await supabase.from("questions").select("*").eq("material_id", materialId);
+          const retry = await supabase.from("questions").select("*").eq("material_id", effectiveMaterialId);
           pool = retry.data || [];
           if (pool.length === 0 && materialFilterFallback) {
             const fallbackRetry = await supabase.from("questions").select("*").order("created_at", { ascending: false }).limit(80);
@@ -5252,7 +5313,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       setLoading(false);
     };
     loadQuestions();
-  }, [materialId]);
+  }, [effectiveMaterialId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (timerOn && quizMode && !finished) {
@@ -5915,10 +5976,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     ];
 
     // 题库为空时的兜底（只针对资料模式）
-    if (materialId && allQuestions.length === 0) {
+    if (effectiveMaterialId && allQuestions.length === 0) {
       return (
         <div style={{ padding: "0 0 16px", maxWidth: 900, margin: "0 auto" }}>
-          <PageHeader title="题库练习" subtitle={materialTitle} onBack={() => setPage("资料库")} />
+          <PageHeader title="题库练习" subtitle={effectiveMaterialTitle} onBack={() => setPage("首页")} />
           <SectionCard style={{ padding: "2rem", textAlign: "center" }}>
             <div style={{ fontSize: 44, marginBottom: 12 }}>📭</div>
             <div style={{ fontSize: 17, fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>该资料暂无关联题目</div>
@@ -5927,9 +5988,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
               <button
                 onClick={async () => {
-                  const regen = await tryGenerateQuestionsForMaterial(materialId);
+                  const regen = await tryGenerateQuestionsForMaterial(effectiveMaterialId);
                   if (regen.ok) {
-                    const retry = await supabase.from("questions").select("*").eq("material_id", materialId);
+                    const retry = await supabase.from("questions").select("*").eq("material_id", effectiveMaterialId);
                     setAllQuestions((retry.data || []).sort(() => Math.random() - 0.5));
                   }
                 }}
@@ -5948,10 +6009,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
     return (
       <div style={{ padding: "0 0 16px", maxWidth: 960, margin: "0 auto" }}>
-        <PageHeader title="题库练习" subtitle={materialTitle ? `${materialTitle} · 基于资料` : "你今天想练什么？"} onBack={() => setPage(materialId ? "资料库" : "首页")} />
+        <PageHeader title="题库练习" subtitle={effectiveMaterialTitle ? `${effectiveMaterialTitle} · 基于资料` : "你今天想练什么？"} onBack={() => setPage("首页")} />
 
         {/* ══ 数据驱动的推荐条（仅有历史数据时） ══ */}
-        {hasHistory && !materialId && (recentWeak || poolWrong.length > 0) && (
+        {hasHistory && !effectiveMaterialId && (recentWeak || poolWrong.length > 0) && (
           <div style={{ marginBottom: 16, padding: "14px 18px", background: "#FFFFFF", border: "1px solid #EEF2F7", borderRadius: 16, display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#94A3B8", letterSpacing: "0.08em" }}>👋 基于你的数据</div>
             {recentWeak && (
@@ -6170,7 +6231,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         )}
 
         {/* 兼容：资料模式的补题提示（放在底部） */}
-        {materialId && materialGenerateMsg && (
+        {effectiveMaterialId && materialGenerateMsg && (
           <div style={{ marginTop: 14, padding: "10px 12px", borderRadius: 10, background: G.blueLight, color: G.blue, fontSize: 13 }}>
             {materialGenerateMsg}
           </div>
@@ -6391,18 +6452,92 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     const pct = displayQ.length ? Math.round(score / displayQ.length * 100) : 0;
     const cwrong = {};
     wrongList.forEach(w => { cwrong[w.chapter] = (cwrong[w.chapter] || 0) + 1; });
+
+    // ── 分级鼓励文案 ──────────────────────────────────────────────────────
+    // ≥90 % → 完美级，给一句数学家名言（与 EmailVerificationResult 同源）
+    // 60-89 → 肯定型，强调"稳步上升"
+    // <60   → 温和型，把"下一步具体建议"作为重点（最薄弱章节链接）
+    const MASTER_QUOTES = [
+      "「数学是科学之王。」 — Carl Friedrich Gauss",
+      "「在数学里，没有真正的难题，只有还没适应的方法。」 — Henri Poincaré",
+      "「优雅是数学家的奢侈，必要的奢侈。」 — David Hilbert",
+      "「为问题而疯狂，为答案而宁静。」 — 改写自 Erdős",
+      "「我从未失败过，我只是发现了一万种行不通的方法。」 — Edison",
+    ];
+    const PRAISE_QUOTES = [
+      "稳步上升 — 把今天的节奏带到明天。",
+      "正在形成肌肉记忆，再练 1-2 组就能跨越分水岭。",
+      "你的大脑正在悄悄重布线 —— 别停。",
+    ];
+    const SOFT_QUOTES = [
+      "错题不是失败，是地图上待点亮的区域。",
+      "题做不对不丢人，只要把每道错题都吃透，下次它就是你最熟的朋友。",
+      "数学是一门慢热的艺术 —— 慢就是快。",
+    ];
+    const tier = pct >= 90 ? "master" : pct >= 60 ? "good" : "soft";
+    const tierMeta = {
+      master: { emoji: "🏆", title: "完美！", color: G.amber, bg: "linear-gradient(135deg,#FEF3C7,#FDE68A)", quote: MASTER_QUOTES[Math.floor(Math.random() * MASTER_QUOTES.length)] },
+      good:   { emoji: "👍", title: "稳步上升！", color: G.teal, bg: "linear-gradient(135deg,#ECFDF5,#D1FAE5)", quote: PRAISE_QUOTES[Math.floor(Math.random() * PRAISE_QUOTES.length)] },
+      soft:   { emoji: "🌱", title: "继续加油！", color: G.blue, bg: "linear-gradient(135deg,#EFF6FF,#DBEAFE)", quote: SOFT_QUOTES[Math.floor(Math.random() * SOFT_QUOTES.length)] },
+    }[tier];
+
+    // 下一步建议：≥90 → 进阶；60-89 → 错题强化；<60 → 回到知识点
+    const weakestChapter = (() => {
+      const sorted = Object.entries(cwrong).sort((a, b) => b[1] - a[1]);
+      return sorted[0] ? sorted[0][0] : null;
+    })();
+    const nextSteps = (() => {
+      if (tier === "master") return [
+        { label: "🚀 挑战更难的题", desc: "再来 10 道随机题，巩固成果", onClick: () => { setQuizMode(null); setFinished(false); } },
+        { label: "🌳 看看技能树", desc: "看看本教材已点亮多少节点", onClick: () => setPage("技能树") },
+      ];
+      if (tier === "good") return [
+        { label: "❌ 重做今天的错题", desc: `${wrongList.length} 道错题已自动入错题本`, onClick: () => setPage("错题本") },
+        { label: "📊 查看学习报告", desc: "看看哪些章节已经稳了", onClick: () => setPage("学习报告") },
+      ];
+      // soft
+      return [
+        weakestChapter ? { label: `📖 回到「${weakestChapter}」知识点`, desc: "先把概念吃透再做题", onClick: () => { if (setChapterFilter) setChapterFilter(weakestChapter); setPage("知识点"); } } : null,
+        { label: "🤖 AI 辅导薄弱章节", desc: "苏格拉底式引导，帮你拆解思路", onClick: () => setPage("资料对话") },
+      ].filter(Boolean);
+    })();
+
     return (
       <div style={{ padding: "0 0 16px", maxWidth: 760, margin: "0 auto" }}>
         <PageHeader title="练习结果" subtitle="复盘错误原因，继续强化薄弱点。" onBack={() => { setQuizMode(null); setFinished(false); }} backText="返回设置" />
         <SectionCard style={{ padding: "2rem" }}>
           <div style={{ textAlign: "center", marginBottom: 24 }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>{pct >= 80 ? "🎉" : pct >= 60 ? "👍" : "💪"}</div>
-            <div style={{ fontSize: 24, fontWeight: 700, color: "#111", marginBottom: 6 }}>练习完成！</div>
-            <div style={{ fontSize: 52, fontWeight: 800, color: pct >= 80 ? G.teal : pct >= 60 ? G.amber : G.red }}>{pct}%</div>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>{tierMeta.emoji}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: "#111", marginBottom: 6 }}>{tierMeta.title}</div>
+            <div style={{ fontSize: 52, fontWeight: 800, color: tierMeta.color }}>{pct}%</div>
             <div style={{ fontSize: 15, color: "#888", margin: "6px 0 12px" }}>答对 {score} / {displayQ.length} 题</div>
             {timerOn && timer > 0 && <div style={{ fontSize: 14, color: "#aaa", marginBottom: 12 }}>⏱ 用时 {Math.floor(timer/60)}分{timer%60}秒 · 平均 {Math.round(timer/displayQ.length)} 秒/题</div>}
-            <ProgressBar value={score} max={displayQ.length} color={pct >= 80 ? G.teal : pct >= 60 ? G.amber : G.red} height={10} />
+            <ProgressBar value={score} max={displayQ.length} color={tierMeta.color} height={10} />
           </div>
+
+          {/* 鼓励文案 */}
+          <div style={{ padding: "14px 18px", borderRadius: 14, background: tierMeta.bg, border: `1px solid ${tierMeta.color}33`, marginBottom: 20, textAlign: "center", color: "#0F172A", fontSize: 14, lineHeight: 1.7, fontStyle: "italic" }}>
+            {tierMeta.quote}
+          </div>
+
+          {/* 下一步建议（分级） */}
+          <div style={{ marginBottom: 22 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#475569", letterSpacing: "0.04em", marginBottom: 10 }}>建议下一步</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              {nextSteps.map((step, i) => (
+                <button key={i} onClick={step.onClick} style={{
+                  textAlign: "left", padding: "12px 14px", borderRadius: 12,
+                  background: "#fff", border: `1.5px solid ${tierMeta.color}33`,
+                  cursor: "pointer", fontFamily: "inherit", color: "#0F172A",
+                  display: "flex", flexDirection: "column", gap: 4,
+                }}>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>{step.label}</div>
+                  <div style={{ fontSize: 12, color: "#64748B" }}>{step.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {wrongList.length > 0 && (
             <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 20 }}>
               <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>⚠️ 本次答错</div>
@@ -7236,12 +7371,20 @@ function FlashcardPage({ setPage }) {
 //   · 新增 dailyMinutesTarget 硬上限设置
 //   · 日历格子显示完成进度（进度环 + N/M 任务）
 //   · 外部组件 <TodayPlanView /> 展示今日任务列表、支持勾选完成
-function ExamPlanSection({ weak, setPage, setChapterFilter, startWithFormOpen = false }) {
+function ExamPlanSection({ weak, setPage, setChapterFilter, startWithFormOpen = false, currentMaterial = null }) {
   const [showForm, setShowForm] = useState(() => startWithFormOpen || !localStorage.getItem("mc_exam_date"));
   const [examDate, setExamDate] = useState(() => localStorage.getItem("mc_exam_date") || "");
-  const [examSubject, setExamSubject] = useState(() => localStorage.getItem("mc_exam_subject") || "");
+  // 沙盒模式下的"考试科目"默认 = 当前教材的 course；用户可手动改
+  const [examSubject, setExamSubject] = useState(() => localStorage.getItem("mc_exam_subject") || currentMaterial?.course || "");
+  // 考试范围 chapters：localStorage 里有就用，否则若有 currentMaterial 则预填本教材所有章节
   const [examChapters, setExamChapters] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("mc_exam_chapters") || "[]"); } catch { return []; }
+    try {
+      const raw = JSON.parse(localStorage.getItem("mc_exam_chapters") || "[]");
+      if (Array.isArray(raw) && raw.length > 0) return raw;
+    } catch {}
+    // 首次进入：用当前教材的章节列表作为种子（用户仍可在表单里增删）
+    if (currentMaterial && Array.isArray(currentMaterial.chapters)) return currentMaterial.chapters.slice();
+    return [];
   });
   const [dailyMinutesTarget, setDailyMinutesTarget] = useState(() => {
     const raw = localStorage.getItem("mc_daily_minutes");
@@ -7970,7 +8113,7 @@ const aggregateBySubject = (stats) => {
   return arr;
 };
 
-function ReportPage({ setPage, setChapterFilter }) {
+function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
   const savedAnswers = (() => {
     try { return JSON.parse(localStorage.getItem("mc_answers") || "{}"); } catch { return {}; }
   })();
@@ -8292,7 +8435,7 @@ function ReportPage({ setPage, setChapterFilter }) {
       {/* ⑥ 完整备考计划（默认收起，点顶部摘要栏"查看完整日程"展开） */}
       {planOpen && (
         <div style={{ marginBottom: 16 }}>
-          <ExamPlanSection weak={weak} setPage={setPage} setChapterFilter={setChapterFilter} startWithFormOpen={!hasPlan} />
+          <ExamPlanSection weak={weak} setPage={setPage} setChapterFilter={setChapterFilter} startWithFormOpen={!hasPlan} currentMaterial={currentMaterial} />
         </div>
       )}
 
@@ -8890,9 +9033,16 @@ function WrongDrill({ questions, onExit, onMastered }) {
 // 数据源改造：从硬编码 4 道 + sessionAnswers 派生的"假薄弱章节"，
 // 升级到持久化 wrong_items 表：所有答题入口通过 recordAnswer 自动落表，
 // 错题本只读表、渲染、触发重做/标签/AI 变式。
-function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChapterFilter }) {
+function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChapterFilter, currentMaterial = null, embedded = false }) {
   const [items, setItems] = useState(() => getWrongItemsFromStore());
+  // 教材沙盒模式（embedded）：默认 scope 为本教材；外部全屏模式默认全部
+  const [scope, setScope] = useState(currentMaterial && embedded ? "material" : "all");
   const [filter, setFilter] = useState({ chapter: "all", status: "active", errorTag: "all" });
+  // 当切教材或退到全屏模式时，重置 scope 到合理默认值
+  useEffect(() => {
+    if (currentMaterial && embedded) setScope("material");
+    else setScope("all");
+  }, [currentMaterial?.id, embedded]); // eslint-disable-line react-hooks/exhaustive-deps
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [drillQueue, setDrillQueue] = useState(null); // null = 未进入 drill
   const [drillKind, setDrillKind] = useState("original"); // "original" | "variant"
@@ -8936,10 +9086,22 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChap
     return Array.from(m.values()).sort((a, b) => b.count - a.count);
   }, [items]);
 
+  // 沙盒模式下匹配当前教材的章节集合（chapter_label 形如 "ODE Ch.2" / "数值分析 Ch.3"）
+  const materialChapterMatcher = useMemo(() => {
+    if (!currentMaterial?.course) return null;
+    const courseLower = String(currentMaterial.course).toLowerCase();
+    return (w) => {
+      const lbl = String(w.chapter_label || w.chapter || "").toLowerCase();
+      return lbl.includes(courseLower);
+    };
+  }, [currentMaterial?.course]);
+
   // 筛选结果
   const filteredItems = useMemo(() => {
     const now = Date.now();
     return items.filter((w) => {
+      // 教材作用域：仅显示与当前教材相关章节的错题（软隔离）
+      if (scope === "material" && materialChapterMatcher && !materialChapterMatcher(w)) return false;
       if (filter.status !== "all" && w.status !== filter.status) return false;
       if (filter.chapter !== "all" && w.chapter !== filter.chapter) return false;
       if (filter.errorTag !== "all") {
@@ -9151,6 +9313,22 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChap
 
       {hasAnyItems && (
         <>
+          {/* 教材作用域切换 —— 沙盒模式下默认只看本教材，但提供"全部"切换支持跨教材回顾（软隔离） */}
+          {currentMaterial && (
+            <div style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 12, background: "#F8FAFC", border: "1px solid #E2E8F0", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, color: "#64748B", fontWeight: 600 }}>作用域</span>
+              <Segmented
+                options={[
+                  { id: "material", label: `本教材（${currentMaterial.course || "未分类"}）` },
+                  { id: "all", label: "全部错题" },
+                ]}
+                value={scope}
+                onChange={setScope}
+              />
+              <span style={{ marginLeft: "auto", fontSize: 11.5, color: "#94A3B8" }}>当前显示 {filteredItems.length} 道</span>
+            </div>
+          )}
+
           {/* 工具栏：segmented control + 章节/错因筛选 */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
             <Segmented
@@ -10128,6 +10306,194 @@ function ErrorTagPicker({ value, onChange }) {
 }
 
 // ── Teacher Page ──────────────────────────────────────────────────────────────
+
+// ══ Review Page (复习 tab) ════════════════════════════════════════════════
+//
+// 教材沙盒下的"复习"是把三类材料按权重抽出来混合一组练习：
+//   1. 错题（默认 50%）—— 走 SM2 到期的 active wrong items
+//   2. 薄弱知识点（默认 30%）—— 取本教材内正确率 < 60% 的 chapter
+//   3. 间隔记忆（默认 20%）—— 还没做过 / 做过但没掌握的题
+//
+// "复习不要输入科目" —— 用户进来不再被问考哪一门，因为已经在沙盒里了。
+// 三个权重可拖滑块调整，权重和会自动归一化为 100%。
+// ════════════════════════════════════════════════════════════════════════════
+function ReviewPage({ currentMaterial, switchStudyTab, setQuizIntent, setChapterFilter }) {
+  // 三类权重（百分比 0-100；和不必精确等于 100，会归一化）
+  const [w, setW] = useState(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("mc_review_weights") || "null");
+      if (raw && typeof raw === "object") return { wrong: raw.wrong ?? 50, weak: raw.weak ?? 30, mem: raw.mem ?? 20 };
+    } catch {}
+    return { wrong: 50, weak: 30, mem: 20 };
+  });
+  const [count, setCount] = useState(10);
+  useEffect(() => { try { localStorage.setItem("mc_review_weights", JSON.stringify(w)); } catch {} }, [w]);
+
+  // 拉错题统计（只看本教材的 chapters，软隔离）
+  const [wrongPool, setWrongPool] = useState([]);
+  const [weakPool, setWeakPool] = useState([]);
+  const [memPool, setMemPool] = useState([]);
+  useEffect(() => {
+    const allWrong = getWrongItemsFromStore();
+    const courseLow = String(currentMaterial?.course || "").toLowerCase();
+    const filterByCourse = (lbl) => !courseLow || String(lbl || "").toLowerCase().includes(courseLow);
+    const due = allWrong.filter(item =>
+      item.status === "active" &&
+      item.sm2 && item.sm2.due_at <= Date.now() &&
+      filterByCourse(item.chapter_label || item.chapter)
+    );
+    setWrongPool(due);
+
+    // 薄弱章节：基于 mc_answers 历史
+    let answers = {};
+    try { answers = JSON.parse(localStorage.getItem("mc_answers") || "{}"); } catch {}
+    const stats = getChapterStats(answers);
+    const weak = Object.entries(stats)
+      .filter(([ch, s]) => filterByCourse(ch) && s.total >= 3 && (s.correct / s.total) < 0.6)
+      .map(([ch]) => ch);
+    // 用 ALL_QUESTIONS 来还原可练习的题
+    const weakQs = ALL_QUESTIONS.filter(q => q.chapter && weak.some(ch => String(q.chapter).includes(ch)));
+    setWeakPool(weakQs);
+
+    // 间隔记忆：本教材 chapters 范围内、还没做过的题
+    const chapterPrefix = currentMaterial?.course || "";
+    const inMaterial = ALL_QUESTIONS.filter(q => !chapterPrefix || String(q.chapter || "").includes(chapterPrefix));
+    const answeredIds = new Set(Object.keys(answers));
+    const newOnes = inMaterial.filter(q => !answeredIds.has(String(q.id)));
+    setMemPool(newOnes);
+  }, [currentMaterial?.id, currentMaterial?.course]);
+
+  const total = Math.max(1, w.wrong + w.weak + w.mem);
+  const norm = { wrong: w.wrong / total, weak: w.weak / total, mem: w.mem / total };
+  const target = {
+    wrong: Math.min(wrongPool.length, Math.round(count * norm.wrong)),
+    weak:  Math.min(weakPool.length,  Math.round(count * norm.weak)),
+    mem:   Math.min(memPool.length,   Math.round(count * norm.mem)),
+  };
+  // 因为各池可能不够，把缺口补到剩下两类里
+  const sumTarget = target.wrong + target.weak + target.mem;
+  const deficit = Math.max(0, count - sumTarget);
+  if (deficit > 0) {
+    const add = Math.min(deficit, Math.max(0, memPool.length - target.mem));
+    target.mem += add;
+  }
+  const finalCount = target.wrong + target.weak + target.mem;
+
+  const onStart = () => {
+    if (finalCount === 0) return;
+    // 复习抽屉混题：把错题 question_id 解析回 ALL_QUESTIONS，三池合并并 shuffle
+    const wrongResolved = wrongPool
+      .slice(0, target.wrong)
+      .map(item => ALL_QUESTIONS.find(q => String(q.id) === String(item.id)))
+      .filter(Boolean);
+    const weakSel = [...weakPool].sort(() => Math.random() - 0.5).slice(0, target.weak);
+    const memSel  = [...memPool ].sort(() => Math.random() - 0.5).slice(0, target.mem);
+    const mix = [...wrongResolved, ...weakSel, ...memSel].sort(() => Math.random() - 0.5);
+
+    // 通过 quizIntent 让 QuizPage 自动开练
+    if (typeof setQuizIntent === "function") {
+      setQuizIntent({
+        source: "review_mix",
+        // 没有单一 chapter，直接用 chapters 数组（QuizPage 会按数组开练）
+        chapters: Array.from(new Set(mix.map(q => q.chapter).filter(Boolean))),
+        count: mix.length,
+        materialId: currentMaterial?.id || null,
+        // 可选：把 question id 列表带过去，让 QuizPage 优先按这个池子练
+        ids: mix.map(q => String(q.id)),
+      });
+    }
+    if (typeof setChapterFilter === "function") {
+      const chs = Array.from(new Set(mix.map(q => q.chapter).filter(Boolean)));
+      if (chs.length > 0) setChapterFilter(chs);
+    }
+    if (typeof switchStudyTab === "function") switchStudyTab("小测");
+  };
+
+  const Slider = ({ label, value, onChange, color, count: cnt }) => (
+    <div style={{ flex: 1, padding: "14px 16px", borderRadius: 14, background: "#fff", border: "1px solid #E2E8F0" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{label}</div>
+        <div style={{ fontSize: 12, color, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{value}%</div>
+      </div>
+      <input
+        type="range"
+        min={0} max={100} step={5}
+        value={value}
+        onChange={(e) => onChange(parseInt(e.target.value, 10))}
+        style={{ width: "100%", accentColor: color }}
+      />
+      <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>本教材可用 {cnt} 题</div>
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 880, margin: "0 auto", padding: "0 0 24px" }}>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 22, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.01em" }}>复习</div>
+        <div style={{ fontSize: 13, color: "#64748B", marginTop: 4 }}>
+          按权重从"错题 / 薄弱 / 新题"三池抽题，混合一组练习
+          {currentMaterial ? ` · 当前教材：${currentMaterial.title}` : ""}
+        </div>
+      </div>
+
+      {/* 教材未选时的提示 */}
+      {!currentMaterial && (
+        <div style={{ padding: "14px 18px", marginBottom: 16, borderRadius: 12, background: "#FEF3C7", border: "1px solid #FDE68A", color: "#92400E", fontSize: 13 }}>
+          建议先回到教材画廊选定一本教材。当前会按"全部"做混合复习，可能命中跨教材的题。
+        </div>
+      )}
+
+      {/* 权重三联滑块 */}
+      <div style={{ display: "flex", gap: 12, marginBottom: 18, flexWrap: "wrap" }}>
+        <Slider label="❌ 错题" color="#DC2626" value={w.wrong} onChange={(v) => setW(p => ({ ...p, wrong: v }))} count={wrongPool.length} />
+        <Slider label="📉 薄弱章节" color="#D97706" value={w.weak}  onChange={(v) => setW(p => ({ ...p, weak: v }))}  count={weakPool.length} />
+        <Slider label="🆕 新题/记忆" color="#0EA5E9" value={w.mem}   onChange={(v) => setW(p => ({ ...p, mem: v }))}   count={memPool.length} />
+      </div>
+
+      {/* 总题量 */}
+      <div style={{ padding: "16px 18px", borderRadius: 14, background: "#fff", border: "1px solid #E2E8F0", marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>总题量</div>
+          <div style={{ fontSize: 16, fontWeight: 900, color: "#1D9E75" }}>{count} 道</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {[5, 10, 15, 20, 30].map(n => (
+            <button key={n} onClick={() => setCount(n)} style={{
+              padding: "6px 14px", borderRadius: 999,
+              background: count === n ? "#0F172A" : "#F8FAFC",
+              color: count === n ? "#fff" : "#475569",
+              border: count === n ? "none" : "1px solid #E2E8F0",
+              fontFamily: "inherit", fontSize: 13, fontWeight: 600, cursor: "pointer",
+            }}>{n}</button>
+          ))}
+        </div>
+        <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10, background: "#F8FAFC", fontSize: 12, color: "#475569" }}>
+          实际抽取：错题 <strong style={{ color: "#DC2626" }}>{target.wrong}</strong> · 薄弱 <strong style={{ color: "#D97706" }}>{target.weak}</strong> · 新题 <strong style={{ color: "#0EA5E9" }}>{target.mem}</strong>
+          {finalCount < count && <span style={{ color: "#94A3B8" }}> · 池量不足，实抽 {finalCount} 道</span>}
+        </div>
+      </div>
+
+      {/* CTA */}
+      <button
+        onClick={onStart}
+        disabled={finalCount === 0}
+        style={{
+          width: "100%", padding: "14px 18px", borderRadius: 14,
+          background: finalCount === 0 ? "#CBD5E1" : "linear-gradient(135deg,#0F172A,#1E293B)",
+          color: "#fff", border: "none", cursor: finalCount === 0 ? "not-allowed" : "pointer",
+          fontFamily: "inherit", fontSize: 15, fontWeight: 800,
+        }}>
+        {finalCount === 0 ? "暂无可复习的题目 —— 先做几道再回来" : `开始复习（${finalCount} 道）→`}
+      </button>
+
+      {finalCount === 0 && (
+        <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 12, background: "#F8FAFC", border: "1px dashed #CBD5E1", fontSize: 12.5, color: "#64748B", lineHeight: 1.7 }}>
+          复习池由"错题 / 薄弱 / 新题"三类组成。在小测里答几道之后再回来这里，复习池就会自动填满。
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Materials Library Page ──────────────────────────────────────────────────
 function MaterialsPage({ setPage, profile }) {
@@ -11167,9 +11533,10 @@ function mcFormatTime(ts) {
   return `${d.getMonth() + 1}月${d.getDate()}日 ${hh}:${mm}`;
 }
 
-function MaterialChatPage({ setPage, profile }) {
+function MaterialChatPage({ setPage, profile, currentMaterial = null }) {
   const [materials, setMaterials] = useState([]);
-  const [materialId, setMaterialId] = useState("");
+  // 沙盒模式：currentMaterial 切换时自动切到对应资料；外部画廊模式下保持原有"最近资料"行为
+  const [materialId, setMaterialId] = useState(currentMaterial?.id || "");
   const [question, setQuestion] = useState("");
   const [chatting, setChatting] = useState(false);
   const [history, setHistory] = useState([]);
@@ -11266,10 +11633,15 @@ function MaterialChatPage({ setPage, profile }) {
         ? rows
         : rows.filter(m => m.uploaded_by === profile?.id || ((m.status || "approved") === "approved" && m.is_public !== false));
       setMaterials(visible);
-      if (visible[0]?.id) setMaterialId(visible[0].id);
+      // 沙盒优先：有 currentMaterial 时跟着它走；否则退化为"最近一份"
+      if (currentMaterial?.id && visible.some(m => m.id === currentMaterial.id)) {
+        setMaterialId(currentMaterial.id);
+      } else if (!materialId && visible[0]?.id) {
+        setMaterialId(visible[0].id);
+      }
     };
     loadChatMaterials();
-  }, [profile?.id, profile?.role]);
+  }, [profile?.id, profile?.role, currentMaterial?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ask = async () => {
     if (!materialId || !question.trim()) return;
@@ -12434,7 +12806,7 @@ class TreeErrorBoundary extends Component {
   }
 }
 
-function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTab }) {
+function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTab, currentMaterial = null }) {
   // 新数据模型：{ [id]: { status, updatedAt, masteredAt } }
   // 向后兼容旧的 mc_skill_mastery (number 0/1/2)
   const [progress, setProgress] = useState(() => {
@@ -12457,7 +12829,12 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   }, []);
 
   const [selectedId, setSelectedId] = useState(null);
-  const [selectedCourse, setSelectedCourse] = useState("全部");
+  // 沙盒模式：默认按当前教材的 course 过滤；用户可以手动切到"全部"做跨教材回顾
+  const [selectedCourse, setSelectedCourse] = useState(currentMaterial?.course || "全部");
+  // 当外部 currentMaterial 切换时，同步刷新筛选（让"切教材"也能反映在知识树）
+  useEffect(() => {
+    if (currentMaterial?.course) setSelectedCourse(currentMaterial.course);
+  }, [currentMaterial?.course]);
   // 双击节点触发的详情浮层（渐进式信息披露 · L3）—— 单击只做高亮（L2）
   const [popoverOpen, setPopoverOpen] = useState(false);
   // 状态徽章作为筛选器（装饰数字 → 功能化数字）
@@ -13646,7 +14023,39 @@ export default function App() {
   // QuizPage 一旦收到且题库加载完成，就自动 startWithPool，不再停在 setup 页让用户重选。
   // 形如 { chapter: "ODE Ch.2", count: 5, source: "knowledge_tree" }
   const [quizIntent, setQuizIntent] = useState(null);
-  const [studyTab, setStudyTab] = useState("资料库");
+  // ══ 教材沙盒 ══════════════════════════════════════════════════════════════
+  // 进入教材后所有页面（知识点/知识树/小测/复习/错题本/AI对话）默认绑定到这本教材。
+  // 不选教材时显示画廊（HomePage 重构），保留"软隔离"——错题等数据全局存，UI 仅默认按教材过滤。
+  // shape: { id, title, course, chapters: string[] } | null
+  const [currentMaterial, setCurrentMaterial] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("mc_current_material") || "null"); }
+    catch { return null; }
+  });
+  useEffect(() => {
+    try {
+      if (currentMaterial) localStorage.setItem("mc_current_material", JSON.stringify(currentMaterial));
+      else localStorage.removeItem("mc_current_material");
+    } catch {}
+  }, [currentMaterial]);
+  // 进入教材沙盒：根据 material 推算 chapters，并跳到默认 tab
+  const enterMaterial = useCallback((mat) => {
+    if (!mat) return;
+    const courseChapters = CHAPTERS
+      .filter(ch => ch.course === mat.course)
+      .map(ch => `${mat.course} ${ch.num}`);
+    setCurrentMaterial({
+      id: mat.id,
+      title: mat.title || "未命名资料",
+      course: mat.course || "未分类",
+      chapters: courseChapters,
+    });
+    setStudyTab("知识点");
+  }, []);
+  const exitMaterial = useCallback(() => {
+    setCurrentMaterial(null);
+    setPage("首页");
+  }, []);
+  const [studyTab, setStudyTab] = useState("知识点");
   // 在学习工作台（StudyWorkspace）内部切换到"小测"tab —— 供 SkillTreePage / TopicModal 的"去做题"按钮使用
   const switchStudyTab = (tab) => setStudyTab(tab);
   const [sessionAnswers, setSessionAnswers] = useState({});
@@ -13843,7 +14252,7 @@ export default function App() {
     (typeof page === "string" && page.startsWith("quiz_material_"));
 
   const renderPage = () => {
-    if (page === "首页") return <HomePage setPage={handleSetPage} profile={profile} />;
+    if (page === "首页") return <HomePage setPage={handleSetPage} profile={profile} onEnterMaterial={enterMaterial} />;
     if (page === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
     if (page === "上传资料") return <UploadPage setPage={handleSetPage} profile={profile} />;
     if (page === "资料对话") return <MaterialChatPage setPage={handleSetPage} profile={profile} />;
@@ -13858,7 +14267,7 @@ export default function App() {
       return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} materialId={matId} materialTitle={matTitle} sessionAnswers={sessionAnswers} autoStartIntent={quizIntent} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
     }
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
-    if (page === "学习报告") return <ReportPage setPage={handleSetPage} setChapterFilter={setChapterFilter} />;
+    if (page === "学习报告") return <ReportPage setPage={handleSetPage} setChapterFilter={setChapterFilter} currentMaterial={currentMaterial} />;
     if (page === "技能树") return <TreeErrorBoundary><SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} /></TreeErrorBoundary>;
     if (page === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} setChapterFilter={setChapterFilter} />;
     if (page === "教师管理") return <TeacherPage setPage={handleSetPage} profile={profile} />;
@@ -13866,11 +14275,12 @@ export default function App() {
   };
 
   const renderStudyTab = (tab) => {
-    if (tab === "资料库") return <MaterialsPage setPage={handleSetPage} profile={profile} />;
-    if (tab === "AI对话") return <MaterialChatPage setPage={handleSetPage} profile={profile} />;
-    if (tab === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} setQuizIntent={setQuizIntent} switchStudyTab={switchStudyTab} />;
-    if (tab === "知识树") return <TreeErrorBoundary><SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} setQuizIntent={setQuizIntent} switchStudyTab={switchStudyTab} /></TreeErrorBoundary>;
-    if (tab === "小测") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} autoStartIntent={quizIntent} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
+    if (tab === "AI对话") return <MaterialChatPage setPage={handleSetPage} profile={profile} currentMaterial={currentMaterial} />;
+    if (tab === "知识点") return <KnowledgePage setPage={handleSetPage} setChapterFilter={setChapterFilter} setQuizIntent={setQuizIntent} switchStudyTab={switchStudyTab} currentMaterial={currentMaterial} />;
+    if (tab === "知识树") return <TreeErrorBoundary><SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} setQuizIntent={setQuizIntent} switchStudyTab={switchStudyTab} currentMaterial={currentMaterial} /></TreeErrorBoundary>;
+    if (tab === "小测") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} autoStartIntent={quizIntent} currentMaterial={currentMaterial} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
+    if (tab === "复习") return <ReviewPage currentMaterial={currentMaterial} switchStudyTab={switchStudyTab} setQuizIntent={setQuizIntent} setChapterFilter={setChapterFilter} />;
+    if (tab === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} setChapterFilter={setChapterFilter} currentMaterial={currentMaterial} embedded />;
     return null;
   };
 
@@ -13906,11 +14316,11 @@ export default function App() {
               <h1 style={{ fontSize: 18, fontWeight: "bold", color: "#111827", margin: 0 }}>MathCore 学习操作系统</h1>
               {isFullscreenPage ? (
                 <button
-                  onClick={() => handleSetPage(workspaceMode === "sprint" ? "首页" : "资料库")}
+                  onClick={() => handleSetPage("首页")}
                   style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 9999, background: "#F3F4F6", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13.5, fontWeight: 700, color: "#111827" }}
-                  title={`返回${workspaceMode === "sprint" ? "考前冲刺" : "学习"}模式`}
+                  title={`返回${workspaceMode === "sprint" ? "考前冲刺" : (currentMaterial ? "教材沙盒" : "教材画廊")}`}
                 >
-                  ← 返回{workspaceMode === "sprint" ? "考前冲刺" : "学习"}模式
+                  ← 返回{workspaceMode === "sprint" ? "考前冲刺" : (currentMaterial ? "教材沙盒" : "教材画廊")}
                 </button>
               ) : (
                 <div style={{ display: "flex", background: "#F3F4F6", padding: 4, borderRadius: 9999, position: "relative" }}>
@@ -13946,9 +14356,27 @@ export default function App() {
             ) : (
               <AnimatePresence mode="wait">
                 {workspaceMode === "study" ? (
-                  <motion.div key="study" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.25 }}>
-                    <StudyWorkspace renderTab={renderStudyTab} activeTab={studyTab} setActiveTab={setStudyTab} />
+                  // 学习模式分两态：
+                  //   · 没选教材 → 显示教材画廊（HomePage）
+                  //   · 选好教材 → 进入沙盒（StudyWorkspace + 顶部横幅）
+                  // 通过 layoutId 让画廊的卡片"放大成"沙盒的横幅徽章，制造连贯感
+                  !currentMaterial ? (
+                    <motion.div key="gallery" style={{ flex: 1, overflowY: "auto" }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+                      <div style={{ padding: "24px 32px" }}>
+                        <HomePage setPage={handleSetPage} profile={profile} onEnterMaterial={enterMaterial} />
+                      </div>
+                    </motion.div>
+                  ) : (
+                  <motion.div key={`sandbox-${currentMaterial.id}`} style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
+                    <StudyWorkspace
+                      renderTab={renderStudyTab}
+                      activeTab={studyTab}
+                      setActiveTab={setStudyTab}
+                      currentMaterial={currentMaterial}
+                      onExit={exitMaterial}
+                    />
                   </motion.div>
+                  )
                 ) : (
                   <motion.div key="sprint" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25 }}>
                     <SprintWorkspace
