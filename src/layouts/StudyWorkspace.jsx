@@ -11,9 +11,9 @@ import InteractiveLab from "./InteractiveLab";
 const TABS = ["知识点", "知识树", "复习", "小测", "错题本", "AI对话"];
 const TAB_ICONS = { "知识点": "📖", "知识树": "🌌", "复习": "🔁", "小测": "🧩", "错题本": "❌", "AI对话": "🤖" };
 
-// 教材沙盒顶部横幅 —— 显示当前教材 + 退出按钮 + 进度
+// 教材沙盒顶部横幅 —— 显示当前教材 + 退出按钮 + PDF 预览按钮
 // 通过 layoutId={"material-card-{id}"} 与画廊里的卡片同名 → framer-motion 自动 morph
-function MaterialBanner({ currentMaterial, onExit }) {
+function MaterialBanner({ currentMaterial, onExit, onPreviewPdf, onReanalyze, reanalyzing }) {
   if (!currentMaterial) return null;
   const courseColor = ({
     "数值分析": "#1D9E75",
@@ -23,6 +23,7 @@ function MaterialBanner({ currentMaterial, onExit }) {
     "数理统计": "#EF4444",
     "最优化":   "#0EA5E9",
   })[currentMaterial.course] || "#64748B";
+  const hasPdf = !!currentMaterial.file_data;
   return (
     <motion.div
       layoutId={`material-card-${currentMaterial.id}`}
@@ -62,18 +63,58 @@ function MaterialBanner({ currentMaterial, onExit }) {
           {Array.isArray(currentMaterial.chapters) ? currentMaterial.chapters.length : 0} 个章节 · 沙盒内所有功能默认绑定本教材
         </div>
       </div>
+      {/* 右侧操作区 */}
+      <div style={{ display: "flex", gap: 8 }}>
+        {hasPdf && onPreviewPdf && (
+          <button
+            onClick={onPreviewPdf}
+            title="预览本教材的 PDF 原文"
+            style={{
+              padding: "6px 12px", borderRadius: 10,
+              background: "#fff", color: "#0EA5E9",
+              border: "1px solid #BAE6FD", cursor: "pointer",
+              fontFamily: "inherit", fontSize: 12.5, fontWeight: 600,
+            }}
+          >
+            📖 查看 PDF
+          </button>
+        )}
+        {onReanalyze && (
+          <button
+            onClick={onReanalyze}
+            disabled={reanalyzing}
+            title="用最新 prompt 重新抽取本教材的细化知识点与题目"
+            style={{
+              padding: "6px 12px", borderRadius: 10,
+              background: reanalyzing ? "#E5E7EB" : "#fff",
+              color: reanalyzing ? "#94A3B8" : "#7C3AED",
+              border: `1px solid ${reanalyzing ? "#E5E7EB" : "#E9D5FF"}`,
+              cursor: reanalyzing ? "wait" : "pointer",
+              fontFamily: "inherit", fontSize: 12.5, fontWeight: 600,
+            }}
+          >
+            {reanalyzing ? "🤖 分析中…" : "🔬 细化分析"}
+          </button>
+        )}
+      </div>
     </motion.div>
   );
 }
 
-export default function StudyWorkspace({ renderTab, activeTab: controlledTab, setActiveTab: setControlledTab, currentMaterial, onExit }) {
+export default function StudyWorkspace({ renderTab, activeTab: controlledTab, setActiveTab: setControlledTab, currentMaterial, onExit, onPreviewPdf, onReanalyze, reanalyzing }) {
   const [uncontrolledTab, setUncontrolledTab] = useState("知识点");
   const activeTab = controlledTab !== undefined ? controlledTab : uncontrolledTab;
   const setActiveTab = setControlledTab || setUncontrolledTab;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, padding: 24, gap: 0, overflow: "hidden", boxSizing: "border-box" }}>
-      <MaterialBanner currentMaterial={currentMaterial} onExit={onExit} />
+      <MaterialBanner
+        currentMaterial={currentMaterial}
+        onExit={onExit}
+        onPreviewPdf={onPreviewPdf}
+        onReanalyze={onReanalyze}
+        reanalyzing={reanalyzing}
+      />
 
       <div style={{ display: "flex", flex: 1, gap: 24, overflow: "hidden", minHeight: 0 }}>
         <div

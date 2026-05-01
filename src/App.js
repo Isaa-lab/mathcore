@@ -1627,7 +1627,7 @@ const findChunkRefContext = (chunk, refDefs) => {
   return hits;
 };
 
-const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
+const processMaterialWithAI = async ({ material, file, genCount = 10, refine = false, ...rest }) => {
   const materialId = material?.id;
   if (!materialId) return { topics: [], questions: [], insertedCount: 0, materialLinked: false };
 
@@ -1717,7 +1717,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
       if (r.ok) {
         const blob = await r.blob();
         const f2 = new File([blob], material.file_name || "m.pdf", { type: "application/pdf" });
-        const sub = await processMaterialWithAI({ material, file: f2, genCount });
+        const sub = await processMaterialWithAI({ material, file: f2, genCount, refine });
         return sub;
       }
     } catch (e) {}
@@ -1764,6 +1764,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
             chunkIndex: idx,
             chunkCount: chunks.length,
             refContext: refs,
+            refine,
             userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
           }),
         });
@@ -1861,20 +1862,40 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
         answer: q.answer,
         explanation: q.explanation || "",
         material_id: materialId,
+        // 细化字段：difficulty / knowledge_points 在 questions 表里若没有该列，下面会做 fallback
+        difficulty: q.difficulty || null,
+        knowledge_points: Array.isArray(q.knowledge_points) && q.knowledge_points.length > 0 ? q.knowledge_points : null,
       }));
       if (rows.length === 0) {
-        // 全部是垃圾题被过滤：把过滤情况通过 dbErrors 透明化，让 UploadPage 显示「AI 出题质量不达标，已全部过滤」
         dbErrors.questions = "AI_FILTERED_ALL_LOW_QUALITY";
       } else {
-        const { error: e1 } = await supabase.from("questions").insert(rows);
-        if (!e1) { insertedCount = rows.length; materialLinked = true; }
-        else {
-          // Try without material_id if column missing
-          const rows2 = rows.map(({ material_id, ...r }) => r);
-          const { error: e2 } = await supabase.from("questions").insert(rows2);
-          if (!e2) insertedCount = rows2.length;
-          else dbErrors.questions = e2.message || e2.code || String(e2);
+        const stripUnknownCols = (r, cols) => {
+          const out = { ...r };
+          for (const c of cols) delete out[c];
+          return out;
+        };
+        const isMissingColumn = (err) => /column .* does not exist|Could not find the .* column/i.test(err?.message || "");
+        let inserted = false;
+        let lastErr = null;
+        // 渐进降级：先全字段，再去掉 difficulty / knowledge_points，再去掉 material_id
+        const tryRows = [
+          rows,
+          rows.map(r => stripUnknownCols(r, ["difficulty", "knowledge_points"])),
+          rows.map(r => stripUnknownCols(r, ["difficulty", "knowledge_points", "material_id"])),
+        ];
+        for (const candidate of tryRows) {
+          const { error: ei } = await supabase.from("questions").insert(candidate);
+          if (!ei) {
+            insertedCount = candidate.length;
+            // 只有第一档真的写到 material_id 列
+            materialLinked = candidate === rows || candidate === tryRows[1];
+            inserted = true;
+            break;
+          }
+          lastErr = ei;
+          if (!isMissingColumn(ei)) break; // 非缺列错误（RLS 等）就停止重试
         }
+        if (!inserted && lastErr) dbErrors.questions = lastErr.message || lastErr.code || String(lastErr);
       }
     } catch (e) { dbErrors.questions = e?.message || String(e); }
   }
@@ -1892,21 +1913,44 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
           name: String(t.name).trim().slice(0, 120),
           summary: t.summary ? String(t.summary).slice(0, 800) : null,
           chapter: chapter || null,
+          // 细化字段：知识树画边、给节点上色 / 上图标都靠这些
+          // 老 schema 没有这些列时，下面会自动 fallback 到旧形态
+          kind: t.kind || null,
+          depth: Number.isFinite(t.depth) ? t.depth : null,
+          prerequisites: Array.isArray(t.prerequisites) && t.prerequisites.length > 0 ? t.prerequisites : null,
+          definition_anchor: t.definition_anchor ? String(t.definition_anchor).slice(0, 240) : null,
         }));
       if (topicRows.length > 0) {
-        const { error: et } = await supabase.from("material_topics").insert(topicRows);
-        if (!et) {
-          topicsLinked = topicRows.length;
-          // 触发全局"知识树/知识点"侧的自动刷新 —— 用户即使正停留在知识树页也能看到新节点出现
-          try {
-            window.dispatchEvent(new CustomEvent("mc:material-topics-updated", {
-              detail: { materialId, count: topicRows.length },
-            }));
-          } catch { /* SSR-safe no-op */ }
-        } else {
-          // Common causes: relation does not exist (42P01), column missing, RLS blocked.
-          console.warn("[material_topics] insert failed:", et.message || et.code);
-          dbErrors.topics = et.message || et.code || String(et);
+        const isMissingColumn = (err) => /column .* does not exist|Could not find the .* column/i.test(err?.message || "");
+        const stripCols = (rows, cols) => rows.map(r => {
+          const out = { ...r };
+          for (const c of cols) delete out[c];
+          return out;
+        });
+        // 渐进降级：先全字段，再去掉细化扩展字段，最后只保留最小集
+        const tryRows = [
+          topicRows,
+          stripCols(topicRows, ["kind", "depth", "prerequisites", "definition_anchor"]),
+        ];
+        let okError = null;
+        for (const candidate of tryRows) {
+          const { error: et } = await supabase.from("material_topics").insert(candidate);
+          if (!et) {
+            topicsLinked = candidate.length;
+            try {
+              window.dispatchEvent(new CustomEvent("mc:material-topics-updated", {
+                detail: { materialId, count: candidate.length },
+              }));
+            } catch { /* SSR-safe no-op */ }
+            okError = null;
+            break;
+          }
+          okError = et;
+          if (!isMissingColumn(et)) break; // RLS / 表不存在等：直接报告
+        }
+        if (okError) {
+          console.warn("[material_topics] insert failed:", okError.message || okError.code);
+          dbErrors.topics = okError.message || okError.code || String(okError);
         }
       }
     } catch (e) {
@@ -4595,6 +4639,57 @@ const COURSE_PALETTE_HOME = {
 };
 const courseStyle = (course) => COURSE_PALETTE_HOME[course] || { solid: "#64748B", soft: "#F1F5F9", ink: "#334155" };
 
+// ── PDF 预览 Modal ─────────────────────────────────────────────────────────
+// 用法：<PdfPreviewModal material={mat} onClose={...} />
+// 直接 iframe 加载 file_data（Supabase Storage 的 publicUrl）。
+// 浏览器内置 PDF.js 视图就够用，不再额外引第三方依赖。
+function PdfPreviewModal({ material, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  if (!material) return null;
+  const url = material.file_data || "";
+  const c = courseStyle(material.course);
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(15,23,42,0.62)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(1080px, 96vw)", height: "min(820px, 92vh)", background: "#fff", borderRadius: 16, boxShadow: "0 24px 80px rgba(0,0,0,0.35)", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderBottom: "1px solid #E2E8F0", background: `linear-gradient(135deg, ${c.soft} 0%, #ffffff 70%)` }}>
+          <div style={{ display: "inline-block", padding: "3px 10px", borderRadius: 999, background: c.solid, color: "#fff", fontSize: 11, fontWeight: 800 }}>{material.course || "未分类"}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#0F172A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{material.title || "未命名资料"}</div>
+            <div style={{ fontSize: 11.5, color: "#64748B", marginTop: 2 }}>资料预览 · 浏览器内置 PDF 阅读器</div>
+          </div>
+          {url && (
+            <a href={url} target="_blank" rel="noreferrer" style={{ padding: "6px 12px", borderRadius: 8, background: "#fff", color: "#475569", border: "1px solid #E2E8F0", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textDecoration: "none" }}>
+              ↗ 新窗口打开
+            </a>
+          )}
+          <button onClick={onClose} title="关闭" style={{ width: 32, height: 32, borderRadius: 10, background: "#fff", color: "#475569", border: "1px solid #E2E8F0", fontSize: 16, cursor: "pointer", fontFamily: "inherit", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+        </div>
+        {/* Body */}
+        <div style={{ flex: 1, background: "#F1F5F9", minHeight: 0 }}>
+          {url ? (
+            <iframe
+              src={url}
+              title={material.title || "PDF Preview"}
+              style={{ width: "100%", height: "100%", border: "none", display: "block" }}
+            />
+          ) : (
+            <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32, textAlign: "center", color: "#64748B" }}>
+              <div style={{ fontSize: 40, marginBottom: 10 }}>📁</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#334155" }}>这份资料没有上传 PDF 文件</div>
+              <div style={{ fontSize: 12.5, marginTop: 6, lineHeight: 1.6, maxWidth: 380 }}>仅有元数据，没有 file_data。可在资料库里"替换文件"重新上传。</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HomePage({ setPage, profile, onEnterMaterial }) {
   const [showAISettings, setShowAISettings] = useState(false);
   const aiCfg = getAIConfig();
@@ -4674,6 +4769,8 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
   // 注：Supabase 端 RLS 仅允许 uploaded_by === auth.uid() 的用户删，老师 / 自己上传的能删，其他人会被静默拒
   // questions / material_topics 在 schema 里设了 ON DELETE CASCADE，删 materials 即可级联清理
   const [deletingId, setDeletingId] = useState(null);
+  const [previewing, setPreviewing] = useState(null); // 当前预览的 material
+  const openPreview = (mat, ev) => { if (ev) { ev.stopPropagation(); ev.preventDefault(); } setPreviewing(mat); };
   const deleteMaterial = async (mat, ev) => {
     if (ev) { ev.stopPropagation(); ev.preventDefault(); }
     if (!mat?.id) return;
@@ -4790,30 +4887,48 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
             >
               {/* 装饰角标 */}
               <div style={{ position: "absolute", top: -22, right: -22, width: 80, height: 80, borderRadius: "50%", background: c.solid, opacity: 0.08 }} />
-              {/* 删除按钮 —— 默认隐藏，hover 时显现，仅卡片所有者可见 */}
-              {canDelete && (
-                <button
-                  type="button"
-                  onClick={(e) => deleteMaterial(mat, e)}
-                  disabled={isDeleting}
-                  title="删除教材"
-                  className="mc-card-delete"
-                  style={{
-                    position: "absolute", top: 10, right: 10, zIndex: 2,
-                    width: 28, height: 28, borderRadius: 8,
-                    background: "rgba(255,255,255,0.95)", color: "#DC2626",
-                    border: "1px solid #FECACA", cursor: isDeleting ? "not-allowed" : "pointer",
-                    fontFamily: "inherit", fontSize: 14, lineHeight: 1, padding: 0,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    opacity: 0, transition: "opacity .15s, background .15s",
-                    boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = "#FEE2E2"; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
-                >
-                  {isDeleting ? "…" : "🗑"}
-                </button>
-              )}
+              {/* 卡片右上角操作区：预览 PDF + 删除 —— hover 时显现 */}
+              <div className="mc-card-actions" style={{ position: "absolute", top: 10, right: 10, zIndex: 2, display: "flex", gap: 6, opacity: 0, transition: "opacity .15s" }}>
+                {mat.file_data && (
+                  <button
+                    type="button"
+                    onClick={(e) => openPreview(mat, e)}
+                    title="预览 PDF"
+                    style={{
+                      width: 28, height: 28, borderRadius: 8,
+                      background: "rgba(255,255,255,0.95)", color: "#0EA5E9",
+                      border: "1px solid #BAE6FD", cursor: "pointer",
+                      fontFamily: "inherit", fontSize: 13, lineHeight: 1, padding: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "#E0F2FE"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
+                  >
+                    📖
+                  </button>
+                )}
+                {canDelete && (
+                  <button
+                    type="button"
+                    onClick={(e) => deleteMaterial(mat, e)}
+                    disabled={isDeleting}
+                    title="删除教材"
+                    style={{
+                      width: 28, height: 28, borderRadius: 8,
+                      background: "rgba(255,255,255,0.95)", color: "#DC2626",
+                      border: "1px solid #FECACA", cursor: isDeleting ? "not-allowed" : "pointer",
+                      fontFamily: "inherit", fontSize: 14, lineHeight: 1, padding: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "#FEE2E2"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
+                  >
+                    {isDeleting ? "…" : "🗑"}
+                  </button>
+                )}
+              </div>
               <div>
                 <div style={{ display: "inline-block", padding: "3px 10px", borderRadius: 999, background: c.solid, color: "#fff", fontSize: 10.5, fontWeight: 800, letterSpacing: "0.04em", marginBottom: 10 }}>
                   {mat.course || "未分类"}
@@ -4893,6 +5008,9 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
           })}
         </div>
       </SectionCard>
+
+      {/* PDF 预览 modal —— 由教材卡 hover 后的 📖 按钮唤出 */}
+      {previewing && <PdfPreviewModal material={previewing} onClose={() => setPreviewing(null)} />}
     </div>
   );
 }
@@ -12768,8 +12886,22 @@ function inferCourseFromChapterTree(ch) {
 
 // AI 节点自动布局：按 course 归组，并追加到已有课程的同列正下方；未知课程进入右侧新列
 // 这是一个轻量 DAG 布局的替代实现 —— 用户上传资料越多，AI 节点越多，画布会自动向下/向右扩展
+// v2 升级：
+//   · 把 t.prerequisites 解析成 deps 边（前置 → 当前），知识树上能看到细化后的依赖网
+//   · 依据 t.kind 给节点一个图标 / 短标签，方便一眼区分定义/定理/方法/反例
+//   · 依据 t.depth 决定排版层级：depth 1（基础）放上面，depth 3（综合）放下面
 function placeAiTopicsToTree(aiTopics, existingNodes) {
   if (!Array.isArray(aiTopics) || aiTopics.length === 0) return [];
+
+  const KIND_TO_SYM = {
+    definition: "📘",
+    theorem: "📐",
+    method: "🛠",
+    formula: "∑",
+    example: "💡",
+    pitfall: "⚠️",
+  };
+
   const groups = new Map();
   for (const t of aiTopics) {
     const course = inferCourseFromChapterTree(t.chapter) || "综合";
@@ -12778,8 +12910,21 @@ function placeAiTopicsToTree(aiTopics, existingNodes) {
   }
   const maxExistingX = existingNodes.length ? Math.max(...existingNodes.map(n => n.x)) : 800;
   let freeColX = maxExistingX + 240;
+
+  // 第一遍：把每个 topic 落位为节点，先攒一个"name → nodeId"映射，第二遍才连边
   const out = [];
+  const nameToId = new Map(); // 同 material 内的 name → nodeId
+  // 同一个 name 在不同 material 里可能撞名，所以再分桶到 materialId
+  const bucketKey = (mid, name) => `${mid || "_"}|||${String(name || "").toLowerCase().trim()}`;
+
   for (const [course, topics] of groups.entries()) {
+    // depth 越小越在上面（基础概念）；同 depth 内按 created_at 顺序保留
+    const sorted = [...topics].sort((a, b) => {
+      const da = Number.isFinite(a.depth) ? a.depth : 2;
+      const db = Number.isFinite(b.depth) ? b.depth : 2;
+      return da - db;
+    });
+
     const existing = existingNodes.filter(n => n.course === course);
     let col_x, base_y;
     if (existing.length > 0) {
@@ -12790,34 +12935,58 @@ function placeAiTopicsToTree(aiTopics, existingNodes) {
       freeColX += 180;
       base_y = 70;
     }
-    const seen = new Set();
-    let x = col_x, y = base_y, colOffset = 0;
-    for (const t of topics) {
+
+    const seenInCourse = new Set();
+    let y = base_y, colOffset = 0;
+    for (const t of sorted) {
       const label = String(t.name || "").trim();
       if (!label) continue;
-      const key = label.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
+      const k = label.toLowerCase();
+      if (seenInCourse.has(k)) continue;
+      seenInCourse.add(k);
+      const id = "ai:" + t.id;
+      nameToId.set(bucketKey(t.material_id, label), id);
+
+      const sym = KIND_TO_SYM[t.kind] || "✱";
+
       out.push({
-        id: "ai:" + t.id,
+        id,
         label: label.length > 12 ? label.slice(0, 11) + "…" : label,
         fullLabel: label,
-        sym: "✱",
+        sym,
+        kind: t.kind || null,
+        depth: Number.isFinite(t.depth) ? t.depth : null,
         course,
-        x: x + colOffset * 170,
+        x: col_x + colOffset * 170,
         y,
         estMin: 20,
         bullet: (t.summary || "AI 从你上传的资料里抽取的知识点").slice(0, 68),
+        anchor: t.definition_anchor || null,
         chapter: t.chapter || null,
         topics: [label],
-        deps: [],
-        isAI: true,
+        deps: [], // 第二遍填
+        prereqNames: Array.isArray(t.prerequisites) ? t.prerequisites : [],
         materialId: t.material_id,
+        isAI: true,
       });
       y += 100;
       if (y > base_y + 600) { colOffset += 1; y = base_y; }
     }
   }
+
+  // 第二遍：把 prereqNames 转成 deps，仅当目标节点在同一 material 中真的存在时才连边
+  for (const n of out) {
+    const deps = [];
+    for (const pname of n.prereqNames || []) {
+      const targetId = nameToId.get(bucketKey(n.materialId, pname));
+      if (targetId && targetId !== n.id) {
+        deps.push({ id: targetId, kind: "strong" });
+      }
+    }
+    n.deps = deps;
+    delete n.prereqNames;
+  }
+
   return out;
 }
 
@@ -12951,13 +13120,25 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     (async () => {
       if (aiRefreshTick > 0) setIsRefreshingAi(true);
       try {
-        const { data, error } = await supabase
+        // 优先拉细化 v2 的字段（kind / depth / prerequisites / definition_anchor）
+        // 老库没有这些列时自动 fallback 到 v1 的最小集，不会让知识树挂掉
+        const v2 = await supabase
           .from("material_topics")
-          .select("id, material_id, name, summary, chapter, created_at")
+          .select("id, material_id, name, summary, chapter, kind, depth, prerequisites, definition_anchor, created_at")
           .order("created_at", { ascending: true })
-          .limit(200);
+          .limit(400);
         if (cancelled) return;
-        if (!error && Array.isArray(data)) setAiTopics(data);
+        if (!v2.error && Array.isArray(v2.data)) {
+          setAiTopics(v2.data);
+        } else {
+          const v1 = await supabase
+            .from("material_topics")
+            .select("id, material_id, name, summary, chapter, created_at")
+            .order("created_at", { ascending: true })
+            .limit(400);
+          if (cancelled) return;
+          if (!v1.error && Array.isArray(v1.data)) setAiTopics(v1.data);
+        }
       } catch { /* 静默：用户未登录 / 无此表时直接用内置树 */ }
       finally {
         if (!cancelled) { setAiTopicsLoaded(true); setIsRefreshingAi(false); }
@@ -14143,6 +14324,8 @@ export default function App() {
       title: mat.title || "未命名资料",
       course: mat.course || "未分类",
       chapters: courseChapters,
+      // 预览 PDF 用：file_data 是 Supabase Storage 的 publicUrl
+      file_data: mat.file_data || null,
     });
     setStudyTab("知识点");
   }, []);
@@ -14150,6 +14333,42 @@ export default function App() {
     setCurrentMaterial(null);
     setPage("首页");
   }, []);
+  // 沙盒里的 PDF 预览 & 重新分析（细化抽取）
+  const [sandboxPreviewing, setSandboxPreviewing] = useState(false);
+  const [sandboxReanalyzing, setSandboxReanalyzing] = useState(false);
+  const [sandboxReanalyzeMsg, setSandboxReanalyzeMsg] = useState("");
+  const reanalyzeCurrentMaterial = useCallback(async () => {
+    if (!currentMaterial?.id) return;
+    if (!window.confirm(`将用最新版 AI prompt 重新分析「${currentMaterial.title}」，会在原有知识点 / 题目基础上追加更细粒度的内容（不会删旧数据）。继续？`)) return;
+    setSandboxReanalyzing(true);
+    setSandboxReanalyzeMsg("正在用细化 prompt 重新抽取，可能需要 30~60 秒…");
+    try {
+      const { data: matRow } = await supabase
+        .from("materials")
+        .select("id,title,course,chapter,description,file_name,file_data")
+        .eq("id", currentMaterial.id)
+        .single();
+      if (!matRow) throw new Error("找不到教材");
+      const fetchedFile = matRow.file_data ? await fetchFileAsBrowserFile(matRow.file_data, matRow.file_name || "material.pdf") : null;
+      const result = await processMaterialWithAI({
+        material: matRow,
+        file: fetchedFile,
+        genCount: 16,
+        actorName: "教材沙盒细化",
+        refine: true,
+      });
+      const inserted = result?.insertedCount ?? 0;
+      const topicsAdded = result?.topicsLinked ?? 0;
+      setSandboxReanalyzeMsg(`✅ 细化完成 · 新增知识点 ${topicsAdded} · 新增题目 ${inserted}。请刷新本页 tab（切走再切回来）查看。`);
+      // 触发知识树自动刷新
+      try { window.dispatchEvent(new CustomEvent("mc:material-topics-updated", { detail: { materialId: currentMaterial.id, count: topicsAdded } })); } catch {}
+    } catch (e) {
+      setSandboxReanalyzeMsg("❌ 细化失败：" + (e?.message || "未知错误"));
+    } finally {
+      setSandboxReanalyzing(false);
+      setTimeout(() => setSandboxReanalyzeMsg(""), 8000);
+    }
+  }, [currentMaterial]);
   const [studyTab, setStudyTab] = useState("知识点");
   // 在学习工作台（StudyWorkspace）内部切换到"小测"tab —— 供 SkillTreePage / TopicModal 的"去做题"按钮使用
   const switchStudyTab = (tab) => setStudyTab(tab);
@@ -14474,7 +14693,16 @@ export default function App() {
                       setActiveTab={setStudyTab}
                       currentMaterial={currentMaterial}
                       onExit={exitMaterial}
+                      onPreviewPdf={() => setSandboxPreviewing(true)}
+                      onReanalyze={reanalyzeCurrentMaterial}
+                      reanalyzing={sandboxReanalyzing}
                     />
+                    {/* 细化分析进度提示 —— toast 风格 */}
+                    {sandboxReanalyzeMsg && (
+                      <div style={{ position: "fixed", top: 80, right: 20, zIndex: 9998, padding: "12px 18px", borderRadius: 12, background: "#0F172A", color: "#fff", fontSize: 13, fontWeight: 600, boxShadow: "0 12px 32px rgba(0,0,0,0.25)", maxWidth: 380, lineHeight: 1.6 }}>
+                        {sandboxReanalyzeMsg}
+                      </div>
+                    )}
                   </motion.div>
                   )
                 ) : (
@@ -14499,6 +14727,10 @@ export default function App() {
       </AnimatePresence>
       {/* 全局 AI 设置弹窗 —— 由 zustand store 控制，任意子组件都可唤出 */}
       <GlobalAISettingsPortal />
+      {/* 沙盒 PDF 预览 modal —— 由教材横幅的 📖 按钮唤出 */}
+      {sandboxPreviewing && currentMaterial && (
+        <PdfPreviewModal material={currentMaterial} onClose={() => setSandboxPreviewing(false)} />
+      )}
     </div>
   );
 }

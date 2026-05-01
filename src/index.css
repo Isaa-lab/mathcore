@@ -61,7 +61,9 @@ body {
   transform: translateY(0) !important;
 }
 
-/* Material gallery card —— hover 时显现垃圾桶按钮 */
+/* Material gallery card —— hover 时显现操作按钮（预览 / 删除） */
+.mc-material-card:hover .mc-card-actions,
+.mc-material-card:focus-within .mc-card-actions,
 .mc-material-card:hover .mc-card-delete,
 .mc-material-card:focus-within .mc-card-delete {
   opacity: 1 !important;
