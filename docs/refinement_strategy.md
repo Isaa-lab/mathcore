@@ -204,8 +204,81 @@ limit 5;
 
 ---
 
-## 6. 之后还能继续做的（按价值排序）
+## 6. v3 升级 · AI 来源标注 + 主题色 + 双 AI 对比
 
+> 2026-05-01 这一轮交付。
+
+### 6.1 默认 refine + 来源标注
+
+- `processMaterialWithAI` 现在 **默认 `refine=true`**——所有上传走细化路径，不再需要用户手动点 🔬。
+- 每条新生成的 `questions` / `material_topics` 都会被打上：
+  - `generated_by` —— provider 名（`gemini` / `deepseek` / `kimi` / `groq` / `anthropic` / `custom`）
+  - `ai_model`    —— 具体模型字符串（如 `gemini-2.0-flash`、`deepseek-chat`、`moonshot-v1-8k`）
+  - `ai_meta`     —— jsonb 备用字段（目前存 `{ refine: true }` 等 flag）
+- 老库里没这些列时，`processMaterialWithAI` 会自动 strip 后重试，不会因列不存在而 500。
+
+### 6.2 每家 AI 一份独立 prompt
+
+`api/extract.js` 不再用同一份 prompt 灌给所有 provider。每家有独立"开场白 + 1~2 条特化 tip"：
+
+| Provider | 特化点 |
+|---|---|
+| **Gemini** | "直接产出 JSON，禁止 markdown" + 用 `responseMimeType: application/json` 强制结构化输出 |
+| **DeepSeek** | 强调中文学术语言专长，要求术语精确、拒口语化 |
+| **Kimi** | 利用 200K 长上下文先全局扫再出题，强制单一 JSON 对象 |
+| **Groq (Llama)** | 严格短语 + 提醒"中文输出覆盖任何英文 fallback" + JSON 模式自动 fallback |
+| **Anthropic Claude** | 鼓励"先内部规划再一次性产出 JSON"，发挥它结构化输出的优势 |
+| **Custom** | 保守路线，只要求纯 JSON |
+
+主体（任务一/二、自包含铁律、CoT 自检、JSON 例子）所有 provider 共用，避免维护爆炸。
+
+### 6.3 AI 主题色（accent 级别）
+
+`PROVIDER_THEME` 给每家 provider 定义 `{ accent, soft, ink }` 三色。用户切换 AI 时，全局 CSS 变量 `--mc-ai-accent` / `--mc-ai-soft` / `--mc-ai-ink` 同步更新，三个高可见性区域跟着变色：
+
+1. **沙盒顶部横幅**：3px 顶条 = 当前 AI 主题色
+2. **左侧 tab 选中态**：背景色 + 左边 3px 立条都用 AI 色
+3. **「🔬 细化分析」按钮**：背景 / 边框 / 文字色全套 AI 色
+
+调色板：
+
+| Provider | accent | label |
+|---|---|---|
+| Platform (Server) | `#10B981` | Platform |
+| Groq Llama | `#F55036` | Groq Llama |
+| Gemini | `#4285F4` | Google Gemini |
+| DeepSeek | `#4D6BFE` | DeepSeek |
+| Kimi | `#6F5BD9` | Kimi |
+| Claude | `#D97757` | Claude |
+| Custom | `#6B7280` | Custom |
+
+### 6.4 「AI 来源」过滤器
+
+QuizPage 设置页加了 STEP 3.5：从当前题库实际出现过的 AI 来源里多选过滤。每个来源 chip 显示该 AI 的题目数量与主题色。
+
+### 6.5 「🆚 双 AI 对比」
+
+沙盒横幅多了第三颗按钮 🆚。点击 →
+1. 弹 `CompareAIModal`，左侧固定为当前 AI（A），右侧下拉选另一已配 key 的 AI（B）
+2. 后台串行跑两次 `processMaterialWithAI({ refine: true })`，期间临时切换 `localStorage` 的 provider 让 `/api/extract` 命中正确的 prompt + 路由
+3. 两组结果都入库，分别带 A、B 的 `generated_by` 标签
+4. 用户回到 `小测` 用 STEP 3.5 的过滤器逐家对照
+
+> 注意：目前没做"side-by-side 直接对比 UI"。决策依据是：题库列表 + 过滤器 已经足以让用户在熟悉的页面里做对比，不需要新建一个对比专属界面，避免维护 2 套数据视图。
+
+### 6.6 配套 SQL
+
+`sql/ai_provenance_v3.sql`：
+- `questions` 加 `generated_by` / `ai_model` / `ai_meta`
+- `material_topics` 加同名三列
+- 创建 `material_ai_breakdown` 视图（每教材 × 每 AI 的产出统计）
+- `notify pgrst, 'reload schema'`
+
+---
+
+## 7. 之后还能继续做的（按价值排序）
+
+0. **真正的 side-by-side 对比页**（v3 没做）——把 A/B 两组同章节的题目拉到一个并排视图，用户能勾选"保留 A"/"保留 B"/"两个都留"。当前用过滤器已经能凑合用，但如果两个 AI 输出量大可读性会差。
 1. **薄弱点反查 → 自动出题**  
    `复习` tab 用 `q.knowledge_points` ∩ 错题最近 30 天 → 反向喂给 LLM 让它针对这些点专门出题。
 2. **知识树 → 推荐下一节点**  

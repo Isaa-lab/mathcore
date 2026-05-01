@@ -11,9 +11,9 @@ import InteractiveLab from "./InteractiveLab";
 const TABS = ["知识点", "知识树", "复习", "小测", "错题本", "AI对话"];
 const TAB_ICONS = { "知识点": "📖", "知识树": "🌌", "复习": "🔁", "小测": "🧩", "错题本": "❌", "AI对话": "🤖" };
 
-// 教材沙盒顶部横幅 —— 显示当前教材 + 退出按钮 + PDF 预览按钮
+// 教材沙盒顶部横幅 —— 显示当前教材 + 退出按钮 + PDF 预览按钮 + 当前 AI 主题色条
 // 通过 layoutId={"material-card-{id}"} 与画廊里的卡片同名 → framer-motion 自动 morph
-function MaterialBanner({ currentMaterial, onExit, onPreviewPdf, onReanalyze, reanalyzing }) {
+function MaterialBanner({ currentMaterial, onExit, onPreviewPdf, onReanalyze, reanalyzing, onCompareAI, comparing, providerLabel = null }) {
   if (!currentMaterial) return null;
   const courseColor = ({
     "数值分析": "#1D9E75",
@@ -29,10 +29,13 @@ function MaterialBanner({ currentMaterial, onExit, onPreviewPdf, onReanalyze, re
       layoutId={`material-card-${currentMaterial.id}`}
       transition={{ type: "spring", stiffness: 260, damping: 28 }}
       style={{
+        position: "relative",
         display: "flex", alignItems: "center", gap: 14,
         padding: "10px 18px", marginBottom: 16,
         background: `linear-gradient(135deg, ${courseColor}12 0%, #ffffff 70%)`,
         border: `1px solid ${courseColor}33`,
+        // 顶部 3px 高的条 = 当前 AI 主题色，由 var(--mc-ai-accent) 控制
+        borderTop: "3px solid var(--mc-ai-accent, #10B981)",
         borderRadius: 16, boxShadow: "0 1px 0 rgba(15,23,42,0.02)",
       }}
     >
@@ -59,8 +62,21 @@ function MaterialBanner({ currentMaterial, onExit, onPreviewPdf, onReanalyze, re
         <div style={{ fontSize: 15, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.01em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {currentMaterial.title || "未命名资料"}
         </div>
-        <div style={{ fontSize: 11.5, color: "#64748B", marginTop: 2 }}>
+        <div style={{ fontSize: 11.5, color: "#64748B", marginTop: 2, display: "flex", alignItems: "center", gap: 8 }}>
           {Array.isArray(currentMaterial.chapters) ? currentMaterial.chapters.length : 0} 个章节 · 沙盒内所有功能默认绑定本教材
+          {providerLabel && (
+            <span title="当前 AI 引擎" style={{
+              display: "inline-flex", alignItems: "center", gap: 4,
+              padding: "1px 8px", borderRadius: 999,
+              background: "var(--mc-ai-soft, #ECFDF5)",
+              color: "var(--mc-ai-ink, #047857)",
+              fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em",
+              border: "1px solid var(--mc-ai-accent, #10B981)33",
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mc-ai-accent, #10B981)" }} />
+              {providerLabel}
+            </span>
+          )}
         </div>
       </div>
       {/* 右侧操作区 */}
@@ -83,12 +99,12 @@ function MaterialBanner({ currentMaterial, onExit, onPreviewPdf, onReanalyze, re
           <button
             onClick={onReanalyze}
             disabled={reanalyzing}
-            title="用最新 prompt 重新抽取本教材的细化知识点与题目"
+            title="用当前 AI + 最新细化 prompt 重抽本教材"
             style={{
               padding: "6px 12px", borderRadius: 10,
-              background: reanalyzing ? "#E5E7EB" : "#fff",
-              color: reanalyzing ? "#94A3B8" : "#7C3AED",
-              border: `1px solid ${reanalyzing ? "#E5E7EB" : "#E9D5FF"}`,
+              background: reanalyzing ? "#E5E7EB" : "var(--mc-ai-soft, #ECFDF5)",
+              color: reanalyzing ? "#94A3B8" : "var(--mc-ai-ink, #047857)",
+              border: `1px solid ${reanalyzing ? "#E5E7EB" : "var(--mc-ai-accent, #10B981)"}`,
               cursor: reanalyzing ? "wait" : "pointer",
               fontFamily: "inherit", fontSize: 12.5, fontWeight: 600,
             }}
@@ -96,12 +112,41 @@ function MaterialBanner({ currentMaterial, onExit, onPreviewPdf, onReanalyze, re
             {reanalyzing ? "🤖 分析中…" : "🔬 细化分析"}
           </button>
         )}
+        {onCompareAI && (
+          <button
+            onClick={onCompareAI}
+            disabled={comparing || reanalyzing}
+            title="选另一个 AI 同时跑一遍，结果一起入库便于对比"
+            style={{
+              padding: "6px 12px", borderRadius: 10,
+              background: (comparing || reanalyzing) ? "#E5E7EB" : "#fff",
+              color: (comparing || reanalyzing) ? "#94A3B8" : "#0F172A",
+              border: `1px solid #CBD5E1`,
+              cursor: (comparing || reanalyzing) ? "wait" : "pointer",
+              fontFamily: "inherit", fontSize: 12.5, fontWeight: 600,
+            }}
+          >
+            {comparing ? "🆚 对比中…" : "🆚 双 AI 对比"}
+          </button>
+        )}
       </div>
     </motion.div>
   );
 }
 
-export default function StudyWorkspace({ renderTab, activeTab: controlledTab, setActiveTab: setControlledTab, currentMaterial, onExit, onPreviewPdf, onReanalyze, reanalyzing }) {
+export default function StudyWorkspace({
+  renderTab,
+  activeTab: controlledTab,
+  setActiveTab: setControlledTab,
+  currentMaterial,
+  onExit,
+  onPreviewPdf,
+  onReanalyze,
+  reanalyzing,
+  onCompareAI,
+  comparing,
+  providerLabel,
+}) {
   const [uncontrolledTab, setUncontrolledTab] = useState("知识点");
   const activeTab = controlledTab !== undefined ? controlledTab : uncontrolledTab;
   const setActiveTab = setControlledTab || setUncontrolledTab;
@@ -114,6 +159,9 @@ export default function StudyWorkspace({ renderTab, activeTab: controlledTab, se
         onPreviewPdf={onPreviewPdf}
         onReanalyze={onReanalyze}
         reanalyzing={reanalyzing}
+        onCompareAI={onCompareAI}
+        comparing={comparing}
+        providerLabel={providerLabel}
       />
 
       <div style={{ display: "flex", flex: 1, gap: 24, overflow: "hidden", minHeight: 0 }}>
@@ -128,15 +176,16 @@ export default function StudyWorkspace({ renderTab, activeTab: controlledTab, se
               style={{
                 padding: "10px 14px",
                 textAlign: "left",
-                background: activeTab === tab ? "#F3F4F6" : "transparent",
+                background: activeTab === tab ? "var(--mc-ai-soft, #F3F4F6)" : "transparent",
                 borderRadius: 12,
                 border: "none",
+                borderLeft: activeTab === tab ? "3px solid var(--mc-ai-accent, #111827)" : "3px solid transparent",
                 cursor: "pointer",
                 fontWeight: 600,
                 fontSize: 14,
-                color: activeTab === tab ? "#111827" : "#6B7280",
+                color: activeTab === tab ? "var(--mc-ai-ink, #111827)" : "#6B7280",
                 fontFamily: "inherit",
-                transition: "background 0.15s, color 0.15s",
+                transition: "background 0.15s, color 0.15s, border-left-color 0.15s",
                 display: "flex",
                 alignItems: "center",
                 gap: 10,

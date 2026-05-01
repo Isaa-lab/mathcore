@@ -501,6 +501,27 @@ const AI_PROVIDER_META = {
 };
 const AI_PROVIDER_ORDER = ["server", "groq", "gemini", "deepseek", "kimi", "anthropic", "custom"];
 
+// PROVIDER_THEME（v3）—— 切换 AI 时给整站换主题色（accent 级别）
+// 三种语义：accent = 强色/按钮/下划线；soft = 浅底色/卡片背景；ink = 深色/标题
+// 给每个 provider 定义独立调色板，让用户切换 API 时一眼能感知"环境变了"
+const PROVIDER_THEME = {
+  server:    { accent: "#10B981", soft: "#ECFDF5", ink: "#047857", label: "Platform" },
+  groq:      { accent: "#F55036", soft: "#FFF1EE", ink: "#B91C1C", label: "Groq Llama" },
+  gemini:    { accent: "#4285F4", soft: "#EFF6FF", ink: "#1D4ED8", label: "Google Gemini" },
+  deepseek:  { accent: "#4D6BFE", soft: "#EEF2FF", ink: "#3730A3", label: "DeepSeek" },
+  kimi:      { accent: "#6F5BD9", soft: "#F5F3FF", ink: "#5B21B6", label: "Kimi" },
+  anthropic: { accent: "#D97757", soft: "#FEF3C7", ink: "#B45309", label: "Claude" },
+  custom:    { accent: "#6B7280", soft: "#F1F5F9", ink: "#334155", label: "Custom" },
+};
+const getProviderTheme = (providerId) => PROVIDER_THEME[providerId] || PROVIDER_THEME.server;
+// AI 切换事件 —— 任何调用 setActiveAIProvider 的地方都派发这个事件
+// App 顶层会订阅此事件并写 CSS 变量，让 var(--mc-ai-accent) / --mc-ai-soft / --mc-ai-ink 全站生效
+const dispatchAIProviderChange = (providerId) => {
+  try {
+    window.dispatchEvent(new CustomEvent("mc:ai-provider-changed", { detail: { providerId } }));
+  } catch { /* SSR-safe */ }
+};
+
 // 多 Key 存储：{ groq: "gsk_...", deepseek: "sk-...", ... }
 // 兼容老版本的 mc_ai_key（会在首次读取时自动迁移）
 const _readAIKeys = () => {
@@ -531,6 +552,8 @@ const getAIConfig = () => {
 const setActiveAIProvider = (providerId) => {
   if (!AI_PROVIDER_META[providerId]) return;
   localStorage.setItem("mc_ai_provider", providerId);
+  // 主题色 / 头像徽章 / "AI 来源"过滤器全部跟着这个事件刷新
+  dispatchAIProviderChange(providerId);
 };
 
 const setAIKeyFor = (providerId, key) => {
@@ -574,6 +597,43 @@ async function fetchPlatformProviders() {
 }
 function getPlatformProviders() {
   return _platformProvidersCache || { groq: false, gemini: false, deepseek: false, kimi: false, anthropic: false };
+}
+
+// ── ProvenanceBadge ── 在题目卡 / 知识点卡上指示"这条是哪家 AI 出的"
+// 取 generated_by 字段（'gemini' / 'deepseek' / 'kimi' / 'groq' / 'anthropic' / 'custom' / 'manual' / null）
+// null 时返回 null，调用方按需自处理（"未知来源"）
+function ProvenanceBadge({ provider, model = null, size = "sm", title = null }) {
+  if (!provider) return null;
+  const theme = PROVIDER_THEME[provider];
+  const meta = AI_PROVIDER_META[provider];
+  if (!theme || !meta) {
+    // 兜底：未知 provider 名（比如 "manual"）也给个灰底徽章
+    return (
+      <span title={title || `来源：${provider}`} style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        padding: size === "sm" ? "1px 6px" : "2px 8px",
+        borderRadius: 999, fontSize: size === "sm" ? 9.5 : 11,
+        fontWeight: 700, letterSpacing: "0.04em",
+        background: "#F1F5F9", color: "#475569", border: "1px solid #CBD5E1",
+      }}>
+        <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#94A3B8" }} />
+        {provider}
+      </span>
+    );
+  }
+  return (
+    <span title={title || `${meta.providerLabel}${model ? ` · ${model}` : ""}`} style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      padding: size === "sm" ? "1px 6px" : "2px 8px",
+      borderRadius: 999, fontSize: size === "sm" ? 9.5 : 11,
+      fontWeight: 700, letterSpacing: "0.04em",
+      background: theme.soft, color: theme.ink,
+      border: `1px solid ${theme.accent}55`,
+    }}>
+      <span style={{ width: 5, height: 5, borderRadius: "50%", background: theme.accent }} />
+      {meta.name}
+    </span>
+  );
 }
 
 // ── ProviderAvatar ── 根据当前 provider 渲染一个圆形头像（chat 气泡 / 面板徽章共用）
@@ -1627,7 +1687,9 @@ const findChunkRefContext = (chunk, refDefs) => {
   return hits;
 };
 
-const processMaterialWithAI = async ({ material, file, genCount = 10, refine = false, ...rest }) => {
+// refine 默认 true：自 v3 起所有上传走细化模式，知识点/题型一步到位
+// 如有性能 / token 顾虑，调用方可显式传 refine=false 走快速通道
+const processMaterialWithAI = async ({ material, file, genCount = 10, refine = true, ...rest }) => {
   const materialId = material?.id;
   if (!materialId) return { topics: [], questions: [], insertedCount: 0, materialLinked: false };
 
@@ -1742,6 +1804,10 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = f
     const aggregatedTopics = [];
     const aggregatedQuestions = [];
     const seenTopicNames = new Set();
+    // 跨 chunk 记录最后一次成功调用的 provider/model；同一次上传 chunks 都用同一 AI key，
+    // 所以这两个值对所有产物都适用。若中途换 quota 等切到 fallback 模型，会以最后一次为准
+    let lastProvider = null;
+    let lastModel = null;
 
     for (let idx = 0; idx < chunks.length; idx++) {
       const chunk = chunks[idx];
@@ -1775,15 +1841,18 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = f
           console.warn(`API quota exceeded at chunk ${idx + 1}/${chunks.length}`);
           break; // 不再继续烧额度
         } else if (!data.error) {
+          if (data.provider) lastProvider = data.provider;
+          if (data.model) lastModel = data.model;
           const tArr = Array.isArray(data.topics) ? data.topics : [];
           for (const t of tArr) {
             const key = String(t?.name || "").trim().toLowerCase();
             if (!key || seenTopicNames.has(key)) continue;
             seenTopicNames.add(key);
-            aggregatedTopics.push(t);
+            // 把来源传到下游入库，行级别保留，方便对比模式
+            aggregatedTopics.push({ ...t, _provider: data.provider || null, _model: data.model || null });
           }
           const qArr = Array.isArray(data.questions) ? data.questions : [];
-          aggregatedQuestions.push(...qArr);
+          aggregatedQuestions.push(...qArr.map(q => ({ ...q, _provider: data.provider || null, _model: data.model || null })));
           usedApi = true;
         } else {
           apiErrorMsg = data.error;
@@ -1865,6 +1934,10 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = f
         // 细化字段：difficulty / knowledge_points 在 questions 表里若没有该列，下面会做 fallback
         difficulty: q.difficulty || null,
         knowledge_points: Array.isArray(q.knowledge_points) && q.knowledge_points.length > 0 ? q.knowledge_points : null,
+        // v3 来源字段：每一行带上具体 AI provider / model
+        generated_by: q._provider || lastProvider || null,
+        ai_model: q._model || lastModel || null,
+        ai_meta: refine ? { refine: true } : null,
       }));
       if (rows.length === 0) {
         dbErrors.questions = "AI_FILTERED_ALL_LOW_QUALITY";
@@ -1877,18 +1950,20 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = f
         const isMissingColumn = (err) => /column .* does not exist|Could not find the .* column/i.test(err?.message || "");
         let inserted = false;
         let lastErr = null;
-        // 渐进降级：先全字段，再去掉 difficulty / knowledge_points，再去掉 material_id
+        // 渐进降级：先全字段（含 v3 来源 + v2 细化）→ 去 v3 → 去 v2 → 去 material_id
         const tryRows = [
           rows,
-          rows.map(r => stripUnknownCols(r, ["difficulty", "knowledge_points"])),
-          rows.map(r => stripUnknownCols(r, ["difficulty", "knowledge_points", "material_id"])),
+          rows.map(r => stripUnknownCols(r, ["generated_by", "ai_model", "ai_meta"])),
+          rows.map(r => stripUnknownCols(r, ["generated_by", "ai_model", "ai_meta", "difficulty", "knowledge_points"])),
+          rows.map(r => stripUnknownCols(r, ["generated_by", "ai_model", "ai_meta", "difficulty", "knowledge_points", "material_id"])),
         ];
-        for (const candidate of tryRows) {
+        for (let ii = 0; ii < tryRows.length; ii++) {
+          const candidate = tryRows[ii];
           const { error: ei } = await supabase.from("questions").insert(candidate);
           if (!ei) {
             insertedCount = candidate.length;
-            // 只有第一档真的写到 material_id 列
-            materialLinked = candidate === rows || candidate === tryRows[1];
+            // 仅当本次没去掉 material_id 时才算"挂上了 material"（最后一档去了 material_id）
+            materialLinked = ii < tryRows.length - 1;
             inserted = true;
             break;
           }
@@ -1919,6 +1994,10 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = f
           depth: Number.isFinite(t.depth) ? t.depth : null,
           prerequisites: Array.isArray(t.prerequisites) && t.prerequisites.length > 0 ? t.prerequisites : null,
           definition_anchor: t.definition_anchor ? String(t.definition_anchor).slice(0, 240) : null,
+          // v3 来源字段
+          generated_by: t._provider || lastProvider || null,
+          ai_model: t._model || lastModel || null,
+          ai_meta: refine ? { refine: true } : null,
         }));
       if (topicRows.length > 0) {
         const isMissingColumn = (err) => /column .* does not exist|Could not find the .* column/i.test(err?.message || "");
@@ -1927,10 +2006,11 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = f
           for (const c of cols) delete out[c];
           return out;
         });
-        // 渐进降级：先全字段，再去掉细化扩展字段，最后只保留最小集
+        // 渐进降级：先全字段（含 v3 来源 + v2 细化）→ 去 v3 → 去 v2 → 最小集
         const tryRows = [
           topicRows,
-          stripCols(topicRows, ["kind", "depth", "prerequisites", "definition_anchor"]),
+          stripCols(topicRows, ["generated_by", "ai_model", "ai_meta"]),
+          stripCols(topicRows, ["generated_by", "ai_model", "ai_meta", "kind", "depth", "prerequisites", "definition_anchor"]),
         ];
         let okError = null;
         for (const candidate of tryRows) {
@@ -4639,6 +4719,140 @@ const COURSE_PALETTE_HOME = {
 };
 const courseStyle = (course) => COURSE_PALETTE_HOME[course] || { solid: "#64748B", soft: "#F1F5F9", ink: "#334155" };
 
+// ── CompareAIModal ─────────────────────────────────────────────────────────
+// 双 AI 对比：让用户选一个"对照 AI"（B），同时用当前 AI（A）+ B 各跑一遍 refine 抽取，
+// 两组结果都带上 generated_by 入库；用户后续在题库 / 知识树用"AI 来源"过滤器即可逐题对照。
+function CompareAIModal({ material, onClose, onResult }) {
+  const aiCfg = getAIConfig();
+  const currentProvider = aiCfg.provider;
+  const allKeys = aiCfg.allKeys || {};
+  const candidateProviders = AI_PROVIDER_ORDER.filter(p => {
+    if (p === currentProvider) return false;
+    if (p === "server") return true;       // server 使用平台 key，无需用户填
+    if (p === "custom") return false;       // custom 需要 customUrl，太复杂，先不放
+    return !!allKeys[p];                   // 其他要求用户已配置该 provider 的 key
+  });
+  const [providerB, setProviderB] = useState(candidateProviders[0] || null);
+  const [running, setRunning] = useState(false);
+  const [msg, setMsg] = useState("");
+  const themeA = getProviderTheme(currentProvider);
+  const themeB = providerB ? getProviderTheme(providerB) : null;
+  const metaA = AI_PROVIDER_META[currentProvider] || {};
+  const metaB = providerB ? AI_PROVIDER_META[providerB] || {} : null;
+
+  const runCompare = async () => {
+    if (!providerB || !material?.id) return;
+    setRunning(true);
+    setMsg("正在让两个 AI 同时分析这本教材，约 1~2 分钟…");
+    try {
+      // 1) 拉教材 + 文件
+      const { data: matRow } = await supabase.from("materials")
+        .select("id,title,course,chapter,description,file_name,file_data")
+        .eq("id", material.id).single();
+      if (!matRow) throw new Error("找不到教材");
+      const fetchedFile = matRow.file_data ? await fetchFileAsBrowserFile(matRow.file_data, matRow.file_name || "material.pdf") : null;
+
+      // 2) AI A —— 用当前配置直接跑（不改 localStorage）
+      setMsg(`第 1 / 2 步：${metaA.name || "当前 AI"} 正在分析…`);
+      const resA = await processMaterialWithAI({
+        material: matRow, file: fetchedFile, genCount: 12, refine: true,
+        actorName: `双 AI 对比 · A=${currentProvider}`,
+      });
+
+      // 3) AI B —— 临时切到 providerB（仅 in-memory 行为，通过设置 localStorage）
+      const prevProv = localStorage.getItem("mc_ai_provider");
+      try {
+        localStorage.setItem("mc_ai_provider", providerB);
+        // 不派发事件，避免界面闪一下；运行完恢复
+        setMsg(`第 2 / 2 步：${metaB.name || providerB} 正在分析…`);
+        const resB = await processMaterialWithAI({
+          material: matRow, file: fetchedFile, genCount: 12, refine: true,
+          actorName: `双 AI 对比 · B=${providerB}`,
+        });
+        const insA = resA?.insertedCount || 0;
+        const insB = resB?.insertedCount || 0;
+        const tA = resA?.topicsLinked || 0;
+        const tB = resB?.topicsLinked || 0;
+        setMsg(`✅ 对比完成：${metaA.name} 入库 ${insA} 题 / ${tA} 知识点，${metaB.name} 入库 ${insB} 题 / ${tB} 知识点。请去"小测"页用「AI 来源」过滤器逐家对比。`);
+        try { window.dispatchEvent(new CustomEvent("mc:material-topics-updated", { detail: { materialId: material.id } })); } catch {}
+        if (onResult) onResult({ a: { provider: currentProvider, ...resA }, b: { provider: providerB, ...resB } });
+      } finally {
+        if (prevProv) localStorage.setItem("mc_ai_provider", prevProv);
+      }
+    } catch (e) {
+      setMsg("❌ 对比失败：" + (e?.message || "未知错误"));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div onClick={running ? undefined : onClose} style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(15,23,42,0.62)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(620px, 96vw)", maxHeight: "92vh", overflow: "auto", background: "#fff", borderRadius: 16, boxShadow: "0 24px 80px rgba(0,0,0,0.35)", padding: 24 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "#0F172A" }}>🆚 双 AI 对比</div>
+            <div style={{ fontSize: 12, color: "#64748B", marginTop: 4 }}>同教材让两个 AI 各出一份知识点 + 题目，结果都入库带来源标签。</div>
+          </div>
+          <button onClick={running ? undefined : onClose} disabled={running} style={{ width: 32, height: 32, borderRadius: 10, background: "#fff", color: "#475569", border: "1px solid #E2E8F0", fontSize: 16, cursor: running ? "wait" : "pointer", fontFamily: "inherit", padding: 0 }}>×</button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 32px 1fr", gap: 12, alignItems: "stretch", marginBottom: 16 }}>
+          <div style={{ padding: 14, borderRadius: 12, border: `2px solid ${themeA.accent}`, background: themeA.soft }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: themeA.ink, letterSpacing: "0.08em", marginBottom: 6 }}>A · 当前 AI</div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: themeA.ink }}>{metaA.name || currentProvider}</div>
+            <div style={{ fontSize: 11, color: "#64748B", marginTop: 4 }}>{metaA.providerLabel || ""}</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "#94A3B8", fontWeight: 800, fontSize: 18 }}>VS</div>
+          <div>
+            <div style={{ fontSize: 10.5, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 6 }}>B · 选另一个 AI</div>
+            <select
+              value={providerB || ""}
+              onChange={(e) => setProviderB(e.target.value)}
+              disabled={running}
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #E2E8F0", fontSize: 14, fontWeight: 600, fontFamily: "inherit", background: "#fff", color: "#0F172A", cursor: running ? "wait" : "pointer" }}
+            >
+              {candidateProviders.length === 0 && <option value="">（请先在头像菜单里给至少一个其他 AI 配 Key）</option>}
+              {candidateProviders.map(p => (
+                <option key={p} value={p}>{AI_PROVIDER_META[p]?.name || p}</option>
+              ))}
+            </select>
+            {themeB && (
+              <div style={{ marginTop: 6, fontSize: 11, color: themeB.ink, background: themeB.soft, padding: "4px 8px", borderRadius: 8, display: "inline-block" }}>
+                配色 · {themeB.label}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{ padding: 12, borderRadius: 10, background: "#F8FAFC", border: "1px solid #E2E8F0", fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 16 }}>
+          运行成本：会消耗两份 LLM token（约 30~60 秒一份）。结束后所有题目 / 知识点都带 <code style={{ background: "#fff", padding: "1px 5px", borderRadius: 4, fontSize: 11 }}>generated_by</code> 标签，可在小测页用 "AI 来源" 过滤器逐家对照。<br />
+          <strong>不会删除老数据</strong>，AI 没生成的内容也不会被覆盖。
+        </div>
+
+        {msg && <div style={{ padding: "10px 12px", borderRadius: 10, background: "#0F172A", color: "#fff", fontSize: 12.5, marginBottom: 14, lineHeight: 1.6 }}>{msg}</div>}
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+          <button onClick={onClose} disabled={running} style={{ padding: "9px 16px", borderRadius: 10, background: "#fff", color: "#475569", border: "1px solid #E2E8F0", cursor: running ? "wait" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600 }}>取消</button>
+          <button
+            onClick={runCompare}
+            disabled={running || !providerB}
+            style={{
+              padding: "9px 18px", borderRadius: 10,
+              background: running ? "#94A3B8" : "#0F172A",
+              color: "#fff", border: "none",
+              cursor: (running || !providerB) ? "wait" : "pointer",
+              fontFamily: "inherit", fontSize: 13, fontWeight: 700,
+            }}
+          >
+            {running ? "对比中…" : "🆚 开始对比"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── PDF 预览 Modal ─────────────────────────────────────────────────────────
 // 用法：<PdfPreviewModal material={mat} onClose={...} />
 // 直接 iframe 加载 file_data（Supabase Storage 的 publicUrl）。
@@ -5381,6 +5595,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     return [];
   });
   const [selectedTypes, setSelectedTypes] = useState([]);
+  // 「AI 来源」过滤：当选中具体 provider 时只出该 AI 生成的题；空数组 = 不过滤
+  // 与 chapters / types 一样用"包含-否-空表示全集"的语义
+  const [selectedSources, setSelectedSources] = useState([]);
   const [showAIHelp, setShowAIHelp] = useState(false);
   const [aiHelpInput, setAIHelpInput] = useState("");
   // 真正的对话流：保留所有轮次。每条消息 { id, role: "user"|"assistant", content, isStreaming?, isError? }
@@ -5597,7 +5814,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]
   );
 
-  const buildPool = (chapters, types) => {
+  const buildPool = (chapters, types, sources = []) => {
     let pool = allQuestions;
     if (chapters.length > 0) pool = pool.filter(q => {
       if (!q.chapter) return false;
@@ -5614,12 +5831,26 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       });
     });
     if (types.length > 0) pool = pool.filter(q => types.includes(q.type));
+    if (sources.length > 0) pool = pool.filter(q => sources.includes(q.generated_by || "manual"));
     return pool;
   };
-  const previewPool = buildPool(selectedChapters, selectedTypes);
+  const previewPool = buildPool(selectedChapters, selectedTypes, selectedSources);
+  // 当前题库里实际出现过的 AI 来源（用于决定 "AI 来源" 过滤器要露出哪几枚 chip）
+  const availableSources = useMemo(() => {
+    const set = new Set();
+    for (const q of allQuestions) {
+      const s = q.generated_by || "manual";
+      set.add(s);
+    }
+    return [...set];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allQuestions]);
+  const toggleSource = (s) => setSelectedSources(prev =>
+    prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
+  );
 
   const startQuiz = (chapters, types, count) => {
-    const pool = buildPool(chapters, types);
+    const pool = buildPool(chapters, types, selectedSources);
     startWithPool(pool, count);
   };
   // 新：直接用已经筛好的题池开始。支持强制开启计时模式（考试/模拟题）
@@ -6387,6 +6618,34 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
               })}
             </div>
 
+            {/* Step 3.5 · AI 来源（v3 新增）—— 只过滤本题库里实际出现过的来源 */}
+            {availableSources.length > 1 && (
+              <>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 3.5 · 只看哪个 AI 出的题？（可多选 / 不选 = 全部）</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+                  {availableSources.map(src => {
+                    const active = selectedSources.includes(src);
+                    const meta = AI_PROVIDER_META[src];
+                    const theme = PROVIDER_THEME[src] || PROVIDER_THEME.custom;
+                    const label = meta?.name || (src === "manual" ? "手动 / 未知" : src);
+                    const cnt = allQuestions.filter(q => (q.generated_by || "manual") === src).length;
+                    return (
+                      <button key={src} onClick={() => toggleSource(src)}
+                              style={{ padding: "8px 14px", borderRadius: 999,
+                                       border: `1.5px solid ${active ? theme.accent : "#E2E8F0"}`,
+                                       background: active ? theme.soft : "#fff",
+                                       color: active ? theme.ink : "#475569",
+                                       fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer",
+                                       display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ width: 7, height: 7, borderRadius: "50%", background: theme.accent }} />
+                        {label} <span style={{ color: "#94A3B8", fontWeight: 500 }}>· {cnt}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
             {/* Step 4 · 题量档位 */}
             <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 4 · 练多少题？</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
@@ -6911,6 +7170,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>· {q.chapter || "未分类"}</span>
             {metaKnowledge && <span style={{ fontSize: 12, color: "#6366F1", background: "#EEF2FF", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>🎯 {metaKnowledge}</span>}
             {metaDifficulty && <span style={{ fontSize: 12, color: "#B45309", background: "#FEF3C7", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>⭐ {metaDifficulty}</span>}
+            {/* AI 来源徽章 —— 让用户一眼看出这道题是哪个 AI 出的 */}
+            <ProvenanceBadge provider={q.generated_by} model={q.ai_model} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
@@ -14292,6 +14553,28 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
   const [page, setPage] = useState("首页");
+  // 当前生效的 AI provider（用于触发主题色切换 + UI 标记）
+  // 初始从 localStorage 读，之后由 dispatchAIProviderChange 事件驱动更新
+  const [activeProvider, setActiveProvider] = useState(() => {
+    try { return getAIConfig().provider; } catch { return "server"; }
+  });
+  // 把当前 provider 的主题色写到 :root 的 CSS 变量上
+  // 全站凡是用 var(--mc-ai-accent) / --mc-ai-soft / --mc-ai-ink 的地方都会自动跟着变
+  useEffect(() => {
+    const theme = getProviderTheme(activeProvider);
+    const root = document.documentElement;
+    root.style.setProperty("--mc-ai-accent", theme.accent);
+    root.style.setProperty("--mc-ai-soft", theme.soft);
+    root.style.setProperty("--mc-ai-ink", theme.ink);
+  }, [activeProvider]);
+  useEffect(() => {
+    const onChange = (e) => {
+      const next = e?.detail?.providerId;
+      if (next && AI_PROVIDER_META[next]) setActiveProvider(next);
+    };
+    window.addEventListener("mc:ai-provider-changed", onChange);
+    return () => window.removeEventListener("mc:ai-provider-changed", onChange);
+  }, []);
   const [loading, setLoading] = useState(true);
   const [retryQuestion, setRetryQuestion] = useState(null);
   const [chapterFilter, setChapterFilter] = useState(null);
@@ -14333,10 +14616,11 @@ export default function App() {
     setCurrentMaterial(null);
     setPage("首页");
   }, []);
-  // 沙盒里的 PDF 预览 & 重新分析（细化抽取）
+  // 沙盒里的 PDF 预览 & 重新分析（细化抽取） & 双 AI 对比
   const [sandboxPreviewing, setSandboxPreviewing] = useState(false);
   const [sandboxReanalyzing, setSandboxReanalyzing] = useState(false);
   const [sandboxReanalyzeMsg, setSandboxReanalyzeMsg] = useState("");
+  const [compareModalOpen, setCompareModalOpen] = useState(false);
   const reanalyzeCurrentMaterial = useCallback(async () => {
     if (!currentMaterial?.id) return;
     if (!window.confirm(`将用最新版 AI prompt 重新分析「${currentMaterial.title}」，会在原有知识点 / 题目基础上追加更细粒度的内容（不会删旧数据）。继续？`)) return;
@@ -14696,6 +14980,9 @@ export default function App() {
                       onPreviewPdf={() => setSandboxPreviewing(true)}
                       onReanalyze={reanalyzeCurrentMaterial}
                       reanalyzing={sandboxReanalyzing}
+                      onCompareAI={() => setCompareModalOpen(true)}
+                      comparing={compareModalOpen}
+                      providerLabel={getProviderTheme(activeProvider).label}
                     />
                     {/* 细化分析进度提示 —— toast 风格 */}
                     {sandboxReanalyzeMsg && (
@@ -14730,6 +15017,14 @@ export default function App() {
       {/* 沙盒 PDF 预览 modal —— 由教材横幅的 📖 按钮唤出 */}
       {sandboxPreviewing && currentMaterial && (
         <PdfPreviewModal material={currentMaterial} onClose={() => setSandboxPreviewing(false)} />
+      )}
+      {/* 沙盒「双 AI 对比」modal —— 由教材横幅的 🆚 按钮唤出 */}
+      {compareModalOpen && currentMaterial && (
+        <CompareAIModal
+          material={currentMaterial}
+          onClose={() => setCompareModalOpen(false)}
+          onResult={() => setCompareModalOpen(false)}
+        />
       )}
     </div>
   );
