@@ -89,11 +89,15 @@ async function runHandler(req, res) {
   const __fromPlatformSlot = (pid) =>
     (__platformSlotProv === pid && __platformSlotKey && __platformSlotKey.trim().length > 8)
       ? __platformSlotKey : null;
-  const GEMINI_KEY    = process.env.GEMINI_KEY    || __fromPlatformSlot("gemini");
-  const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || __fromPlatformSlot("anthropic");
-  const GROQ_KEY      = process.env.GROQ_KEY      || __fromPlatformSlot("groq");
-  const DEEPSEEK_KEY  = process.env.DEEPSEEK_KEY  || __fromPlatformSlot("deepseek");
-  const KIMI_KEY      = process.env.KIMI_KEY      || __fromPlatformSlot("kimi");
+  const GEMINI_KEY      = process.env.GEMINI_KEY      || __fromPlatformSlot("gemini");
+  const ANTHROPIC_KEY   = process.env.ANTHROPIC_KEY   || __fromPlatformSlot("anthropic");
+  const GROQ_KEY        = process.env.GROQ_KEY        || __fromPlatformSlot("groq");
+  const DEEPSEEK_KEY    = process.env.DEEPSEEK_KEY    || __fromPlatformSlot("deepseek");
+  const KIMI_KEY        = process.env.KIMI_KEY        || __fromPlatformSlot("kimi");
+  const OPENROUTER_KEY  = process.env.OPENROUTER_KEY  || __fromPlatformSlot("openrouter");
+  const SILICONFLOW_KEY = process.env.SILICONFLOW_KEY || __fromPlatformSlot("siliconflow");
+  const ZHIPU_KEY       = process.env.ZHIPU_KEY       || __fromPlatformSlot("zhipu");
+  const CEREBRAS_KEY    = process.env.CEREBRAS_KEY    || __fromPlatformSlot("cerebras");
 
   // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底
   const SERVER_KEY_FOR = {
@@ -102,11 +106,15 @@ async function runHandler(req, res) {
     deepseek: DEEPSEEK_KEY,
     kimi: KIMI_KEY,
     anthropic: ANTHROPIC_KEY,
+    openrouter: OPENROUTER_KEY,
+    siliconflow: SILICONFLOW_KEY,
+    zhipu: ZHIPU_KEY,
+    cerebras: CEREBRAS_KEY,
   };
 
   const hasUserKey = userKey && String(userKey).trim().length > 8;
   const effectiveProvider = hasUserKey ? (userProvider || "groq") : null;
-  const hasServerKey = !!(GROQ_KEY || GEMINI_KEY || ANTHROPIC_KEY || DEEPSEEK_KEY || KIMI_KEY);
+  const hasServerKey = !!(GROQ_KEY || GEMINI_KEY || ANTHROPIC_KEY || DEEPSEEK_KEY || KIMI_KEY || OPENROUTER_KEY || SILICONFLOW_KEY || ZHIPU_KEY || CEREBRAS_KEY);
 
   // ── Provider-aware：判断这次请求"最终会落在哪个 provider"，用来选配不同的 VIZ 指令 ──
   // 不同模型的结构化输出能力差异很大：
@@ -901,6 +909,27 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     if (pid === "gemini") {
       return await callGemini(k) || "";
     }
+    if (pid === "openrouter") {
+      // OpenRouter 的免费模型用 :free 后缀；多模型 fallback 让单个模型流量打满时不至于全挂
+      let out = await callOpenAICompat("https://openrouter.ai/api/v1", k, "mistralai/mistral-7b-instruct:free", `openrouter(${tagSrc}):mistral7b:free`) || "";
+      if (!out) out = await callOpenAICompat("https://openrouter.ai/api/v1", k, "google/gemma-2-9b-it:free", `openrouter(${tagSrc}):gemma2-9b:free`) || "";
+      if (!out) out = await callOpenAICompat("https://openrouter.ai/api/v1", k, "meta-llama/llama-3.1-8b-instruct:free", `openrouter(${tagSrc}):llama31-8b:free`) || "";
+      return out;
+    }
+    if (pid === "siliconflow") {
+      let out = await callOpenAICompat("https://api.siliconflow.cn/v1", k, "Qwen/Qwen2.5-7B-Instruct", `siliconflow(${tagSrc}):qwen25-7b`) || "";
+      if (!out) out = await callOpenAICompat("https://api.siliconflow.cn/v1", k, "THUDM/glm-4-9b-chat", `siliconflow(${tagSrc}):glm4-9b`) || "";
+      return out;
+    }
+    if (pid === "zhipu") {
+      // 智谱 GLM-4-Flash 完全免费
+      return await callOpenAICompat("https://open.bigmodel.cn/api/paas/v4", k, "glm-4-flash", `zhipu(${tagSrc}):glm4-flash`) || "";
+    }
+    if (pid === "cerebras") {
+      let out = await callOpenAICompat("https://api.cerebras.ai/v1", k, "llama3.1-8b", `cerebras(${tagSrc}):llama31-8b`) || "";
+      if (!out) out = await callOpenAICompat("https://api.cerebras.ai/v1", k, "llama3.3-70b", `cerebras(${tagSrc}):llama33-70b`) || "";
+      return out;
+    }
     if (pid === "custom") {
       const base = String(userCustomUrl || "").trim().replace(/\/$/, "");
       if (!base) { providerDiag.push(`custom(${tagSrc}): no_base_url`); return ""; }
@@ -947,6 +976,27 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   // Priority 4.5: server Kimi
   if (!responseText && KIMI_KEY) {
     responseText = await callOpenAICompat("https://api.moonshot.cn/v1", KIMI_KEY, "moonshot-v1-8k", "kimi(server)") || "";
+  }
+
+  // Priority 4.6: server 智谱 GLM-4-Flash（完全免费 + 无限调用，最值得作高优 fallback）
+  if (!responseText && ZHIPU_KEY) {
+    responseText = await callOpenAICompat("https://open.bigmodel.cn/api/paas/v4", ZHIPU_KEY, "glm-4-flash", "zhipu(server):glm4-flash") || "";
+  }
+
+  // Priority 4.7: server OpenRouter（聚合多家，:free 模型完全免费）
+  if (!responseText && OPENROUTER_KEY) {
+    responseText = await callOpenAICompat("https://openrouter.ai/api/v1", OPENROUTER_KEY, "mistralai/mistral-7b-instruct:free", "openrouter(server):mistral7b:free") || "";
+    if (!responseText) responseText = await callOpenAICompat("https://openrouter.ai/api/v1", OPENROUTER_KEY, "google/gemma-2-9b-it:free", "openrouter(server):gemma2-9b:free") || "";
+  }
+
+  // Priority 4.8: server SiliconFlow（国内访问稳定）
+  if (!responseText && SILICONFLOW_KEY) {
+    responseText = await callOpenAICompat("https://api.siliconflow.cn/v1", SILICONFLOW_KEY, "Qwen/Qwen2.5-7B-Instruct", "siliconflow(server):qwen25-7b") || "";
+  }
+
+  // Priority 4.9: server Cerebras（速度王）
+  if (!responseText && CEREBRAS_KEY) {
+    responseText = await callOpenAICompat("https://api.cerebras.ai/v1", CEREBRAS_KEY, "llama3.1-8b", "cerebras(server):llama31-8b") || "";
   }
 
   // Priority 5: Anthropic

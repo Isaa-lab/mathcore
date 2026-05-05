@@ -45,10 +45,22 @@ function getEffectiveKey({ userProvider, userKey }) {
   if (hasUserKey) {
     return { provider: userProvider || "groq", key: String(userKey).trim(), isPlatform: false };
   }
-  // 平台兜底：优先走 Groq（便宜快），其次 PLATFORM_API_KEY
-  if (process.env.GROQ_KEY && String(process.env.GROQ_KEY).trim().length > 8) {
-    return { provider: "groq", key: process.env.GROQ_KEY.trim(), isPlatform: true };
+  // 平台兜底：按"免费档优先"顺序尝试（Groq > Gemini > Zhipu > OpenRouter > SiliconFlow > Cerebras > Kimi > DeepSeek）
+  const FALLBACK_ORDER = [
+    ["groq",        "GROQ_KEY"],
+    ["gemini",      "GEMINI_KEY"],
+    ["zhipu",       "ZHIPU_KEY"],
+    ["openrouter",  "OPENROUTER_KEY"],
+    ["siliconflow", "SILICONFLOW_KEY"],
+    ["cerebras",    "CEREBRAS_KEY"],
+    ["kimi",        "KIMI_KEY"],
+    ["deepseek",    "DEEPSEEK_KEY"],
+  ];
+  for (const [pid, env] of FALLBACK_ORDER) {
+    const v = process.env[env];
+    if (v && String(v).trim().length > 8) return { provider: pid, key: String(v).trim(), isPlatform: true };
   }
+  // 兼容老 PLATFORM_PROVIDER + PLATFORM_API_KEY 槽位
   const platformProvider = String(process.env.PLATFORM_PROVIDER || "").trim().toLowerCase();
   if (platformProvider && process.env.PLATFORM_API_KEY && String(process.env.PLATFORM_API_KEY).trim().length > 8) {
     return { provider: platformProvider, key: process.env.PLATFORM_API_KEY.trim(), isPlatform: true };
@@ -71,6 +83,28 @@ async function callGroq({ key, prompt }) {
   if (!resp.ok) {
     const errText = await resp.text().catch(() => "");
     throw new Error(`Groq ${resp.status}: ${errText.slice(0, 200)}`);
+  }
+  const data = await resp.json();
+  return data?.choices?.[0]?.message?.content || "";
+}
+
+// 通用 OpenAI 兼容 caller —— 给 OpenRouter / SiliconFlow / 智谱 / Cerebras / DeepSeek / Kimi / Custom 用
+async function callOpenAICompat({ baseUrl, key, model, prompt, structured = true }) {
+  const body = {
+    model,
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.3,
+    max_tokens: 300,
+  };
+  if (structured) body.response_format = { type: "json_object" };
+  const resp = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => "");
+    throw new Error(`${baseUrl} ${resp.status}: ${errText.slice(0, 200)}`);
   }
   const data = await resp.json();
   return data?.choices?.[0]?.message?.content || "";
@@ -126,9 +160,25 @@ export default async function handler(req, res) {
     }
 
     const prompt = buildPrompt(input);
-    const raw = effective.provider === "gemini"
-      ? await callGemini({ key: effective.key, prompt })
-      : await callGroq({ key: effective.key, prompt }); // 默认 groq（便宜快）
+    let raw = "";
+    const p = effective.provider;
+    if (p === "gemini") {
+      raw = await callGemini({ key: effective.key, prompt });
+    } else if (p === "openrouter") {
+      raw = await callOpenAICompat({ baseUrl: "https://openrouter.ai/api/v1", key: effective.key, model: "mistralai/mistral-7b-instruct:free", prompt });
+    } else if (p === "siliconflow") {
+      raw = await callOpenAICompat({ baseUrl: "https://api.siliconflow.cn/v1", key: effective.key, model: "Qwen/Qwen2.5-7B-Instruct", prompt });
+    } else if (p === "zhipu") {
+      raw = await callOpenAICompat({ baseUrl: "https://open.bigmodel.cn/api/paas/v4", key: effective.key, model: "glm-4-flash", prompt });
+    } else if (p === "cerebras") {
+      raw = await callOpenAICompat({ baseUrl: "https://api.cerebras.ai/v1", key: effective.key, model: "llama3.1-8b", prompt });
+    } else if (p === "deepseek") {
+      raw = await callOpenAICompat({ baseUrl: "https://api.deepseek.com", key: effective.key, model: "deepseek-chat", prompt });
+    } else if (p === "kimi") {
+      raw = await callOpenAICompat({ baseUrl: "https://api.moonshot.cn/v1", key: effective.key, model: "moonshot-v1-8k", prompt });
+    } else {
+      raw = await callGroq({ key: effective.key, prompt }); // 默认 groq（便宜快）
+    }
 
     const parsed = extractJson(raw);
     if (!parsed) {

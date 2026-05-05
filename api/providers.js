@@ -10,11 +10,15 @@ const looksSet = (v) => typeof v === "string" && v.trim().length > 8;
 
 function hasKeyFor(provider) {
   const explicitVar = {
-    groq: "GROQ_KEY",
-    gemini: "GEMINI_KEY",
-    deepseek: "DEEPSEEK_KEY",
-    kimi: "KIMI_KEY",
-    anthropic: "ANTHROPIC_KEY",
+    groq:        "GROQ_KEY",
+    gemini:      "GEMINI_KEY",
+    deepseek:    "DEEPSEEK_KEY",
+    kimi:        "KIMI_KEY",
+    anthropic:   "ANTHROPIC_KEY",
+    openrouter:  "OPENROUTER_KEY",
+    siliconflow: "SILICONFLOW_KEY",
+    zhipu:       "ZHIPU_KEY",
+    cerebras:    "CEREBRAS_KEY",
   }[provider];
   if (explicitVar && looksSet(process.env[explicitVar])) return true;
   const platformProvider = String(process.env.PLATFORM_PROVIDER || "").trim().toLowerCase();
@@ -25,11 +29,15 @@ function hasKeyFor(provider) {
 export default function handler(req, res) {
   try {
     const platformProviders = {
-      groq:      hasKeyFor("groq"),
-      gemini:    hasKeyFor("gemini"),
-      deepseek:  hasKeyFor("deepseek"),
-      kimi:      hasKeyFor("kimi"),
-      anthropic: hasKeyFor("anthropic"),
+      groq:        hasKeyFor("groq"),
+      gemini:      hasKeyFor("gemini"),
+      deepseek:    hasKeyFor("deepseek"),
+      kimi:        hasKeyFor("kimi"),
+      anthropic:   hasKeyFor("anthropic"),
+      openrouter:  hasKeyFor("openrouter"),
+      siliconflow: hasKeyFor("siliconflow"),
+      zhipu:       hasKeyFor("zhipu"),
+      cerebras:    hasKeyFor("cerebras"),
     };
     return res.status(200).json({
       platformProviders,
@@ -38,7 +46,7 @@ export default function handler(req, res) {
   } catch (err) {
     return res.status(500).json({
       error: String(err?.message || err),
-      platformProviders: { groq: false, gemini: false, deepseek: false, kimi: false, anthropic: false },
+      platformProviders: { groq: false, gemini: false, deepseek: false, kimi: false, anthropic: false, openrouter: false, siliconflow: false, zhipu: false, cerebras: false },
       any: false,
     });
   }

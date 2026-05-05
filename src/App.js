@@ -454,17 +454,21 @@ const getFileExt = (name = "") => {
 // - recommended: UI 推荐度
 // 另外一个 runtime 状态："platform-provided" —— 不在这里写死，来自 /api/providers
 const AI_PROVIDER_META = {
-  groq:      { id: "groq",      name: "Groq",      logo: "G",  desc: "Llama 3.x·速度最快",   placeholder: "gsk_...",    link: "https://console.groq.com/keys",                   color: "#F55036", free: true, providerLabel: "Groq" },
-  gemini:    { id: "gemini",    name: "Gemini",    logo: "✦",  desc: "Google·免费额度大",     placeholder: "AIzaSy...",  link: "https://aistudio.google.com/apikey",              color: "#4285F4", free: true, providerLabel: "Google Gemini" },
-  deepseek:  { id: "deepseek",  name: "DeepSeek",  logo: "🐋", desc: "国内·推理强·价格低",     placeholder: "sk-...",     link: "https://platform.deepseek.com/api_keys",          color: "#4D6BFE", providerLabel: "DeepSeek" },
-  kimi:      { id: "kimi",      name: "Kimi",      logo: "K",  desc: "月之暗面·国内可访问",    placeholder: "sk-...",     link: "https://platform.moonshot.cn/console/api-keys",   color: "#6F5BD9", providerLabel: "Kimi (Moonshot)" },
-  anthropic: { id: "anthropic", name: "Claude",    logo: "A",  desc: "Anthropic·擅长复杂推理", placeholder: "sk-ant-...", link: "https://console.anthropic.com/",                  color: "#D97757", providerLabel: "Anthropic Claude" },
-  custom:    { id: "custom",    name: "自定义",    logo: "⚙",  desc: "任意 OpenAI 兼容接口",   placeholder: "sk-...",     link: null,                                              color: "#6B7280", providerLabel: "Custom endpoint" },
+  groq:        { id: "groq",        name: "Groq",        logo: "G",  desc: "Llama 3.3 70B·速度最快·完全免费", placeholder: "gsk_...",     link: "https://console.groq.com/keys",                       color: "#F55036", free: true, freeNote: "免费 14400 req/day", providerLabel: "Groq" },
+  gemini:      { id: "gemini",      name: "Gemini",      logo: "✦",  desc: "Google·免费额度大",                placeholder: "AIzaSy...",   link: "https://aistudio.google.com/apikey",                  color: "#4285F4", free: true, freeNote: "免费 1500 req/day", providerLabel: "Google Gemini" },
+  openrouter:  { id: "openrouter",  name: "OpenRouter",  logo: "OR", desc: "聚合多模型·有免费档·OpenAI 兼容", placeholder: "sk-or-v1-...", link: "https://openrouter.ai/keys",                          color: "#7C3AED", free: true, freeNote: "选 :free 模型完全免费", providerLabel: "OpenRouter (free models)" },
+  siliconflow: { id: "siliconflow", name: "硅基流动",    logo: "硅", desc: "国内·Qwen 7B 系列免费",            placeholder: "sk-...",       link: "https://cloud.siliconflow.cn/account/ak",             color: "#0EA5E9", free: true, freeNote: "免费 Qwen2.5-7B", providerLabel: "SiliconFlow" },
+  zhipu:       { id: "zhipu",       name: "智谱 GLM",    logo: "智", desc: "清华系·GLM-4-Flash 免费",          placeholder: "...",          link: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",    color: "#1F75FE", free: true, freeNote: "GLM-4-Flash 完全免费", providerLabel: "Zhipu GLM" },
+  cerebras:    { id: "cerebras",    name: "Cerebras",    logo: "C",  desc: "速度王·Llama 3.1 8B·免费档",       placeholder: "csk-...",      link: "https://cloud.cerebras.ai/platform",                  color: "#FF6F61", free: true, freeNote: "免费 14400 req/day", providerLabel: "Cerebras" },
+  deepseek:    { id: "deepseek",    name: "DeepSeek",    logo: "🐋", desc: "国内·推理强·价格低",               placeholder: "sk-...",       link: "https://platform.deepseek.com/api_keys",              color: "#4D6BFE", providerLabel: "DeepSeek" },
+  kimi:        { id: "kimi",        name: "Kimi",        logo: "K",  desc: "月之暗面·国内可访问",              placeholder: "sk-...",       link: "https://platform.moonshot.cn/console/api-keys",       color: "#6F5BD9", providerLabel: "Kimi (Moonshot)" },
+  anthropic:   { id: "anthropic",   name: "Claude",      logo: "A",  desc: "Anthropic·擅长复杂推理",           placeholder: "sk-ant-...",   link: "https://console.anthropic.com/",                      color: "#D97757", providerLabel: "Anthropic Claude" },
+  custom:      { id: "custom",      name: "自定义",      logo: "⚙",  desc: "任意 OpenAI 兼容接口",             placeholder: "sk-...",       link: null,                                                  color: "#6B7280", providerLabel: "Custom endpoint" },
   // server 是一个"行为"而非独立 provider —— 用于"不指定 provider，后端按优先级自动选"
   // 视觉上告诉用户："默认就是 Groq"，让背后模型透明。
-  server:    { id: "server",    name: "平台内置（Groq）", logo: "G", desc: "默认推荐·免费无需配置·由平台承担成本",  placeholder: null, link: null, color: "#10B981", free: true, recommended: true, providerLabel: "Platform (Groq)" },
+  server:      { id: "server",      name: "平台内置（Groq）", logo: "G", desc: "默认推荐·免费无需配置·由平台承担成本",  placeholder: null, link: null, color: "#10B981", free: true, recommended: true, providerLabel: "Platform (Groq)" },
 };
-const AI_PROVIDER_ORDER = ["server", "groq", "gemini", "deepseek", "kimi", "anthropic", "custom"];
+const AI_PROVIDER_ORDER = ["server", "groq", "gemini", "openrouter", "siliconflow", "zhipu", "cerebras", "deepseek", "kimi", "anthropic", "custom"];
 
 // 多 Key 存储：{ groq: "gsk_...", deepseek: "sk-...", ... }
 // 兼容老版本的 mc_ai_key（会在首次读取时自动迁移）
@@ -803,13 +807,15 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched, onLogout }) {
 
 // ── AI 设置弹窗 ───────────────────────────────────────────────────────────────
 function AISettingsModal({ onClose }) {
-  const AI_PROVIDERS = [
-    { id: "groq",     name: "Groq",      flag: "⚡", desc: "完全免费·速度最快·推荐测试", placeholder: "gsk_...",      link: "https://console.groq.com/keys", free: true },
-    { id: "gemini",   name: "Gemini",    flag: "🌐", desc: "Google（有免费 Key）",       placeholder: "AIzaSy...",    link: "https://aistudio.google.com/apikey" },
-    { id: "deepseek", name: "DeepSeek",  flag: "🇨🇳", desc: "国内推荐，价格低廉",        placeholder: "sk-...",       link: "https://platform.deepseek.com/api_keys" },
-    { id: "kimi",     name: "Kimi",      flag: "🇨🇳", desc: "月之暗面，国内可访问",      placeholder: "sk-...",       link: "https://platform.moonshot.cn/console/api-keys" },
-    { id: "custom",   name: "自定义",    flag: "⚙️",  desc: "任意 OpenAI 兼容接口",     placeholder: "sk-...",       link: null },
-  ];
+  // 从 AI_PROVIDER_META 派生：免费档优先，按 AI_PROVIDER_ORDER 排序，去掉 server（前端选 server 的逻辑由"清空"按钮覆盖）
+  const AI_PROVIDERS = AI_PROVIDER_ORDER
+    .filter(id => id !== "server")
+    .map(id => AI_PROVIDER_META[id])
+    .filter(Boolean)
+    .map(m => ({
+      id: m.id, name: m.name, flag: m.logo, desc: m.desc, placeholder: m.placeholder, link: m.link,
+      free: !!m.free, freeNote: m.freeNote || null,
+    }));
 
   const [provider, setProvider] = useState(localStorage.getItem("mc_ai_provider") || "groq");
   const [key, setKey] = useState(localStorage.getItem("mc_ai_key") || "");
@@ -849,28 +855,51 @@ function AISettingsModal({ onClose }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
-      <div style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 500, padding: "2rem", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 620, maxHeight: "90vh", overflowY: "auto", padding: "2rem", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
           <div style={{ fontSize: 20, fontWeight: 700, color: "#111" }}>⚙️ AI 接口设置</div>
           <button onClick={onClose} style={{ fontSize: 20, background: "none", border: "none", cursor: "pointer", color: "#999", lineHeight: 1 }}>✕</button>
         </div>
-        <div style={{ fontSize: 13, color: "#888", marginBottom: 22 }}>
+        <div style={{ fontSize: 13, color: "#888", marginBottom: 18 }}>
           <div style={{ padding: "10px 12px", background: G.tealLight, borderRadius: 9, marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontSize: 18 }}>⚡</span>
-            <div><strong style={{ color: G.tealDark }}>平台已内置 AI，无需配置即可使用！</strong><div style={{ fontSize: 11, color: G.teal, marginTop: 1 }}>若想切换模型或使用更高额度，可填入自己的 Key</div></div>
+            <div><strong style={{ color: G.tealDark }}>平台已内置 AI，无需配置即可使用！</strong><div style={{ fontSize: 11, color: G.teal, marginTop: 1 }}>填入自己的 Key 可获得更高免费额度，或切换不同模型对比知识点抽取效果</div></div>
           </div>
           所有 Key 仅存在本地浏览器，不上传服务器。
         </div>
 
+        {/* 免费 API 速查表 —— 用户点开就知道去哪儿领 Key */}
+        <details open style={{ marginBottom: 18, padding: "12px 14px", background: "linear-gradient(90deg,#FEF3C7,#ECFDF5)", border: "1px solid #FDE68A", borderRadius: 12 }}>
+          <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 800, color: "#92400E", listStyle: "none", display: "flex", alignItems: "center", gap: 8 }}>
+            <span>🎁</span><span>免费 API 速查表</span>
+            <span style={{ marginLeft: "auto", fontSize: 11, color: "#A16207", fontWeight: 600 }}>点击展开 / 收起</span>
+          </summary>
+          <div style={{ marginTop: 10, fontSize: 12, color: "#1F2937", lineHeight: 1.7 }}>
+            <div style={{ marginBottom: 8, fontWeight: 700, color: "#0F172A" }}>下面这些都是真免费、无需信用卡，注册即得 API Key：</div>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              <li><strong>Groq</strong>：每天 14400 次请求免费，速度最快。注册 → <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer" style={{ color: "#F55036" }}>console.groq.com/keys</a></li>
+              <li><strong>Gemini (Google)</strong>：每天 1500 次免费，质量最好。Google 账号一键创建 → <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: "#4285F4" }}>aistudio.google.com/apikey</a></li>
+              <li><strong>OpenRouter</strong>：聚合 Llama / Mistral / Gemma 等开源模型，选 <code style={{ background: "#FEF3C7", padding: "0 4px", borderRadius: 3 }}>:free</code> 后缀的模型完全免费 → <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" style={{ color: "#7C3AED" }}>openrouter.ai/keys</a></li>
+              <li><strong>硅基流动 (SiliconFlow)</strong>：国内访问稳定，Qwen2.5-7B 等小模型完全免费 → <a href="https://cloud.siliconflow.cn/account/ak" target="_blank" rel="noreferrer" style={{ color: "#0EA5E9" }}>cloud.siliconflow.cn</a></li>
+              <li><strong>智谱 GLM</strong>：清华系，<strong>GLM-4-Flash 完全免费</strong>且无限调用 → <a href="https://bigmodel.cn/usercenter/proj-mgmt/apikeys" target="_blank" rel="noreferrer" style={{ color: "#1F75FE" }}>bigmodel.cn</a></li>
+              <li><strong>Cerebras</strong>：硬件加速·速度炸裂，每天 14400 次免费 → <a href="https://cloud.cerebras.ai/platform" target="_blank" rel="noreferrer" style={{ color: "#FF6F61" }}>cloud.cerebras.ai</a></li>
+            </ul>
+            <div style={{ marginTop: 10, padding: "8px 10px", background: "#fff", borderRadius: 8, fontSize: 11.5, color: "#475569" }}>
+              💡 <strong>建议组合</strong>：填 Groq + Gemini 两个 Key，平台会自动 fallback。一份配额用尽自动切到另一个，几乎用不完。
+            </div>
+          </div>
+        </details>
+
         {/* Provider 选择 */}
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: "#555", marginBottom: 10 }}>选择服务商</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
             {AI_PROVIDERS.map(p => (
               <button key={p.id} onClick={() => setProvider(p.id)} style={{ padding: "10px 12px", borderRadius: 12, border: provider === p.id ? `2px solid ${G.teal}` : "2px solid #e8e8e8", cursor: "pointer", background: provider === p.id ? G.tealLight : "#fafafa", textAlign: "left", fontFamily: "inherit", position: "relative" }}>
                 {p.free && <span style={{ position: "absolute", top: 6, right: 8, fontSize: 10, fontWeight: 700, background: "#22c55e", color: "#fff", padding: "1px 6px", borderRadius: 6 }}>免费</span>}
                 <div style={{ fontSize: 14, fontWeight: 600, color: provider === p.id ? G.tealDark : "#333" }}>{p.flag} {p.name}</div>
                 <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>{p.desc}</div>
+                {p.freeNote && <div style={{ fontSize: 10, color: G.teal, marginTop: 3, fontWeight: 600 }}>📦 {p.freeNote}</div>}
               </button>
             ))}
           </div>
@@ -4843,27 +4872,42 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
         )}
       </div>
 
-      {/* ③ 快捷工具（精简版）—— 教师管理 / 错题本 / 学习报告 这类跨教材入口 */}
-      <SectionCard style={{ padding: "1rem 1.2rem", marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "#334155", letterSpacing: "0.04em" }}>跨教材工具</div>
-          <div style={{ fontSize: 11, color: "#94A3B8" }}>不依赖具体教材的全局视图</div>
+      {/* ③ 跨教材工具 —— 升级为卡片式，每张卡有图标 + 描述 + 入口；填补成就墙移除后的版面 */}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.01em" }}>跨教材工具</div>
+            <div style={{ fontSize: 12.5, color: "#64748B", marginTop: 2 }}>跨教材的全局视图——错题、记忆、报告、知识树都汇总在这里</div>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
           {[
-            { icon: "📊", label: "学习报告", page: "学习报告", color: G.amber, bg: G.amberLight },
-            { icon: "❌", label: "全部错题", page: "错题本", color: G.red, bg: G.redLight },
-            { icon: "🌳", label: "总览技能树", page: "技能树", color: G.teal, bg: G.tealLight },
-            { icon: "🃏", label: "记忆卡片", page: "记忆卡片", color: G.purple, bg: G.purpleLight },
+            { icon: "📊", label: "学习报告", desc: "正确率 / 章节强弱 / 学习曲线",  page: "学习报告", color: G.amber,  bg: G.amberLight },
+            { icon: "❌", label: "全部错题", desc: "跨教材错题 + AI 错因诊断 + 变式", page: "错题本",   color: G.red,    bg: G.redLight },
+            { icon: "🌳", label: "总览技能树", desc: "策划版逻辑骨架 + 依赖箭头",     page: "技能树",   color: G.teal,   bg: G.tealLight },
+            { icon: "🃏", label: "记忆卡片", desc: "SM-2 间隔重复 · 公式速记",       page: "记忆卡片", color: G.purple, bg: G.purpleLight },
           ].map(t => (
-            <button key={t.label} onClick={() => setPage(t.page)} style={{ padding: "8px 16px", background: t.bg, color: t.color, border: "1px solid " + t.color + "30", borderRadius: 999, fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
-              <span>{t.icon}</span>{t.label}
+            <button key={t.label} onClick={() => setPage(t.page)}
+              style={{
+                padding: "16px 18px", background: "#fff", border: `1.5px solid ${t.color}33`, borderRadius: 16,
+                cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                display: "flex", flexDirection: "column", gap: 8, transition: "all .18s",
+                position: "relative", overflow: "hidden",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = t.color; e.currentTarget.style.boxShadow = `0 12px 28px ${t.color}22`; e.currentTarget.style.transform = "translateY(-2px)"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = `${t.color}33`; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
+            >
+              <div style={{ position: "absolute", top: -16, right: -16, width: 56, height: 56, borderRadius: "50%", background: t.color, opacity: 0.07 }} />
+              <div style={{ width: 38, height: 38, borderRadius: 11, background: t.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>{t.icon}</div>
+              <div style={{ fontSize: 14.5, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.005em" }}>{t.label}</div>
+              <div style={{ fontSize: 11.5, color: "#64748B", lineHeight: 1.5 }}>{t.desc}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: t.color, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
+                打开 →
+              </div>
             </button>
           ))}
         </div>
-      </SectionCard>
-
-      {/* 成就墙已移除：用户反馈"成就/勋章是装饰性噪音，不如把版面让给真正的学习内容" */}
+      </div>
     </div>
   );
 }
@@ -8563,6 +8607,41 @@ function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
     try { return JSON.parse(localStorage.getItem("mc_streak") || "{}").days || 0; } catch { return 0; }
   })();
 
+  // 真实学习时长（recordStudyTime 写入的 mc_study_time.totalSeconds）
+  const totalMinutes = (() => {
+    try { return Math.round((JSON.parse(localStorage.getItem("mc_study_time") || "{}").totalSeconds || 0) / 60); } catch { return 0; }
+  })();
+  // 最近 7 天 session 活动（mc_sessions 由 QuizPage 在完成时 push）
+  const last7DayActivity = (() => {
+    try {
+      const sessions = JSON.parse(localStorage.getItem("mc_sessions") || "[]");
+      const now = new Date();
+      const days = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(now); d.setDate(now.getDate() - i); d.setHours(0, 0, 0, 0);
+        const next = new Date(d); next.setDate(d.getDate() + 1);
+        const cnt = sessions.filter(s => s.ts >= d.getTime() && s.ts < next.getTime()).length;
+        days.push({ d, cnt, label: `${d.getMonth() + 1}/${d.getDate()}` });
+      }
+      return days;
+    } catch { return []; }
+  })();
+  // 错题本错因分布 —— 从 wrongItems store 聚合，让老师 / 自己一眼看到错因结构
+  const wrongTagBreakdown = (() => {
+    try {
+      const items = getWrongItemsFromStore();
+      const counts = { formula: 0, concept: 0, careless: 0, method: 0, unknown: 0 };
+      items.forEach((w) => {
+        if (w.status !== "active") return;
+        const tags = Array.isArray(w.error_tags) ? w.error_tags : [];
+        if (tags.length === 0) counts.unknown += 1;
+        else tags.forEach(t => { if (counts[t] != null) counts[t] += 1; else counts.unknown += 1; });
+      });
+      return counts;
+    } catch { return { formula: 0, concept: 0, careless: 0, method: 0, unknown: 0 }; }
+  })();
+  const wrongTotal = wrongTagBreakdown.formula + wrongTagBreakdown.concept + wrongTagBreakdown.careless + wrongTagBreakdown.method + wrongTagBreakdown.unknown;
+
   const getLevel = (p) => {
     if (p >= 90) return { label: "大师级", emoji: "🏆", color: G.amber, desc: "超越了90%的同学！" };
     if (p >= 75) return { label: "熟练级", emoji: "⭐", color: G.teal, desc: "掌握扎实，继续保持！" };
@@ -8625,6 +8704,70 @@ function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
           <div style={{ fontSize: 12, color: "#666", fontWeight: 600 }}>天连续学习</div>
           {streak === 0 && <div style={{ fontSize: 11, color: "#bbb", marginTop: 4 }}>今天开始打卡吧！</div>}
           {streak >= 3 && <div style={{ fontSize: 11, color: G.amber, marginTop: 4, fontWeight: 600 }}>坚持得很好！🎉</div>}
+        </div>
+      </div>
+
+      {/* ①.5 真实学习概览：累计时长 + 7 日活动条带 + 错因分布 —— 全部从 localStorage / wrongItems 聚合 */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.6fr 1.4fr", gap: 14, marginBottom: 14 }}>
+        <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #F3F4F6", padding: "14px 16px" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "#94A3B8", marginBottom: 6 }}>累计学习时长</div>
+          <div style={{ fontSize: 26, fontWeight: 900, color: "#0F172A", lineHeight: 1 }}>
+            {totalMinutes >= 60 ? `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m` : `${totalMinutes} 分钟`}
+          </div>
+          <div style={{ fontSize: 11, color: "#64748B", marginTop: 6 }}>每完成一组小测自动累计</div>
+        </div>
+        <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #F3F4F6", padding: "14px 16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "#94A3B8" }}>近 7 天学习活动</span>
+            <span style={{ fontSize: 11, color: "#94A3B8" }}>每格 = 一天 · 越深 = 当日完成 session 越多</span>
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "flex-end", height: 40 }}>
+            {last7DayActivity.map((d, i) => {
+              const intensity = Math.min(1, d.cnt / 3);
+              const today = i === last7DayActivity.length - 1;
+              return (
+                <div key={i} title={`${d.label} · ${d.cnt} 次小测`} style={{ flex: 1, height: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                  <div style={{
+                    flex: 1, width: "100%", borderRadius: 6,
+                    background: d.cnt === 0 ? "#F1F5F9" : `rgba(29,158,117,${0.25 + intensity * 0.6})`,
+                    border: today ? `1.5px solid ${G.teal}` : "1px solid transparent",
+                  }} />
+                  <span style={{ fontSize: 9.5, color: today ? G.tealDark : "#94A3B8", fontWeight: today ? 700 : 500 }}>{d.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{ background: "#fff", borderRadius: 16, border: "1px solid #F3F4F6", padding: "14px 16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "#94A3B8" }}>错因分布（待攻克）</span>
+            <span style={{ fontSize: 11, color: "#94A3B8" }}>{wrongTotal} 道</span>
+          </div>
+          {wrongTotal === 0 ? (
+            <div style={{ fontSize: 12, color: "#94A3B8", padding: "10px 0" }}>暂无活跃错题。继续做题，AI 会自动诊断错因。</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {[
+                { id: "formula",  label: "公式记错", color: "#F59E0B", bg: "#FFFBEB" },
+                { id: "concept",  label: "概念混淆", color: "#A855F7", bg: "#FAF5FF" },
+                { id: "careless", label: "计算粗心", color: "#3B82F6", bg: "#EFF6FF" },
+                { id: "method",   label: "方法错误", color: "#EF4444", bg: "#FEF2F2" },
+                { id: "unknown",  label: "未分类",  color: "#6B7280", bg: "#F3F4F6" },
+              ].map(t => {
+                const c = wrongTagBreakdown[t.id] || 0;
+                const pct = Math.round((c / wrongTotal) * 100);
+                return (
+                  <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: t.color, minWidth: 60 }}>{t.label}</span>
+                    <div style={{ flex: 1, height: 8, background: t.bg, borderRadius: 999, overflow: "hidden" }}>
+                      <div style={{ width: `${pct}%`, height: "100%", background: t.color, transition: "width .25s" }} />
+                    </div>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: t.color, minWidth: 32, textAlign: "right" }}>{c} 道</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -13415,8 +13558,6 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   // AI 抽取的知识点已经在"知识点"tab 按 provider 分组展示，这里不再重复堆放，避免视觉撞车。
   const treeNodes = useMemo(() => SKILL_TREE, []);
   const nodeIndex = useMemo(() => NODE_INDEX, []);
-  // aiTopics 仍然保留状态，以便底部驾驶舱里显示"已抽取 N 个 AI 知识点 → 去知识点页查看"的引流文案。
-  void aiTopics; void aiTopicsLoaded; void isRefreshingAi;
 
   // ══ 悬浮高亮：沿依赖链向上/向下扫描，点亮前置 + 后续，其他节点/边暗化 ══
   const [hoveredId, setHoveredId] = useState(null);
@@ -13730,10 +13871,10 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: "-0.02em", color: "#0F172A", lineHeight: 1.15 }}>知识树</div>
           <div style={{ fontSize: 13, color: "#94A3B8", marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span>{treeNodes.length} 个知识点 · {Array.from(new Set(treeNodes.map(n => n.course))).length} 个学科</span>
-            {aiNodes.length > 0 ? (
-              <span style={{ color: "#7C3AED", fontWeight: 600 }}>· ✱ {aiNodes.length} 个 AI 抽取</span>
+            {Array.isArray(aiTopics) && aiTopics.length > 0 ? (
+              <span style={{ color: "#7C3AED", fontWeight: 600 }}>· ✱ AI 已抽取 {aiTopics.length} 条 → 在「知识点」tab 查看</span>
             ) : aiTopicsLoaded ? (
-              <span style={{ color: "#CBD5E1" }}>· AI 节点将在你上传资料后出现</span>
+              <span style={{ color: "#CBD5E1" }}>· AI 节点会出现在「知识点」tab，本树只展示策划好的逻辑骨架</span>
             ) : null}
             <span>· 双击节点看详情 · 悬浮点亮学习路径</span>
             <button
@@ -14777,6 +14918,7 @@ export default function App() {
     page === "学习报告" ||
     page === "记忆卡片" ||
     page === "教师管理" ||
+    page === "技能树" ||  // 总览技能树 = 全屏 overlay；之前漏在这里，导致从 HomePage 点击无反应（StudyWorkspace tab 把它吃掉了）
     (typeof page === "string" && page.startsWith("quiz_material_"));
 
   const renderPage = () => {
