@@ -66,3 +66,9 @@ body {
 .mc-material-card:focus-within .mc-card-delete {
   opacity: 1 !important;
 }
+
+/* 通用旋转 spinner —— 用于 AI 异步分析等场景 */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

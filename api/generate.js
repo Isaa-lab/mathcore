@@ -77,6 +77,8 @@ async function runHandler(req, res) {
     vizIntent,       // { wantsViz: bool, reason: string } —— 前端已做关键词检测，后端据此分流 prompt
     dialogueMode,    // "socratic" | "exposition" —— 前端根据答题状态 + 用户意图推导
     // dialogueModeReason, quizState —— 仅日志用，不参与 prompt 构造
+    // 错题靶向变式专用：把用户的错题、错因诊断、错因 tag 一起传过来，让出题更"针对"
+    errorContext,    // [{ question, correctAnswer, userAnswer, errorTags:[], reasoning, remedyFocus }]
     userProvider, userKey, userCustomUrl,
   } = body;
 
@@ -632,7 +634,47 @@ ${vizProfile.extraConstraint ? "\n━━━ 本轮模型专属约束（必须遵
     messages = [sysMsg, ...histMsgs, userMsg];
   }
 
-  const prompt = isChatMode ? null : `你是数学课程出题专家。请为"${chapter}"这个数学章节生成${count}道${type}，主版本使用中文。
+  // 错题靶向变式块：把用户错题 + 错因诊断打包成 prompt 头部，让出题"针对错因"
+  // 设计目标：
+  //   · 每个错因 tag 触发不同的变式策略（不是简单换数字）
+  //   · 同一道题如果错了 N 次，必须给"看起来不一样但考同一个易错点"的变体
+  //   · 不是给学生换皮做对——而是把那个易错点"反复用不同语境追问"，逼他真的理解
+  const errorContextBlock = (() => {
+    if (!Array.isArray(errorContext) || errorContext.length === 0) return "";
+    const TAG_STRATEGY = {
+      formula:  "把"公式形式"作为干扰核心：选项里放公式的常见错误变体（漏系数、错指数、漏负号、用错记号）。",
+      concept:  "把"概念边界"作为干扰核心：制造和正确概念形似的相邻概念（比如"行阶梯"vs"简化行阶梯"），错误选项就是相邻概念的特征。",
+      careless: "保持原题方法不变，但题目设计成"中间步骤容易写错符号或单位"的形式；解析里逐步标注容易丢分的地方。",
+      method:   "题面在"该用哪种方法"上做文章：先让学生判定"以下方法哪个适用"，干扰项是常见但不适用的方法。",
+      unknown:  "考查同一知识点的不同侧面（定义 / 性质 / 反例 / 应用），帮学生定位真正的薄弱处。",
+    };
+    const lines = errorContext.slice(0, 6).map((e, i) => {
+      const tags = (Array.isArray(e.errorTags) && e.errorTags.length > 0) ? e.errorTags : ["unknown"];
+      const strategy = tags.map(t => TAG_STRATEGY[t] || TAG_STRATEGY.unknown).filter(Boolean).join(" ");
+      return `· 错题 ${i + 1}：${String(e.question || "").slice(0, 220)}
+    - 正确答案：${e.correctAnswer || "未知"}
+    - 学生作答：${e.userAnswer || "(未作答)"}
+    - 错因 tag：${tags.join(", ")}${e.reasoning ? `\n    - 错因诊断：${String(e.reasoning).slice(0, 120)}` : ""}${e.remedyFocus ? `\n    - 重点补救：${String(e.remedyFocus).slice(0, 120)}` : ""}
+    - 出题策略：${strategy}`;
+    }).join("\n");
+    return `==================================================
+【优先约束 · 错题靶向变式 OVERRIDE】
+==================================================
+本次出题是错题专项变式训练。下面是用户最近做错的题 + AI 错因诊断：
+${lines}
+
+铁律：
+1. 每道新题必须能被映射到上述某道错题的"易错点"，并明确通过该错因策略来设计选项。
+2. 不要单纯换数字 —— 必须切换情境（比如不同函数、不同矩阵、不同条件），但仍然踩同一个坑。
+3. 解析里必须显式说明"这道题为什么针对你之前那道错题"——一句话点明对应错因。
+4. 输出题数按下方 LAYER 1-5 中要求的数量；如果错题里同一错因出现多次，多产出该错因的变体。
+
+完成上述错题策略后，再叠加下面的通用约束：
+
+`;
+  })();
+
+  const prompt = isChatMode ? null : `${errorContextBlock}你是数学课程出题专家。请为"${chapter}"这个数学章节生成${count}道${type}，主版本使用中文。
 
 ==================================================
 【LAYER 1 · 内容约束（题干必须是"数学命题"）】

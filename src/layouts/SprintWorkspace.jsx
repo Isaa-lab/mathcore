@@ -593,6 +593,7 @@ function SprintAnimations() {
 export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQuestions = [], onAutoStartQuiz, onResetQuizIntent }) {
   const [rightPanelMode, setRightPanelMode] = useState("chat");
   const [setupOpen, setSetupOpen] = useState(false);
+  const [mockOpen, setMockOpen] = useState(false);
   const [selectedDayKey, setSelectedDayKey] = useState(null);
   const [tick, setTick] = useState(0); // 驱动 re-read storage
 
@@ -773,6 +774,18 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
             style={{ padding: "9px 12px", textAlign: "center", background: "#F3F4F6", borderRadius: 10, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13, color: "#111827", fontFamily: "inherit" }}>
             📝 进入错题本
           </button>
+          <button
+            onClick={() => setMockOpen(true)}
+            title={examPlan ? "按考试计划范围模拟考" : "暂未设置考试，将使用全部章节"}
+            style={{
+              padding: "10px 12px", textAlign: "center", borderRadius: 10, border: "none", cursor: "pointer",
+              fontWeight: 700, fontSize: 13, fontFamily: "inherit",
+              background: "linear-gradient(135deg,#EF4444,#F97316)", color: "#fff",
+              boxShadow: "0 4px 14px rgba(239,68,68,0.28)",
+            }}
+          >
+            🎯 模拟考试
+          </button>
 
           <div style={{ paddingTop: 8, marginTop: 2, borderTop: "1px solid #F3F4F6" }}>
             {(() => {
@@ -844,6 +857,182 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
           onStartTask={handleStartTaskInternal}
         />
       )}
+      {mockOpen && (
+        <MockExamModal
+          examPlan={examPlan}
+          availableChapters={availableChapters}
+          onClose={() => setMockOpen(false)}
+          onStart={(opts) => {
+            // 落到右侧 quiz 面板：autoStartIntent 走 mock_exam 通道，QuizPage 已经识别该 source
+            const intent = {
+              source: "mock_exam",
+              chapters: opts.chapters,
+              chapter: Array.isArray(opts.chapters) && opts.chapters.length === 1 ? opts.chapters[0] : null,
+              count: opts.count,
+              minutes: opts.minutes,
+              nodeLabel: `🎯 模拟考试（${opts.count} 题 · ${opts.minutes} 分钟）`,
+              timed: true,
+              taskId: `mock_${Date.now()}`,
+            };
+            if (onAutoStartQuiz) onAutoStartQuiz(intent);
+            setRightPanelMode("quiz");
+            setMockOpen(false);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+// ── 模拟考试弹窗 —————————————————————————————————————————————
+// 设计意图：让"考前冲刺"这套页面里有一个明确的"开始模拟考"入口，免得用户
+// 还要手动到题库去拼一组题。范围默认用 examPlan.chapters_in_scope，没有计划时
+// 退化为全部 availableChapters；时长仅用于展示倒计时，不强行截题。
+function MockExamModal({ examPlan, availableChapters, onClose, onStart }) {
+  const planScope = Array.isArray(examPlan?.chapters_in_scope) ? examPlan.chapters_in_scope : [];
+  const chapterByLabel = (slugs) => {
+    const idx = new Map(availableChapters.map(c => [c.slug, c.label || c.slug]));
+    return slugs.map(s => idx.get(s) || s);
+  };
+  const [scope, setScope] = useState(() => new Set(planScope.length > 0 ? planScope : availableChapters.map(c => c.slug)));
+  const [count, setCount] = useState(20);
+  const [minutes, setMinutes] = useState(60);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const toggle = (slug) => setScope(prev => {
+    const n = new Set(prev);
+    if (n.has(slug)) n.delete(slug); else n.add(slug);
+    return n;
+  });
+  const allSelected = scope.size === availableChapters.length && availableChapters.length > 0;
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1060 }} />
+      <div role="dialog" aria-label="模拟考试设置"
+        style={{
+          position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)",
+          width: "min(560px, 92vw)", maxHeight: "85vh",
+          background: "#fff", borderRadius: 16, zIndex: 1061,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
+          display: "flex", flexDirection: "column", overflow: "hidden",
+        }}>
+        <header style={{ padding: "16px 22px", borderBottom: "1px solid #E5E7EB", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 22 }}>🎯</span>
+            <div>
+              <div style={{ fontSize: 17, fontWeight: 800, color: "#111" }}>模拟考试</div>
+              <div style={{ fontSize: 11.5, color: "#6B7280", marginTop: 2 }}>限时 + 全程不显示解析，结束后一次性出报告</div>
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="关闭" style={{ fontSize: 18, background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", padding: 4, lineHeight: 1 }}>✕</button>
+        </header>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* 题量 + 时长 */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <label style={{ display: "block" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#374151", display: "block", marginBottom: 6 }}>📝 题量</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[10, 20, 30, 50].map(n => (
+                  <button key={n} onClick={() => setCount(n)}
+                    style={{
+                      flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
+                      background: count === n ? "#111827" : "#fff",
+                      color: count === n ? "#fff" : "#374151",
+                      border: `1px solid ${count === n ? "#111827" : "#E5E7EB"}`,
+                    }}>{n}</button>
+                ))}
+              </div>
+            </label>
+            <label style={{ display: "block" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#374151", display: "block", marginBottom: 6 }}>⏰ 时长（分钟）</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[30, 60, 90, 120].map(n => (
+                  <button key={n} onClick={() => setMinutes(n)}
+                    style={{
+                      flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
+                      background: minutes === n ? "#EF4444" : "#fff",
+                      color: minutes === n ? "#fff" : "#374151",
+                      border: `1px solid ${minutes === n ? "#EF4444" : "#E5E7EB"}`,
+                    }}>{n}</button>
+                ))}
+              </div>
+            </label>
+          </div>
+
+          {/* 章节范围 */}
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#374151" }}>
+                📖 考查章节
+                <span style={{ marginLeft: 6, color: "#9CA3AF", fontWeight: 500 }}>({scope.size}/{availableChapters.length})</span>
+                {planScope.length > 0 && <span style={{ marginLeft: 8, fontSize: 10.5, color: "#4338CA", background: "#EEF2FF", padding: "1px 7px", borderRadius: 999, fontWeight: 700 }}>已加载考试计划范围</span>}
+              </span>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => setScope(new Set(availableChapters.map(c => c.slug)))}
+                  style={{ fontSize: 11, padding: "3px 10px", borderRadius: 6, border: "1px solid #E5E7EB", background: "#fff", color: "#374151", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>全选</button>
+                <button onClick={() => setScope(new Set())}
+                  style={{ fontSize: 11, padding: "3px 10px", borderRadius: 6, border: "1px solid #E5E7EB", background: "#fff", color: "#374151", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>清空</button>
+              </div>
+            </div>
+            {availableChapters.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: "#6B7280", padding: "16px 12px", background: "#F9FAFB", borderRadius: 10, textAlign: "center" }}>
+                还没有章节数据 —— 先去做几道题或上传资料
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 180, overflowY: "auto", padding: 8, border: "1px solid #E5E7EB", borderRadius: 10, background: "#fff" }}>
+                {availableChapters.map(ch => {
+                  const sel = scope.has(ch.slug);
+                  return (
+                    <button key={ch.slug} onClick={() => toggle(ch.slug)}
+                      style={{
+                        padding: "5px 11px", borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                        border: "1.5px solid " + (sel ? "#EF4444" : "#E5E7EB"),
+                        background: sel ? "#EF4444" : "#fff", color: sel ? "#fff" : "#374151",
+                        display: "inline-flex", alignItems: "center", gap: 5,
+                      }}>
+                      {ch.label || ch.slug}
+                      {ch.wrong_count > 0 && (
+                        <span style={{ fontSize: 9.5, background: sel ? "rgba(255,255,255,0.22)" : "#FEE2E2", color: sel ? "#fff" : "#991B1B", padding: "0 5px", borderRadius: 10, fontWeight: 700 }}>
+                          {ch.wrong_count}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div style={{ padding: "10px 12px", background: "#FEF3C7", borderRadius: 10, fontSize: 12, color: "#92400E", lineHeight: 1.55 }}>
+            💡 模拟考过程中题面右上角会有倒计时；考完后会按章节 / 题型给出正确率分布，错题自动入错题本。
+          </div>
+        </div>
+
+        <footer style={{ padding: "12px 22px", borderTop: "1px solid #E5E7EB", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button onClick={onClose}
+            style={{ padding: "8px 16px", borderRadius: 9, border: "1px solid #E5E7EB", background: "#fff", color: "#374151", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+            取消
+          </button>
+          <button
+            disabled={scope.size === 0}
+            onClick={() => onStart({ chapters: chapterByLabel(Array.from(scope)), count, minutes })}
+            style={{
+              padding: "8px 18px", borderRadius: 9, border: "none",
+              background: scope.size === 0 ? "#FCA5A5" : "linear-gradient(135deg,#EF4444,#F97316)",
+              color: "#fff", fontSize: 13, fontWeight: 800, cursor: scope.size === 0 ? "not-allowed" : "pointer", fontFamily: "inherit",
+              boxShadow: scope.size === 0 ? "none" : "0 4px 14px rgba(239,68,68,0.28)",
+            }}>
+            {allSelected ? "🚀 开始全范围模拟考" : `🚀 开考（${scope.size} 章 · ${count} 题）`}
+          </button>
+        </footer>
+      </div>
+    </>
   );
 }

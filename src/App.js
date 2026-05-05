@@ -1742,6 +1742,8 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
     const aggregatedTopics = [];
     const aggregatedQuestions = [];
     const seenTopicNames = new Set();
+    // 记录这次抽取实际用到的 provider —— 写库时打到每条 topic 上，方便 KnowledgePage 按来源分 tab
+    let lastApiUsed = null;
 
     for (let idx = 0; idx < chunks.length; idx++) {
       const chunk = chunks[idx];
@@ -1774,6 +1776,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
           console.warn(`API quota exceeded at chunk ${idx + 1}/${chunks.length}`);
           break; // 不再继续烧额度
         } else if (!data.error) {
+          if (data.apiUsed) lastApiUsed = data.apiUsed;
           const tArr = Array.isArray(data.topics) ? data.topics : [];
           for (const t of tArr) {
             const key = String(t?.name || "").trim().toLowerCase();
@@ -1882,10 +1885,22 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
   // Step 5b: Persist AI topics into material_topics so KnowledgePage can surface them.
   //   RLS: sql/material_uploader_write_rls.sql allows owner to insert topics of own material.
   //   Table missing / RLS mis-config / dup-run are all tolerated (silent fallback).
+  // 解析 provider —— /api/extract 返回的 apiUsed 形如 "groq(user)" / "gemini(server)" / "anthropic(server)"
+  const parseApiUsed = (raw) => {
+    if (!raw) return { provider: "unknown", model: null };
+    const s = String(raw);
+    const m = s.match(/^([a-z]+)/i);
+    return { provider: m ? m[1].toLowerCase() : "unknown", model: s };
+  };
+  const { provider: detectedProvider, model: detectedModel } = parseApiUsed(lastApiUsed);
+  // 同一次 processMaterialWithAI 调用产生的 topics 共享一个 group id，便于后续按"批"展示
+  const topicGroupId = (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `grp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   let topicsLinked = 0;
   if (!apiQuotaExceeded && topics.length > 0) {
     try {
-      const topicRows = topics
+      const topicRowsBase = topics
         .filter(t => t && t.name && String(t.name).trim())
         .map(t => ({
           material_id: materialId,
@@ -1893,14 +1908,26 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
           summary: t.summary ? String(t.summary).slice(0, 800) : null,
           chapter: chapter || null,
         }));
-      if (topicRows.length > 0) {
-        const { error: et } = await supabase.from("material_topics").insert(topicRows);
+      // 带上 provider 字段的"完整版" rows；如果列不存在 (42703 / 42P01) 会自动降级回不带这些字段的版本，所以不影响现网
+      const topicRowsWithProvider = topicRowsBase.map(r => ({
+        ...r,
+        provider: detectedProvider,
+        provider_model: detectedModel,
+        topic_group_id: topicGroupId,
+      }));
+      if (topicRowsWithProvider.length > 0) {
+        let { error: et } = await supabase.from("material_topics").insert(topicRowsWithProvider);
+        // 列还没建出来（42703 = undefined column）时，降级用旧 schema 写一遍
+        if (et && /column .* does not exist|provider/i.test(et.message || "")) {
+          const fallback = await supabase.from("material_topics").insert(topicRowsBase);
+          et = fallback.error;
+        }
         if (!et) {
-          topicsLinked = topicRows.length;
+          topicsLinked = topicRowsWithProvider.length;
           // 触发全局"知识树/知识点"侧的自动刷新 —— 用户即使正停留在知识树页也能看到新节点出现
           try {
             window.dispatchEvent(new CustomEvent("mc:material-topics-updated", {
-              detail: { materialId, count: topicRows.length },
+              detail: { materialId, count: topicRowsWithProvider.length, provider: detectedProvider },
             }));
           } catch { /* SSR-safe no-op */ }
         } else {
@@ -4917,12 +4944,20 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
 
     // Real AI-extracted topics (material_topics schema from sql/learning_mvp_schema.sql)
     // Silent fallback if table missing / RLS blocks — KnowledgePage still shows hardcoded CHAPTERS.
+    // 优先用带 provider 的 select；列还没建出来时降级回旧 schema，保证不破坏现网。
     try {
-      const tRes = await supabase
+      let tRes = await supabase
         .from("material_topics")
-        .select("id,material_id,name,summary,chapter,created_at")
+        .select("id,material_id,name,summary,chapter,provider,provider_model,topic_group_id,created_at")
         .order("created_at", { ascending: false })
         .limit(800);
+      if (tRes.error && /column .* does not exist|provider/i.test(tRes.error.message || "")) {
+        tRes = await supabase
+          .from("material_topics")
+          .select("id,material_id,name,summary,chapter,created_at")
+          .order("created_at", { ascending: false })
+          .limit(800);
+      }
       setAiTopics(Array.isArray(tRes.data) ? tRes.data : []);
     } catch (e) {
       setAiTopics([]);
@@ -4987,6 +5022,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
 
   const [selectedTopic, setSelectedTopic] = useState(null);
   const [selectedTopicMeta, setSelectedTopicMeta] = useState(null);
+  // AI 知识点 provider tab：null = 全部；否则匹配 t.provider
+  const [providerFilter, setProviderFilter] = useState(null);
 
   const openTopic = (t, mat) => {
     setSelectedTopic(t.name);
@@ -5013,6 +5050,31 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   // AI-extracted topics from DB (for future use when AI extraction works)
   const aiTopicsForMaterial = aiTopics.filter((t) => t.material_id === selectedMaterialId);
 
+  // 按 provider 聚合：tabs 上显示 "全部 AI / Gemini / Groq / DeepSeek / ..."
+  // 同一 provider 内可能有多次抽取（不同 topic_group_id），最近一批置顶
+  const providerStats = (() => {
+    const m = new Map();
+    aiTopicsForMaterial.forEach(t => {
+      const key = (t.provider && String(t.provider).trim()) || "legacy";
+      if (!m.has(key)) m.set(key, { provider: key, count: 0, latestAt: 0, model: t.provider_model || null });
+      const slot = m.get(key);
+      slot.count += 1;
+      const ts = t.created_at ? new Date(t.created_at).getTime() : 0;
+      if (ts > slot.latestAt) slot.latestAt = ts;
+      if (!slot.model && t.provider_model) slot.model = t.provider_model;
+    });
+    return Array.from(m.values()).sort((a, b) => b.latestAt - a.latestAt || b.count - a.count);
+  })();
+  const PROVIDER_META = {
+    gemini:    { label: "Gemini",   color: "#4285F4", bg: "#EFF6FF" },
+    groq:      { label: "Groq",     color: "#F97316", bg: "#FFF7ED" },
+    deepseek:  { label: "DeepSeek", color: "#0EA5E9", bg: "#F0F9FF" },
+    kimi:      { label: "Kimi",     color: "#8B5CF6", bg: "#F5F3FF" },
+    anthropic: { label: "Claude",   color: "#D97706", bg: "#FFFBEB" },
+    custom:    { label: "自定义",   color: "#6B7280", bg: "#F9FAFB" },
+    legacy:    { label: "历史",     color: "#9CA3AF", bg: "#F9FAFB" },
+    unknown:   { label: "未标记",   color: "#9CA3AF", bg: "#F9FAFB" },
+  };
   const totalTopicCount = courseTopics.length + aiTopicsForMaterial.length;
 
   return (
@@ -5052,14 +5114,59 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           {/* ── AI extracted topics (material_topics) for this material ── */}
           {aiTopicsForMaterial.length > 0 && (
             <div style={{ marginBottom: 28 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                 <span style={{ background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 800, letterSpacing: "0.06em" }}>🤖 AI 抽取</span>
                 <span style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>本资料 AI 提取的核心知识点</span>
-                <span style={{ fontSize: 12, color: "#9ca3af" }}>{aiTopicsForMaterial.length} 个</span>
+                <span style={{ fontSize: 12, color: "#9ca3af" }}>
+                  {(providerFilter ? aiTopicsForMaterial.filter(t => (t.provider || "legacy") === providerFilter).length : aiTopicsForMaterial.length)} / {aiTopicsForMaterial.length} 个
+                </span>
                 <div style={{ flex: 1, height: 1, background: "#f3f4f6" }} />
               </div>
+              {/* Provider tabs —— 只有 ≥2 个 provider 时才出现，避免单 provider 资料显得啰嗦 */}
+              {providerStats.length >= 2 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14, paddingBottom: 12, borderBottom: "1px dashed #f3f4f6" }}>
+                  <button
+                    onClick={() => setProviderFilter(null)}
+                    style={{
+                      padding: "5px 12px", borderRadius: 999,
+                      background: providerFilter === null ? "#111827" : "#fff",
+                      color: providerFilter === null ? "#fff" : "#6B7280",
+                      border: `1px solid ${providerFilter === null ? "#111827" : "#e5e7eb"}`,
+                      fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                    }}
+                  >
+                    全部 AI · {aiTopicsForMaterial.length}
+                  </button>
+                  {providerStats.map((p) => {
+                    const meta = PROVIDER_META[p.provider] || PROVIDER_META.unknown;
+                    const active = providerFilter === p.provider;
+                    return (
+                      <button
+                        key={p.provider}
+                        onClick={() => setProviderFilter(active ? null : p.provider)}
+                        title={p.model ? `模型：${p.model}` : meta.label}
+                        style={{
+                          padding: "5px 12px", borderRadius: 999,
+                          background: active ? meta.color : meta.bg,
+                          color: active ? "#fff" : meta.color,
+                          border: `1px solid ${active ? meta.color : meta.color + "33"}`,
+                          fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+                          display: "inline-flex", alignItems: "center", gap: 6,
+                        }}
+                      >
+                        <span style={{ width: 6, height: 6, borderRadius: 999, background: active ? "#fff" : meta.color }} />
+                        {meta.label} · {p.count}
+                      </button>
+                    );
+                  })}
+                  <span style={{ flex: 1 }} />
+                  <span style={{ fontSize: 11, color: "#9CA3AF", alignSelf: "center" }}>
+                    💡 不同 AI 抽取角度不同，可切换对照
+                  </span>
+                </div>
+              )}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
-                {aiTopicsForMaterial.map(t => {
+                {(providerFilter ? aiTopicsForMaterial.filter(t => (t.provider || "legacy") === providerFilter) : aiTopicsForMaterial).map(t => {
                   const mastery = topicMastery[t.id]?.status || "todo";
                   return (
                     <div
@@ -5076,17 +5183,41 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                         {t.summary || "（AI 未给出摘要）"}
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 10, color: "#7c3aed", background: "#ede9fe", padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>🤖 AI 生成</span>
+                        {(() => {
+                          const provKey = (t.provider && String(t.provider).trim()) || "legacy";
+                          const meta = PROVIDER_META[provKey] || PROVIDER_META.unknown;
+                          return (
+                            <span
+                              title={t.provider_model ? `${meta.label} · ${t.provider_model}` : meta.label}
+                              style={{ fontSize: 10, color: meta.color, background: meta.bg, padding: "2px 7px", borderRadius: 20, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}
+                            >
+                              <span style={{ width: 5, height: 5, borderRadius: 999, background: meta.color }} />
+                              {meta.label}
+                            </span>
+                          );
+                        })()}
                         {t.chapter && <span style={{ fontSize: 10, color: G.blue, background: G.blueLight, padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>{t.chapter}</span>}
                       </div>
                       <div style={{ display: "flex", gap: 7, marginTop: 2 }}>
                         <button
                           onClick={() => {
-                            // 按资料 + topic 出题：跳到该资料的专属题池
+                            // 按资料 + topic 直达做题：
+                            //  · 在沙盒里 → switchStudyTab("小测")，autoStartIntent 自动开练
+                            //  · 不在沙盒（legacy 全屏路由）→ 回退到 quiz_material_xxx
                             if (typeof setQuizIntent === "function") {
-                              setQuizIntent({ source: "ai_topic", materialId: selectedMaterialId, topicName: t.name, count: 5 });
+                              setQuizIntent({
+                                source: "ai_topic",
+                                materialId: selectedMaterialId,
+                                topicId: t.id,
+                                topicName: t.name,
+                                topicSummary: t.summary || "",
+                                chapter: t.chapter || null,
+                                count: 5,
+                              });
                             }
-                            if (selectedMaterial) {
+                            if (typeof switchStudyTab === "function") {
+                              switchStudyTab("小测");
+                            } else if (selectedMaterial) {
                               setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
                             }
                           }}
@@ -5119,7 +5250,24 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
               <div style={{ fontSize: 13, color: "#9ca3af" }}>上传资料后 AI 会自动抽取知识点；也可进入该资料练习直接出题</div>
             </div>
           ) : courseTopics.length > 0 ? (
-            CHAPTERS.filter(ch => ch.course === selectedMaterial?.course).map(ch => {
+            <details
+              // 已经有 AI 抽取结果时默认折叠系统大纲，避免和 AI 知识点视觉撞车（用户最在意的是 AI 抽出来的那份）
+              open={aiTopicsForMaterial.length === 0}
+              style={{ marginTop: 8, borderRadius: 14, border: "1px dashed #e5e7eb", padding: "12px 14px", background: "#fafafa" }}
+            >
+              <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 700, color: "#6b7280", listStyle: "none", display: "flex", alignItems: "center", gap: 8, userSelect: "none" }}>
+                <span>📚</span>
+                <span>教材通用大纲（系统内置 · {courseTopics.length} 个知识点）</span>
+                {aiTopicsForMaterial.length > 0 && (
+                  <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 500, marginLeft: 4 }}>
+                    · 已折叠以突出 AI 抽取结果
+                  </span>
+                )}
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 11, color: "#9ca3af", fontWeight: 500 }}>展开 / 收起</span>
+              </summary>
+              <div style={{ marginTop: 14 }}>
+              {CHAPTERS.filter(ch => ch.course === selectedMaterial?.course).map(ch => {
               const chTopics = courseTopics.filter(t => t.chapterNum === ch.num);
               if (chTopics.length === 0) return null;
               const chColor = ({"数值分析":G.teal,"最优化":G.purple,"线性代数":G.blue,"概率论":G.amber,"数理统计":G.red,"ODE":"#7c3aed"})[selectedMaterial?.course] || G.teal;
@@ -5195,7 +5343,9 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   </div>
                 </div>
               );
-            })
+            })}
+              </div>
+            </details>
           ) : null}
         </div>
       </div>
@@ -5305,6 +5455,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   // 用于可跳转进度条 + "看正确答案" 的就地揭示
   const [answerRecords, setAnswerRecords] = useState({});
   const [revealedAnswer, setRevealedAnswer] = useState(false);
+  // 答错时自动 AI 错因分析：{ [qIdx]: { loading, tags, reasoning, error } }
+  const [autoAnalysis, setAutoAnalysis] = useState({});
+  const autoAnalysisFiredRef = useRef(new Set()); // 已经触发过的 qIdx，避免重复请求
   // 错题/延伸场景下的上下文感知 AI 引导
   const [aiContextPrompt, setAIContextPrompt] = useState("");
   const sessionStartRef = useRef(Date.now());
@@ -5436,13 +5589,24 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     if (!autoStartIntent) return;
     if (loading) return;
     if (quizMode) return; // 已经在做题中
-    if (!allQuestions || allQuestions.length === 0) return;
     autoStartFiredRef.current = true;
-    const { chapter, count, topicName } = autoStartIntent;
+    const { chapter, chapters, count, topicName, materialId: intentMatId, source, timed, ids } = autoStartIntent;
     const parseOf = (c) => QUIZ_parseChapter(c) || null;
     const targetParsed = parseOf(chapter);
-    // 先按 chapter 过滤
-    let pool = allQuestions.filter(q => {
+    // 多章节支持：chapters 数组（mock_exam / review_mix 用）→ 任一命中即收
+    const chaptersArr = Array.isArray(chapters) ? chapters.filter(Boolean) : [];
+    const chapterSetParsed = chaptersArr.map(parseOf).filter(Boolean);
+    // 先按 chapter / chapters 过滤
+    let pool = (allQuestions || []).filter(q => {
+      if (Array.isArray(ids) && ids.length > 0) {
+        return ids.includes(String(q.id));
+      }
+      if (chaptersArr.length > 0) {
+        if (chaptersArr.includes(q.chapter)) return true;
+        const qp = parseOf(q.chapter);
+        if (qp && chapterSetParsed.some(p => p.num === qp.num && p.course === qp.course)) return true;
+        return false;
+      }
       if (!chapter) return true;
       if (q.chapter === chapter) return true;
       const qp = parseOf(q.chapter);
@@ -5459,8 +5623,33 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       if (narrowed.length >= 1) pool = narrowed;
       // 如果 topic 过滤后没剩题，就用原 pool（至少不让用户卡住）
     }
-    if (pool.length === 0) return;
-    startWithPool(pool, count || Math.min(5, pool.length));
+    // 池为空但是 ai_topic / knowledge_point 入口 → 直接开练原 pool 兜底
+    if (pool.length === 0) {
+      if ((source === "ai_topic" || source === "knowledge_point") && (allQuestions?.length > 0)) {
+        pool = allQuestions;
+      } else if (intentMatId && !autoGenTriedRef.current) {
+        // 资料题池真的为空：触发一次自动补题，下一轮 effect 拉起后再 startWithPool
+        autoGenTriedRef.current = true;
+        autoStartFiredRef.current = false; // 让下一轮重试
+        tryGenerateQuestionsForMaterial(intentMatId).then(() => {
+          // 触发 allQuestions 重新加载
+          setLoading(true);
+          // 直接复用现有 effect：把 effectiveMaterialId 不变，但 reload 一遍
+          (async () => {
+            const { data: re } = await supabase.from("questions").select("*").eq("material_id", intentMatId);
+            const next = (re || []).filter((q) => !isLowQualityQuestion(q));
+            setAllQuestions(next.sort(() => Math.random() - 0.5));
+            setLoading(false);
+          })();
+        });
+        return;
+      } else {
+        return;
+      }
+    }
+    // 模拟考 / 显式 timed 时直接打开倒计时，让用户感知到考试压力
+    const wantTimer = timed === true || source === "mock_exam";
+    startWithPool(pool, count || Math.min(5, pool.length), { timer: wantTimer });
   }, [autoStartIntent, loading, allQuestions, quizMode]);
 
   useEffect(() => { setTimer(0); }, [current]);
@@ -5817,6 +6006,55 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       if (onAnswer && q) onAnswer(q.id || q.question, correct, q.chapter || "Unknown", q);
     }
   };
+
+  // 自动 AI 错因分析：用户答错时 → 一次性调 /api/analyze-error，结果就地展示并写回错题本
+  // 设计意图：把"老师希望小测内容直接到做题"扩展为"做错了 → 立即看到错因 + 后续"，缩短反馈环
+  useEffect(() => {
+    if (!q) return;
+    const rec = answerRecords[current];
+    if (!rec || rec.correct) return;
+    const key = `${current}|${q.id || q.question?.slice(0, 24)}`;
+    if (autoAnalysisFiredRef.current.has(key)) return;
+    if (autoAnalysis[current]?.loading || autoAnalysis[current]?.tags) return;
+    autoAnalysisFiredRef.current.add(key);
+    setAutoAnalysis(prev => ({ ...prev, [current]: { loading: true } }));
+    (async () => {
+      try {
+        const aiCfg = getAIConfig();
+        const userAns = isTextQuestion(q)
+          ? answerText
+          : (opts ? (selected != null ? letters[selected] : "") : (selected === 0 ? "正确" : "错误"));
+        const resp = await fetch("/api/analyze-error", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            question_stem: q.question,
+            options: opts,
+            correct_answer: q.answer,
+            user_answer: userAns,
+            chapter: q.chapter || "",
+            userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+          }),
+        });
+        const data = await resp.json();
+        if (data.error && (!data.tags || data.tags.length === 0)) {
+          setAutoAnalysis(prev => ({ ...prev, [current]: { loading: false, error: data.error } }));
+          return;
+        }
+        setAutoAnalysis(prev => ({ ...prev, [current]: {
+          loading: false,
+          tags: Array.isArray(data.tags) ? data.tags : [],
+          reasoning: data.reasoning || "",
+        } }));
+        // 同步把诊断写回错题本，让错题本卡片省得再点一次"AI 猜错因"
+        if (q.id && data.reasoning) {
+          try { saveAiReasoning(q.id, data.reasoning, data.tags || []); } catch {}
+        }
+      } catch (err) {
+        setAutoAnalysis(prev => ({ ...prev, [current]: { loading: false, error: err?.message || "请求失败" } }));
+      }
+    })();
+  }, [answered, current, q, answerRecords]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleNext = () => {
     if (current >= displayQ.length - 1) {
@@ -6738,7 +6976,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           <div style={{ flex: 1, color: "#4338CA", fontWeight: 600 }}>
             正在练习：<span style={{ fontWeight: 800 }}>{autoStartIntent.nodeLabel || autoStartIntent.topicName || autoStartIntent.chapter}</span>
             <span style={{ marginLeft: 8, fontWeight: 500, color: "#6366F1", fontSize: 12 }}>
-              · {displayQ.length} 题 · 来自{autoStartIntent.source === "knowledge_tree" ? "知识树" : autoStartIntent.source === "knowledge_point" ? "知识点" : "推荐"}
+              · {displayQ.length} 题 · 来自{autoStartIntent.source === "knowledge_tree" ? "知识树" : autoStartIntent.source === "knowledge_point" ? "知识点" : autoStartIntent.source === "ai_topic" ? "AI 知识点" : autoStartIntent.source === "review_mix" ? "复习抽题" : autoStartIntent.source === "mock_exam" ? "🎯 模拟考试" : "推荐"}
             </span>
           </div>
           <button onClick={() => { setQuizMode(null); setFinished(false); setCurrent(0); }}
@@ -6939,6 +7177,50 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                   ? <><b>可能的思维陷阱：</b>{misconceptionForChoice}</>
                   : <>别急着看答案 —— 先和 AI 一起重新梳理一下思路。学习发生在「重新思考」的那一刻，不在「看到答案」的那一刻。</>}
               </div>
+              {/* AI 自动错因分析（答错就跑一次，结果同步写回错题本） */}
+              {(() => {
+                const aa = autoAnalysis[current];
+                if (!aa) return null;
+                if (aa.loading) {
+                  return (
+                    <div style={{ marginBottom: 12, padding: "10px 14px", background: "#EEF2FF", borderRadius: 12, fontSize: 12.5, color: "#4338CA", display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ width: 12, height: 12, borderRadius: "50%", border: "2px solid #4338CA", borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} />
+                      AI 正在分析错因…
+                    </div>
+                  );
+                }
+                if (aa.error) {
+                  return (
+                    <div style={{ marginBottom: 12, padding: "8px 14px", background: "#FEF2F2", borderRadius: 12, fontSize: 12, color: "#991B1B" }}>
+                      AI 错因分析失败：{aa.error}
+                    </div>
+                  );
+                }
+                const tagMeta = (id) => {
+                  const t = ERROR_TAGS.find(x => x.id === id);
+                  if (t) return t;
+                  return { id, label: id === "unknown" ? "暂未分类" : id, color: "#6B7280", bg: "#F9FAFB" };
+                };
+                return (
+                  <div style={{ marginBottom: 12, padding: "12px 14px", background: "#F5F3FF", borderRadius: 12, border: "1px solid #DDD6FE" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: "#5B21B6" }}>🧠 AI 错因诊断</span>
+                      {(aa.tags || []).map(id => {
+                        const m = tagMeta(id);
+                        return (
+                          <span key={id} style={{ fontSize: 11, fontWeight: 700, color: m.color, background: m.bg, padding: "2px 8px", borderRadius: 999, border: `1px solid ${m.color}33` }}>
+                            {m.label}
+                          </span>
+                        );
+                      })}
+                      <span style={{ marginLeft: "auto", fontSize: 10.5, color: "#9CA3AF" }}>已同步到错题本</span>
+                    </div>
+                    {aa.reasoning && (
+                      <div style={{ fontSize: 13, lineHeight: 1.65, color: "#4C1D95" }}>{aa.reasoning}</div>
+                    )}
+                  </div>
+                );
+              })()}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <Btn variant="primary" onClick={() => askAIInContext("guide")}>💬 让 AI 引导我拆解</Btn>
@@ -9262,11 +9544,25 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChap
       const type = selectedItems[0]?.type || "单选题";
       const count = Math.min(Math.max(selectedItems.length, 5), 10);
       const aiCfg = getAIConfig();
+      // 把每道错题 + 错因诊断打包成 errorContext，让后端 prompt 按错因策略针对性变式
+      const errorContext = selectedItems.map((w) => {
+        const lastWrong = (w.attempts || []).filter(a => !a.correct).slice(-1)[0];
+        const q = ALL_QUESTIONS.find(qq => String(qq.id) === String(w.id));
+        return {
+          question: q?.question || "",
+          correctAnswer: q?.answer || "",
+          userAnswer: lastWrong?.user_answer || "",
+          errorTags: Array.isArray(w.error_tags) ? w.error_tags : [],
+          reasoning: w.ai_reasoning || "",
+          remedyFocus: w.ai_remedy_focus || "",
+        };
+      }).filter(e => e.question);
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chapter, type, count,
+          errorContext,
           userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
         }),
       });
@@ -9328,6 +9624,26 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChap
       .slice(0, 6);
   }, [items]);
 
+  // 错因分布热力（按 ERROR_TAGS 计数 active 错题里命中各 tag 的数量）—— 老师最关心的"学生到底错在哪类"
+  // 没有 AI 诊断过的错题计入 "unknown"，让面板告诉用户"还有 N 道没分析"，引导补充
+  const tagStats = useMemo(() => {
+    const counts = { formula: 0, concept: 0, careless: 0, method: 0, unknown: 0 };
+    items.forEach((w) => {
+      if (w.status !== "active") return;
+      const tags = Array.isArray(w.error_tags) ? w.error_tags : [];
+      if (tags.length === 0) {
+        counts.unknown += 1;
+        return;
+      }
+      tags.forEach((t) => {
+        if (counts[t] != null) counts[t] += 1;
+        else counts.unknown += 1;
+      });
+    });
+    return counts;
+  }, [items]);
+  const totalActiveTagged = (tagStats.formula + tagStats.concept + tagStats.careless + tagStats.method + tagStats.unknown) || 1;
+
   // —— 流式诊断卡片：三态（全部/待复习/已掌握）+ 网格 + AI 归因 ——
   const statusTab = filter.status === "active" ? "review" : filter.status === "mastered" ? "mastered" : "all";
   function switchTab(tab) {
@@ -9340,6 +9656,16 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChap
     setRegenMsg("");
     try {
       const aiCfg = getAIConfig();
+      const lastWrong = (item.attempts || []).filter(a => !a.correct).slice(-1)[0];
+      const q = ALL_QUESTIONS.find(qq => String(qq.id) === String(item.id));
+      const errorContext = q?.question ? [{
+        question: q.question,
+        correctAnswer: q.answer || "",
+        userAnswer: lastWrong?.user_answer || "",
+        errorTags: Array.isArray(item.error_tags) ? item.error_tags : [],
+        reasoning: item.ai_reasoning || "",
+        remedyFocus: item.ai_remedy_focus || "",
+      }] : [];
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -9347,6 +9673,7 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChap
           chapter: item.chapter_label || item.chapter,
           type: item.type || "单选题",
           count: 5,
+          errorContext,
           userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
         }),
       });
@@ -9421,6 +9748,65 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChap
                 onChange={setScope}
               />
               <span style={{ marginLeft: "auto", fontSize: 11.5, color: "#94A3B8" }}>当前显示 {filteredItems.length} 道</span>
+            </div>
+          )}
+
+          {/* 错因热力分布 —— 一眼看出哪类错最多，点击切换全局错因筛选（与 SoftSelect 双向绑定） */}
+          {activeCount > 0 && (
+            <div style={{ marginBottom: 18, padding: "14px 16px", borderRadius: 14, background: "#fff", border: "1px solid #F3F4F6" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 800, color: "#111827" }}>📊 错因分布</span>
+                <span style={{ fontSize: 11.5, color: "#9CA3AF" }}>点击任意类别可定向过滤 · 共 {activeCount} 道待攻克</span>
+                <span style={{ flex: 1 }} />
+                {filter.errorTag !== "all" && (
+                  <button
+                    onClick={() => setFilter({ ...filter, errorTag: "all" })}
+                    style={{ padding: "3px 10px", borderRadius: 999, background: "#F3F4F6", color: "#6B7280", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}
+                  >
+                    清除筛选
+                  </button>
+                )}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+                {[
+                  ...ERROR_TAGS,
+                  { id: "unknown", label: "未分类（待 AI 诊断）", color: "#6B7280", bg: "#F3F4F6" },
+                ].map((tag) => {
+                  const c = tagStats[tag.id] || 0;
+                  const pct = Math.round((c / totalActiveTagged) * 100);
+                  const active = filter.errorTag === tag.id;
+                  return (
+                    <button
+                      key={tag.id}
+                      onClick={() => setFilter({ ...filter, errorTag: active ? "all" : tag.id })}
+                      title={`${tag.label} · ${c} 道（${pct}%）`}
+                      style={{
+                        textAlign: "left", padding: "10px 12px", borderRadius: 12, cursor: "pointer", fontFamily: "inherit",
+                        background: active ? tag.color : tag.bg,
+                        color: active ? "#fff" : tag.color,
+                        border: `1px solid ${active ? tag.color : tag.color + "33"}`,
+                        display: "flex", flexDirection: "column", gap: 4,
+                        opacity: c === 0 ? 0.55 : 1,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                        <span style={{ fontSize: 12, fontWeight: 800 }}>{tag.label}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, opacity: 0.75 }}>{c} 道</span>
+                      </div>
+                      {/* 比例条 */}
+                      <div style={{ height: 4, borderRadius: 999, background: active ? "rgba(255,255,255,0.3)" : tag.color + "22", position: "relative", overflow: "hidden" }}>
+                        <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct}%`, background: active ? "#fff" : tag.color, borderRadius: 999, transition: "width .25s" }} />
+                      </div>
+                      <span style={{ fontSize: 10.5, opacity: 0.78, fontWeight: 600 }}>{pct}% 占比</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {tagStats.unknown > 0 && (
+                <div style={{ marginTop: 10, fontSize: 11.5, color: "#92400E", background: "#FFFBEB", padding: "6px 10px", borderRadius: 8, border: "1px dashed #FDE68A" }}>
+                  💡 还有 {tagStats.unknown} 道未分类错题。打开任一卡片点 "🤖 让 AI 猜错因" 即可补全分析。
+                </div>
+              )}
             </div>
           )}
 
