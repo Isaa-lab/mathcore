@@ -890,11 +890,45 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
 // 退化为全部 availableChapters；时长仅用于展示倒计时，不强行截题。
 function MockExamModal({ examPlan, availableChapters, onClose, onStart }) {
   const planScope = Array.isArray(examPlan?.chapters_in_scope) ? examPlan.chapters_in_scope : [];
+  // 学科归类：从 chapter label 里推断，如 "ODE Ch.2" → "ODE"；纯 "Ch.2" → "通用"
+  const inferSubject = (label = "") => {
+    const s = String(label).trim();
+    const m = s.match(/^(.+?)\s*Ch\.?\s*\d+/i);
+    if (m && m[1].trim()) return m[1].trim();
+    if (/^Ch\.?\d+/i.test(s)) return "通用";
+    return s.split(/\s+/)[0] || "通用";
+  };
+  const subjectsAvailable = useMemo(() => {
+    const s = new Set();
+    availableChapters.forEach(c => s.add(inferSubject(c.label || c.slug)));
+    return Array.from(s);
+  }, [availableChapters]);
+  // 默认学科：优先 examPlan.subject 推断，其次第一个学科；用户可点"全部"切回多学科
+  const planSubject = (() => {
+    if (!examPlan?.subject) return null;
+    const ps = String(examPlan.subject);
+    return subjectsAvailable.find(s => ps.includes(s)) || null;
+  })();
+  const [subjectFocus, setSubjectFocus] = useState(planSubject || (subjectsAvailable[0] || null));
+  const visibleChapters = useMemo(() => {
+    if (!subjectFocus) return availableChapters;
+    return availableChapters.filter(c => inferSubject(c.label || c.slug) === subjectFocus);
+  }, [subjectFocus, availableChapters]);
+
   const chapterByLabel = (slugs) => {
     const idx = new Map(availableChapters.map(c => [c.slug, c.label || c.slug]));
     return slugs.map(s => idx.get(s) || s);
   };
-  const [scope, setScope] = useState(() => new Set(planScope.length > 0 ? planScope : availableChapters.map(c => c.slug)));
+  // scope 的初始默认：planScope 优先；否则取当前 subjectFocus 下的全部章节
+  const [scope, setScope] = useState(() => {
+    if (planScope.length > 0) return new Set(planScope);
+    return new Set(visibleChapters.map(c => c.slug));
+  });
+  // 学科切换时，自动把 scope 重置为该学科下的全部章节（避免显示错位的"上一学科"勾选）
+  useEffect(() => {
+    if (planScope.length > 0) return; // 用户有 examPlan，尊重计划范围
+    setScope(new Set(visibleChapters.map(c => c.slug)));
+  }, [subjectFocus]); // eslint-disable-line react-hooks/exhaustive-deps
   const [count, setCount] = useState(20);
   const [minutes, setMinutes] = useState(60);
 
@@ -909,7 +943,7 @@ function MockExamModal({ examPlan, availableChapters, onClose, onStart }) {
     if (n.has(slug)) n.delete(slug); else n.add(slug);
     return n;
   });
-  const allSelected = scope.size === availableChapters.length && availableChapters.length > 0;
+  const allSelected = scope.size === visibleChapters.length && visibleChapters.length > 0;
 
   return (
     <>
@@ -966,28 +1000,56 @@ function MockExamModal({ examPlan, availableChapters, onClose, onStart }) {
             </label>
           </div>
 
+          {/* 学科聚焦 —— 默认锁定到一个学科，避免出现"几十个学科混在一起"的勾选地狱 */}
+          {subjectsAvailable.length > 1 && (
+            <div>
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: "#374151", display: "block", marginBottom: 6 }}>🎓 学科聚焦</span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {subjectsAvailable.map(s => {
+                  const active = subjectFocus === s;
+                  return (
+                    <button key={s} onClick={() => setSubjectFocus(s)}
+                      style={{
+                        padding: "5px 12px", borderRadius: 999, fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
+                        background: active ? "#EF4444" : "#FFF",
+                        color: active ? "#fff" : "#374151",
+                        border: `1px solid ${active ? "#EF4444" : "#E5E7EB"}`,
+                      }}>{s}</button>
+                  );
+                })}
+                <button onClick={() => setSubjectFocus(null)}
+                  style={{
+                    padding: "5px 12px", borderRadius: 999, fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
+                    background: subjectFocus === null ? "#111827" : "#FFF",
+                    color: subjectFocus === null ? "#fff" : "#374151",
+                    border: `1px solid ${subjectFocus === null ? "#111827" : "#E5E7EB"}`,
+                  }}>跨学科 · 全部</button>
+              </div>
+            </div>
+          )}
+
           {/* 章节范围 */}
           <div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
               <span style={{ fontSize: 12.5, fontWeight: 700, color: "#374151" }}>
                 📖 考查章节
-                <span style={{ marginLeft: 6, color: "#9CA3AF", fontWeight: 500 }}>({scope.size}/{availableChapters.length})</span>
+                <span style={{ marginLeft: 6, color: "#9CA3AF", fontWeight: 500 }}>({scope.size}/{visibleChapters.length})</span>
                 {planScope.length > 0 && <span style={{ marginLeft: 8, fontSize: 10.5, color: "#4338CA", background: "#EEF2FF", padding: "1px 7px", borderRadius: 999, fontWeight: 700 }}>已加载考试计划范围</span>}
               </span>
               <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={() => setScope(new Set(availableChapters.map(c => c.slug)))}
+                <button onClick={() => setScope(new Set(visibleChapters.map(c => c.slug)))}
                   style={{ fontSize: 11, padding: "3px 10px", borderRadius: 6, border: "1px solid #E5E7EB", background: "#fff", color: "#374151", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>全选</button>
                 <button onClick={() => setScope(new Set())}
                   style={{ fontSize: 11, padding: "3px 10px", borderRadius: 6, border: "1px solid #E5E7EB", background: "#fff", color: "#374151", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>清空</button>
               </div>
             </div>
-            {availableChapters.length === 0 ? (
+            {visibleChapters.length === 0 ? (
               <div style={{ fontSize: 12.5, color: "#6B7280", padding: "16px 12px", background: "#F9FAFB", borderRadius: 10, textAlign: "center" }}>
-                还没有章节数据 —— 先去做几道题或上传资料
+                {subjectFocus ? `「${subjectFocus}」暂无章节数据，先去做几道这门课的题` : "还没有章节数据 —— 先去做几道题或上传资料"}
               </div>
             ) : (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 180, overflowY: "auto", padding: 8, border: "1px solid #E5E7EB", borderRadius: 10, background: "#fff" }}>
-                {availableChapters.map(ch => {
+                {visibleChapters.map(ch => {
                   const sel = scope.has(ch.slug);
                   return (
                     <button key={ch.slug} onClick={() => toggle(ch.slug)}

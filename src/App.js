@@ -340,43 +340,8 @@ const ActionBar = ({ children }) => (
   </div>
 );
 
-// ── Badge System ─────────────────────────────────────────────────────────────
-const BADGES = [
-  { id: "first_answer",   emoji: "🌱", name: "初学者",    desc: "完成第一道题",          check: (st) => st.totalAnswered >= 1 },
-  { id: "perfect_score",  emoji: "🎯", name: "神枪手",    desc: "单次练习全部答对",       check: (st) => st.hadPerfect },
-  { id: "streak3",        emoji: "🔥", name: "坚持者",    desc: "连续学习 3 天",          check: (st) => st.streak >= 3 },
-  { id: "streak7",        emoji: "⚡", name: "铁杆学霸",  desc: "连续学习 7 天",          check: (st) => st.streak >= 7 },
-  { id: "wrong_killer",   emoji: "💪", name: "错题杀手",  desc: "攻克 5 道错题",          check: (st) => st.masteredWrong >= 5 },
-  { id: "ace",            emoji: "🏆", name: "数学达人",  desc: "总正确率超过 80%",       check: (st) => st.overallAccuracy >= 80 },
-  { id: "scholar",        emoji: "📚", name: "博学者",    desc: "累计学习时长超 60 分钟", check: (st) => st.totalMinutes >= 60 },
-  { id: "all_chapters",   emoji: "🌈", name: "全能学霸",  desc: "练习 5 个及以上章节",    check: (st) => st.chaptersAttempted >= 5 },
-  { id: "century",        emoji: "💯", name: "百题王",    desc: "累计答对 100 道题",      check: (st) => st.totalCorrect >= 100 },
-  { id: "speed",          emoji: "⚡", name: "闪电答题",  desc: "30 秒内完成一题",        check: (st) => st.hadSpeedAnswer },
-];
-
-const getBadgeStats = () => {
-  try {
-    const answers = JSON.parse(localStorage.getItem("mc_answers") || "{}");
-    const streak = JSON.parse(localStorage.getItem("mc_streak") || "{}").days || 0;
-    const timeData = JSON.parse(localStorage.getItem("mc_study_time") || "{}");
-    const wrongMastered = JSON.parse(localStorage.getItem("mc_wrong_mastered") || "0");
-    const sessions = JSON.parse(localStorage.getItem("mc_sessions") || "[]");
-    const totalMinutes = Math.round((timeData.totalSeconds || 0) / 60);
-    const allAnswers = Object.values(answers);
-    const totalAnswered = allAnswers.length;
-    const totalCorrect = allAnswers.filter(Boolean).length;
-    const overallAccuracy = totalAnswered > 0 ? Math.round(totalCorrect / totalAnswered * 100) : 0;
-    const chaptersAttempted = new Set(Object.keys(JSON.parse(localStorage.getItem("mc_chapter_answers") || "{}"))).size;
-    const hadPerfect = sessions.some(s => s.correct === s.total && s.total >= 5);
-    const hadSpeedAnswer = JSON.parse(localStorage.getItem("mc_had_speed") || "false");
-    return { totalAnswered, totalCorrect, overallAccuracy, streak, totalMinutes, masteredWrong: Number(wrongMastered), chaptersAttempted, hadPerfect, hadSpeedAnswer };
-  } catch { return { totalAnswered: 0, totalCorrect: 0, overallAccuracy: 0, streak: 0, totalMinutes: 0, masteredWrong: 0, chaptersAttempted: 0, hadPerfect: false, hadSpeedAnswer: false }; }
-};
-
-const getUnlockedBadges = () => {
-  const stats = getBadgeStats();
-  return BADGES.filter(b => b.check(stats));
-};
+// Badge / Achievement system removed —— 用户反馈"勋章成就只是装饰性指标，浪费版面"。
+// 保留 mc_streak / mc_study_time / mc_sessions 等底层数据写入，为后续真正的学习分析报表服务。
 
 // Study time tracker helper (call on quiz start/end)
 const recordStudyTime = (seconds) => {
@@ -1627,7 +1592,7 @@ const findChunkRefContext = (chunk, refDefs) => {
   return hits;
 };
 
-const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
+const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvider = null, forceUserKey = null }) => {
   const materialId = material?.id;
   if (!materialId) return { topics: [], questions: [], insertedCount: 0, materialLinked: false };
 
@@ -1734,6 +1699,11 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
   //   - 每块自动注入它引用到的编号定义，解决"方程(1)"这类悬挂引用
   if (hasText) {
     const aiCfg = getAIConfig();
+    // forceProvider 来自"用 XX 重抽"按钮：覆盖默认 provider，并使用对应 provider 的用户 key（若有）
+    const effectiveProvider = forceProvider || aiCfg.provider;
+    const effectiveKey = forceProvider
+      ? (forceUserKey || aiCfg.allKeys?.[forceProvider] || "")
+      : aiCfg.key;
     const fullText = text.slice(0, 24000); // 上限保护，避免极端长文挤爆
     const refDefs = extractReferenceDefinitions(fullText);
     const chunks = buildSemanticChunks(fullText, { target: 3500, overlap: 250, max: 4 });
@@ -1766,7 +1736,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10 }) => {
             chunkIndex: idx,
             chunkCount: chunks.length,
             refContext: refs,
-            userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+            userProvider: effectiveProvider, userKey: effectiveKey, userCustomUrl: aiCfg.customUrl,
           }),
         });
         const data = await resp.json();
@@ -4629,8 +4599,6 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
   const providerLabel = { groq: "Groq", gemini: "Gemini", deepseek: "DeepSeek", kimi: "Kimi", custom: "自定义" }[aiCfg.provider] || "Groq";
 
   const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); return d.days || 1; } catch { return 1; } })();
-  const badgeStats = getBadgeStats();
-  const unlockedIds = new Set(BADGES.filter(b => b.check(badgeStats)).map(b => b.id));
 
   // 教材列表（跟着用户的可见性规则走：teacher 全部、学生只看自己 + 公开已审核）
   const [materials, setMaterials] = useState([]);
@@ -4741,7 +4709,6 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
         <div style={{ display: "flex", gap: 14 }}>
           {[
             { title: "连续学习", val: `${streak}` , unit: "天" },
-            { title: "徽章", val: `${unlockedIds.size}`, unit: `/${BADGES.length}` },
             { title: "题库", val: `${ALL_QUESTIONS.length}`, unit: "+" },
           ].map(i => (
             <div key={i.title} style={{ textAlign: "right", minWidth: 70 }}>
@@ -4896,30 +4863,7 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
         </div>
       </SectionCard>
 
-      {/* ④ 成就墙（精简版）—— 保留正反馈，但不再喧宾夺主 */}
-      <SectionCard style={{ padding: "1rem 1.2rem" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 800, color: "#334155", letterSpacing: "0.04em" }}>🏅 成就墙</div>
-          <div style={{ fontSize: 11, color: "#94A3B8" }}>{unlockedIds.size} / {BADGES.length} 已解锁</div>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 10 }}>
-          {BADGES.map(b => {
-            const unlocked = unlockedIds.has(b.id);
-            return (
-              <div key={b.id} title={b.desc} style={{
-                background: unlocked ? "#fffbe6" : "#fff",
-                border: unlocked ? "1.5px solid #facc15" : `1px solid ${T.border}`,
-                borderRadius: 12, padding: "10px 6px",
-                display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
-                opacity: unlocked ? 1 : 0.45,
-              }}>
-                <span style={{ fontSize: 22, filter: unlocked ? "none" : "grayscale(1)" }}>{b.emoji}</span>
-                <div style={{ fontSize: 11.5, fontWeight: 700, color: unlocked ? "#78350f" : "#999", textAlign: "center" }}>{b.name}</div>
-              </div>
-            );
-          })}
-        </div>
-      </SectionCard>
+      {/* 成就墙已移除：用户反馈"成就/勋章是装饰性噪音，不如把版面让给真正的学习内容" */}
     </div>
   );
 }
@@ -5024,6 +4968,49 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const [selectedTopicMeta, setSelectedTopicMeta] = useState(null);
   // AI 知识点 provider tab：null = 全部；否则匹配 t.provider
   const [providerFilter, setProviderFilter] = useState(null);
+  // "用 XX 重抽"运行状态：{ provider, status: "running"|"done"|"error", msg }
+  const [reExtractStatus, setReExtractStatus] = useState(null);
+
+  // 用指定 provider 触发一次知识点重抽：免费的 Groq / Gemini / DeepSeek / Kimi 都可以
+  // 设计意图：让用户对比同一份资料在不同 AI 眼里的"知识点骨架"——这是免费多 AI 抽取的核心价值
+  const triggerReExtract = async (provider) => {
+    if (!selectedMaterial?.id) return;
+    setReExtractStatus({ provider, status: "running", msg: `正在用 ${provider} 重抽（约 10-25 秒）…` });
+    try {
+      const { data: matRow, error: matErr } = await supabase
+        .from("materials")
+        .select("id,title,course,chapter,description,file_name,file_data")
+        .eq("id", selectedMaterial.id)
+        .single();
+      if (matErr || !matRow) throw new Error(matErr?.message || "未找到资料");
+      const fetchedFile = matRow?.file_data
+        ? await fetchFileAsBrowserFile(matRow.file_data, matRow.file_name || "material.pdf")
+        : null;
+      const aiCfg = getAIConfig();
+      const userKeyForProvider = aiCfg.allKeys?.[provider] || "";
+      const result = await processMaterialWithAI({
+        material: matRow,
+        file: fetchedFile,
+        fallbackText: `${matRow.title || ""} ${matRow.description || ""}`,
+        genCount: 8,
+        forceProvider: provider,
+        forceUserKey: userKeyForProvider,
+        actorName: `用户重抽（${provider}）`,
+      });
+      if (result?.apiQuotaExceeded) {
+        setReExtractStatus({ provider, status: "error", msg: `⚠️ ${provider} 配额用尽。免费档每分钟有上限，过 1 分钟再试，或换一个 provider。` });
+      } else if ((result?.topicsLinked || 0) > 0) {
+        setReExtractStatus({ provider, status: "done", msg: `✅ ${provider} 抽到 ${result.topicsLinked} 个知识点。` });
+        await reloadKnowledge();
+        // 自动切到刚抽出来的 provider tab，让结果立刻可见
+        setProviderFilter(provider);
+      } else {
+        setReExtractStatus({ provider, status: "error", msg: `${provider} 抽取完成，但没有新增知识点（可能 PDF 文字提取不充分 / 列未建出来）。` });
+      }
+    } catch (e) {
+      setReExtractStatus({ provider, status: "error", msg: `用 ${provider} 重抽失败：${e?.message || "未知错误"}` });
+    }
+  };
 
   const openTopic = (t, mat) => {
     setSelectedTopic(t.name);
@@ -5102,7 +5089,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                 <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>{totalTopicCount} 个知识点</span>
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>
               <Btn size="sm" onClick={() => reloadKnowledge()}>刷新</Btn>
               <Btn size="sm" onClick={() => setPage("上传资料")}>上传新资料</Btn>
               <Btn size="sm" variant="primary" onClick={() => { if (!selectedMaterial) return; setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || "")); }} disabled={!selectedMaterial}>
@@ -5110,6 +5097,45 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
               </Btn>
             </div>
           </div>
+
+          {/* 用不同 AI 重抽 —— 免费档 provider 全列出来，让用户能对比不同 AI 的知识点结构 */}
+          {selectedMaterial?.id && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 12, background: "linear-gradient(90deg, #FEF3C7 0%, #EFF6FF 100%)", border: "1px solid #FDE68A", marginBottom: 18 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 800, color: "#92400E" }}>🔁 用不同 AI 重抽（免费）</span>
+              <span style={{ fontSize: 11.5, color: "#78350F", fontWeight: 500 }}>对比不同 AI 视角下的知识点骨架</span>
+              <span style={{ flex: 1 }} />
+              {[
+                { id: "groq",     label: "Groq",     color: "#F97316" },
+                { id: "gemini",   label: "Gemini",   color: "#4285F4" },
+                { id: "deepseek", label: "DeepSeek", color: "#0EA5E9" },
+                { id: "kimi",     label: "Kimi",     color: "#8B5CF6" },
+              ].map(p => {
+                const running = reExtractStatus?.provider === p.id && reExtractStatus?.status === "running";
+                return (
+                  <button key={p.id}
+                    disabled={running}
+                    onClick={() => triggerReExtract(p.id)}
+                    style={{
+                      padding: "5px 12px", borderRadius: 999,
+                      background: running ? p.color + "55" : "#fff",
+                      color: p.color, border: `1.5px solid ${p.color}`,
+                      fontSize: 11.5, fontWeight: 800, cursor: running ? "wait" : "pointer", fontFamily: "inherit",
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                    }}
+                    title={`让 ${p.label} 重新读这份资料并抽知识点；结果会以独立 tab 出现，不覆盖现有内容`}
+                  >
+                    {running && <span style={{ width: 10, height: 10, borderRadius: "50%", border: `2px solid ${p.color}`, borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} />}
+                    🤖 {p.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {reExtractStatus && reExtractStatus.status !== "running" && (
+            <div style={{ marginBottom: 14, padding: "8px 12px", borderRadius: 10, fontSize: 12.5, color: reExtractStatus.status === "done" ? "#047857" : "#991B1B", background: reExtractStatus.status === "done" ? "#ECFDF5" : "#FEF2F2", border: `1px solid ${reExtractStatus.status === "done" ? "#A7F3D0" : "#FECACA"}` }}>
+              {reExtractStatus.msg}
+            </div>
+          )}
 
           {/* ── AI extracted topics (material_topics) for this material ── */}
           {aiTopicsForMaterial.length > 0 && (
@@ -5465,6 +5491,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [materialGenerating, setMaterialGenerating] = useState(false);
   const [materialGenerateMsg, setMaterialGenerateMsg] = useState("");
   const autoGenTriedRef = useRef(false);
+  // 自动补题守卫（pool < 12 时后台触发一次）
+  const autoTopUpTriedRef = useRef(false);
   const timerRef = useRef(null);
 
   const tryGenerateQuestionsForMaterial = async (mid) => {
@@ -5483,7 +5511,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         material,
         file: fetchedFile,
         fallbackText: `${material.title || ""} ${material.description || ""}`,
-        genCount: 8,
+        genCount: 15,
         actorName: "系统自动补题",
       });
       const inserted = result?.insertedCount ?? result?.questions?.length ?? 0;
@@ -5559,6 +5587,22 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       }
       setAllQuestions(pool.sort(() => Math.random() - 0.5));
       setLoading(false);
+
+      // 自动补题：资料题池小于 12 道时，后台静默调一次 AI 生成 —— 用户反馈"题库题目太少"
+      // 只在已绑定 material 的入口触发（小测沙盒会绑当前教材）；非教材入口不动 ALL_QUESTIONS。
+      // 用 ref 守卫保证一次只跑一次，防止 race。
+      if (effectiveMaterialId && pool.length > 0 && pool.length < 12 && !autoTopUpTriedRef.current) {
+        autoTopUpTriedRef.current = true;
+        // 不阻塞 UI：异步 fire-and-forget；完成后悄悄 reload 题池
+        (async () => {
+          try {
+            await tryGenerateQuestionsForMaterial(effectiveMaterialId);
+            const refresh = await supabase.from("questions").select("*").eq("material_id", effectiveMaterialId);
+            const next = (refresh.data || []).filter((q) => !isLowQualityQuestion(q));
+            if (next.length > pool.length) setAllQuestions(next.sort(() => Math.random() - 0.5));
+          } catch { /* 失败静默 —— 用户已经在原 pool 上做题 */ }
+        })();
+      }
     };
     loadQuestions();
   }, [effectiveMaterialId, sandboxCourse]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -9007,7 +9051,7 @@ function UploadPage({ setPage, profile }) {
       aiResult = await processMaterialWithAI({
         material: insertedMaterial,
         file: tFile,
-        genCount: 10,
+        genCount: 18,
         actorName: profile?.name || "用户",
       });
     } catch (e) {
@@ -12536,7 +12580,7 @@ function TeacherPage({ setPage, profile }) {
             material: { ...material, status: "approved" },
             file: null,
             fallbackText: `${material?.title || ""} ${material?.description || ""}`,
-            genCount: 10,
+            genCount: 18,
             actorName: profile?.name || "教师",
           });
         } catch (e) {}
@@ -12556,7 +12600,7 @@ function TeacherPage({ setPage, profile }) {
             material: { ...material, status: "approved" },
             file: null,
             fallbackText: `${material?.title || ""} ${material?.description || ""}`,
-            genCount: 10,
+            genCount: 18,
             actorName: profile?.name || "教师",
           });
         } catch (e) {}
@@ -13366,10 +13410,13 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     };
   }, [aiTopicsLoaded]);
 
-  // AI 节点 + 合并后的节点集 / 索引（替代原来的全局 SKILL_TREE / NODE_INDEX）
-  const aiNodes = useMemo(() => placeAiTopicsToTree(aiTopics, SKILL_TREE), [aiTopics]);
-  const treeNodes = useMemo(() => [...SKILL_TREE, ...aiNodes], [aiNodes]);
-  const nodeIndex = useMemo(() => Object.fromEntries(treeNodes.map(n => [n.id, n])), [treeNodes]);
+  // 知识树只渲染人工策划的 SKILL_TREE（带依赖箭头），不再把 AI 抽取的扁平节点堆到画布右侧。
+  // —— 用户反馈："知识树的综合需要体现逻辑关系，不是单纯全列出来"。
+  // AI 抽取的知识点已经在"知识点"tab 按 provider 分组展示，这里不再重复堆放，避免视觉撞车。
+  const treeNodes = useMemo(() => SKILL_TREE, []);
+  const nodeIndex = useMemo(() => NODE_INDEX, []);
+  // aiTopics 仍然保留状态，以便底部驾驶舱里显示"已抽取 N 个 AI 知识点 → 去知识点页查看"的引流文案。
+  void aiTopics; void aiTopicsLoaded; void isRefreshingAi;
 
   // ══ 悬浮高亮：沿依赖链向上/向下扫描，点亮前置 + 后续，其他节点/边暗化 ══
   const [hoveredId, setHoveredId] = useState(null);
@@ -13419,7 +13466,8 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     else if (typeof setPage === "function") setPage(p);
   };
 
-  const courses = useMemo(() => ["全部", ...Array.from(new Set(treeNodes.map(s => s.course)))], [treeNodes]);
+  // "综合" 已废弃（AI 节点不再注入 canvas），过滤掉避免再出现一个空 tab
+  const courses = useMemo(() => ["全部", ...Array.from(new Set(treeNodes.map(s => s.course))).filter(c => c !== "综合")], [treeNodes]);
   const visibleNodes = useMemo(() => (
     selectedCourse === "全部" ? treeNodes : treeNodes.filter(n => n.course === selectedCourse)
   ), [selectedCourse, treeNodes]);
@@ -14276,8 +14324,6 @@ function LegendItem({ kind, text }) {
 function GatewayPage({ profile, onMaterial, onExam }) {
   const spring = { type: "spring", stiffness: 300, damping: 25 };
   const streak = (() => { try { const d = JSON.parse(localStorage.getItem("mc_streak") || "{}"); return d.days || 1; } catch { return 1; } })();
-  const badgeStats = getBadgeStats();
-  const unlocked = BADGES.filter(b => b.check(badgeStats)).length;
   const displayName = profile?.name || "ISAA";
 
   const IconZap = ({ size = 16, color }) => (
@@ -14285,9 +14331,6 @@ function GatewayPage({ profile, onMaterial, onExam }) {
   );
   const IconDatabase = ({ size = 16, color }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4 3 9 3s9-1.34 9-3v-6"/></svg>
-  );
-  const IconTrophy = ({ size = 16, color }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
   );
   const IconSmartphone = ({ size = 28, color, style }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
@@ -14303,7 +14346,6 @@ function GatewayPage({ profile, onMaterial, onExam }) {
     { label: "连续学习", value: streak + " 天", icon: <IconZap color="#F59E0B" /> },
     { label: "题库规模", value: ALL_QUESTIONS.length + "+", icon: <IconDatabase color="#3B82F6" /> },
     { label: "记忆卡", value: String(FLASHCARDS.length), icon: <IconTarget size={16} color="#F43F5E" strokeWidth={2.5} /> },
-    { label: "徽章", value: unlocked + "/" + BADGES.length, icon: <IconTrophy color="#F43F5E" /> },
   ];
 
   const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1 } } };
