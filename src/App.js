@@ -5383,98 +5383,95 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
             </div>
           </div>
 
-          {/* 用不同 AI 重抽 —— 紧凑单行：标题 + 头像胶囊一字排开，悬停显示名字 */}
-          {selectedMaterial?.id && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, background: "#FAFAFA", border: "1px solid #F1F5F9", marginBottom: 14, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#475569", flexShrink: 0 }}>🔁 用 AI 重抽：</span>
-              {RE_EXTRACT_PROVIDERS.map(pid => {
-                const meta = PROVIDER_META[pid] || PROVIDER_META.unknown;
-                const running = reExtractStatus?.provider === pid && reExtractStatus?.status === "running";
-                return (
-                  <button key={pid}
-                    disabled={running}
-                    onClick={() => triggerReExtract(pid)}
-                    title={`用 ${meta.label} 重新抽取知识点（结果会作为独立来源出现，不覆盖已有）`}
-                    style={{
-                      width: 28, height: 28, borderRadius: 8, padding: 0,
-                      background: running ? meta.color + "33" : meta.color,
-                      color: "#fff", border: "none",
-                      fontSize: 12, fontWeight: 900, cursor: running ? "wait" : "pointer", fontFamily: "inherit",
-                      display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                      transition: "transform .12s, box-shadow .12s",
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 12px ${meta.color}55`; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}
-                  >
-                    {running ? <span style={{ width: 10, height: 10, borderRadius: "50%", border: "2px solid #fff", borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} /> : meta.avatar}
-                  </button>
-                );
-              })}
-              {reExtractStatus?.status === "running" && (
-                <span style={{ marginLeft: 4, fontSize: 11.5, color: "#0EA5E9", fontWeight: 600 }}>
-                  {PROVIDER_META[reExtractStatus.provider]?.label || reExtractStatus.provider} 抽取中…
-                </span>
-              )}
-            </div>
-          )}
-          {reExtractStatus && reExtractStatus.status !== "running" && (
-            <div style={{ marginBottom: 14, padding: "8px 12px", borderRadius: 10, fontSize: 12.5, color: reExtractStatus.status === "done" ? "#047857" : "#991B1B", background: reExtractStatus.status === "done" ? "#ECFDF5" : "#FEF2F2", border: `1px solid ${reExtractStatus.status === "done" ? "#A7F3D0" : "#FECACA"}` }}>
-              {reExtractStatus.msg}
-            </div>
-          )}
-
-          {/* ── AI extracted topics (material_topics) for this material ── */}
+          {/* ── AI 抽取 知识点区块 —— 头部"AI 抽取"徽章本身就是入口：点击展开切换/重抽面板 ── */}
           {aiTopicsForMaterial.length > 0 && (
             <div style={{ marginBottom: 28 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <span style={{ background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 800, letterSpacing: "0.06em" }}>🤖 AI 抽取</span>
-                <span style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>本资料 AI 提取的核心知识点</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+                {/* 主徽章：可点击展开 dropdown */}
+                <button
+                  onClick={() => setReExtractExpanded(v => !v)}
+                  style={{
+                    background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff",
+                    borderRadius: 8, padding: "4px 12px", fontSize: 11, fontWeight: 800,
+                    letterSpacing: "0.06em", border: "none", cursor: "pointer", fontFamily: "inherit",
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                  }}
+                  title="点击切换显示哪个 AI 的知识点 / 用其他 AI 重抽"
+                >
+                  🤖 AI 抽取
+                  <span style={{ fontSize: 10, transform: reExtractExpanded ? "rotate(180deg)" : "none", transition: "transform .15s" }}>▾</span>
+                </button>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>
+                  {providerFilter ? (PROVIDER_META[providerFilter]?.label || providerFilter) + " 抽取的知识点" : "本资料 AI 提取的核心知识点"}
+                </span>
                 <span style={{ fontSize: 12, color: "#9ca3af" }}>
                   {(providerFilter ? aiTopicsForMaterial.filter(t => (t.provider || "legacy") === providerFilter).length : aiTopicsForMaterial.length)} / {aiTopicsForMaterial.length} 个
                 </span>
+                {reExtractStatus?.status === "running" && (
+                  <span style={{ fontSize: 11.5, color: PROVIDER_META[reExtractStatus.provider]?.color || "#0EA5E9", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: "50%", border: `2px solid ${PROVIDER_META[reExtractStatus.provider]?.color || "#0EA5E9"}`, borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} />
+                    {PROVIDER_META[reExtractStatus.provider]?.label || reExtractStatus.provider} 抽取中…
+                  </span>
+                )}
                 <div style={{ flex: 1, height: 1, background: "#f3f4f6" }} />
               </div>
-              {/* Provider tabs —— 只有 ≥2 个 provider 时才出现，避免单 provider 资料显得啰嗦 */}
-              {providerStats.length >= 2 && (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14, paddingBottom: 12, borderBottom: "1px dashed #f3f4f6" }}>
-                  <button
-                    onClick={() => setProviderFilter(null)}
-                    style={{
-                      padding: "5px 12px", borderRadius: 999,
-                      background: providerFilter === null ? "#111827" : "#fff",
-                      color: providerFilter === null ? "#fff" : "#6B7280",
-                      border: `1px solid ${providerFilter === null ? "#111827" : "#e5e7eb"}`,
-                      fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                    }}
-                  >
-                    全部 AI · {aiTopicsForMaterial.length}
-                  </button>
-                  {providerStats.map((p) => {
-                    const meta = PROVIDER_META[p.provider] || PROVIDER_META.unknown;
-                    const active = providerFilter === p.provider;
-                    return (
-                      <button
-                        key={p.provider}
-                        onClick={() => setProviderFilter(active ? null : p.provider)}
-                        title={p.model ? `模型：${p.model}` : meta.label}
-                        style={{
-                          padding: "5px 12px", borderRadius: 999,
-                          background: active ? meta.color : meta.bg,
-                          color: active ? "#fff" : meta.color,
-                          border: `1px solid ${active ? meta.color : meta.color + "33"}`,
-                          fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
-                          display: "inline-flex", alignItems: "center", gap: 6,
-                        }}
-                      >
-                        <span style={{ width: 6, height: 6, borderRadius: 999, background: active ? "#fff" : meta.color }} />
-                        {meta.label} · {p.count}
-                      </button>
-                    );
-                  })}
-                  <span style={{ flex: 1 }} />
-                  <span style={{ fontSize: 11, color: "#9CA3AF", alignSelf: "center" }}>
-                    💡 不同 AI 抽取角度不同，可切换对照
-                  </span>
+
+              {/* Dropdown 面板：包含「切换显示」+「用其他 AI 重抽」两组操作 */}
+              {reExtractExpanded && (
+                <div style={{ padding: "12px 14px", marginBottom: 14, borderRadius: 12, background: "#FAFAFB", border: "1px solid #E5E7EB" }}>
+                  {/* (A) 切换显示来源 —— 仅当有多个 provider 时出现 */}
+                  {providerStats.length >= 2 && (
+                    <>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 8, letterSpacing: "0.05em" }}>📂 切换显示来源</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+                        <button
+                          onClick={() => setProviderFilter(null)}
+                          style={{ padding: "5px 12px", borderRadius: 999, background: providerFilter === null ? "#111827" : "#fff", color: providerFilter === null ? "#fff" : "#6B7280", border: `1px solid ${providerFilter === null ? "#111827" : "#e5e7eb"}`, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                        >全部 · {aiTopicsForMaterial.length}</button>
+                        {providerStats.map((p) => {
+                          const meta = PROVIDER_META[p.provider] || PROVIDER_META.unknown;
+                          const active = providerFilter === p.provider;
+                          return (
+                            <button key={p.provider}
+                              onClick={() => setProviderFilter(active ? null : p.provider)}
+                              title={p.model ? `模型：${p.model}` : meta.label}
+                              style={{ padding: "5px 12px", borderRadius: 999, background: active ? meta.color : meta.bg, color: active ? "#fff" : meta.color, border: `1px solid ${active ? meta.color : meta.color + "33"}`, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}
+                            >
+                              <span style={{ width: 16, height: 16, borderRadius: 4, background: active ? "rgba(255,255,255,0.25)" : meta.color, color: active ? "#fff" : "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 900 }}>{meta.avatar}</span>
+                              {meta.label} · {p.count}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+
+                  {/* (B) 用其他 AI 重抽 —— 总是出现，紧凑头像方块 */}
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 8, letterSpacing: "0.05em" }}>🔁 用其他 AI 重抽（独立结果·不覆盖现有）</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {RE_EXTRACT_PROVIDERS.map(pid => {
+                      const meta = PROVIDER_META[pid] || PROVIDER_META.unknown;
+                      const running = reExtractStatus?.provider === pid && reExtractStatus?.status === "running";
+                      return (
+                        <button key={pid}
+                          disabled={running}
+                          onClick={() => triggerReExtract(pid)}
+                          title={`用 ${meta.label} 重新抽取`}
+                          style={{ padding: "5px 10px", borderRadius: 999, background: "#fff", color: meta.color, border: `1.5px solid ${meta.color}`, fontSize: 12, fontWeight: 700, cursor: running ? "wait" : "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}
+                        >
+                          <span style={{ width: 16, height: 16, borderRadius: 4, background: meta.color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 900 }}>{running ? "…" : meta.avatar}</span>
+                          {meta.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* 状态栏 */}
+                  {reExtractStatus && reExtractStatus.status !== "running" && (
+                    <div style={{ marginTop: 10, padding: "6px 10px", borderRadius: 8, fontSize: 12, color: reExtractStatus.status === "done" ? "#047857" : "#991B1B", background: reExtractStatus.status === "done" ? "#ECFDF5" : "#FEF2F2", border: `1px solid ${reExtractStatus.status === "done" ? "#A7F3D0" : "#FECACA"}` }}>
+                      {reExtractStatus.msg}
+                    </div>
+                  )}
                 </div>
               )}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
@@ -6902,6 +6899,33 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                              letterSpacing: "0.02em" }}>
               {customPool.length === 0 ? "请放宽筛选条件" : `开始练习 → ${effectiveCount} 题`}
             </button>
+
+            {/* 手动补题：当资料题池存在时，让用户主动让 AI 多生成一批入库 */}
+            {effectiveMaterialId && (
+              <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 10, background: "#F0F9FF", border: "1px dashed #BAE6FD" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12.5, color: "#0369A1", fontWeight: 700 }}>📚 当前题池 {allQuestions.length} 道，觉得少？</span>
+                  <span style={{ flex: 1 }} />
+                  <button
+                    disabled={materialGenerating}
+                    onClick={async () => {
+                      const r = await tryGenerateQuestionsForMaterial(effectiveMaterialId);
+                      if (r.ok) {
+                        const re = await supabase.from("questions").select("*").eq("material_id", effectiveMaterialId);
+                        const next = (re.data || []).filter(q => !isLowQualityQuestion(q));
+                        setAllQuestions(next.sort(() => Math.random() - 0.5));
+                      }
+                    }}
+                    style={{ padding: "6px 14px", background: materialGenerating ? "#94A3B8" : "#0EA5E9", color: "#fff", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: materialGenerating ? "wait" : "pointer", fontFamily: "inherit" }}
+                  >
+                    {materialGenerating ? "生成中…" : "✨ AI 再补 20 题"}
+                  </button>
+                </div>
+                {materialGenerateMsg && (
+                  <div style={{ marginTop: 8, fontSize: 11.5, color: "#0C4A6E" }}>{materialGenerateMsg}</div>
+                )}
+              </div>
+            )}
           </SectionCard>
         )}
 
@@ -11339,10 +11363,13 @@ function ReviewPage({ currentMaterial, switchStudyTab, setQuizIntent, setChapter
       </div>
       <input
         type="range"
-        min={0} max={100} step={5}
+        min={0} max={100} step={1}
         value={value}
         onChange={(e) => onChange(parseInt(e.target.value, 10))}
-        style={{ width: "100%", accentColor: color }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        style={{ width: "100%", accentColor: color, cursor: "grab", height: 24 }}
       />
       <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 4 }}>本教材可用 {cnt} 题</div>
     </div>
