@@ -822,6 +822,22 @@ function AISettingsModal({ onClose }) {
   const [customUrl, setCustomUrl] = useState(localStorage.getItem("mc_ai_custom_url") || "");
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
+  // 连通性测试 —— 调 /api/ping 用最小 prompt 试一次目标 provider
+  const [pingState, setPingState] = useState(null); // null | { loading } | { ok, latencyMs, model } | { error }
+  const handlePing = async () => {
+    setPingState({ loading: true });
+    try {
+      const resp = await fetch("/api/ping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, userKey: key.trim() || null, customUrl: customUrl.trim() || null }),
+      });
+      const data = await resp.json();
+      setPingState(data);
+    } catch (e) {
+      setPingState({ ok: false, error: e?.message || "请求失败" });
+    }
+  };
 
   const curProvider = AI_PROVIDERS.find(p => p.id === provider) || AI_PROVIDERS[0];
 
@@ -942,7 +958,24 @@ function AISettingsModal({ onClose }) {
           </div>
         )}
 
+        {/* 连通性测试结果 */}
+        {pingState && (
+          <div style={{ padding: "10px 12px", borderRadius: 10, marginBottom: 12, fontSize: 12.5,
+            background: pingState.loading ? "#EEF2FF" : pingState.ok ? "#ECFDF5" : "#FEF2F2",
+            color: pingState.loading ? "#4338CA" : pingState.ok ? "#047857" : "#991B1B",
+            border: "1px solid " + (pingState.loading ? "#C7D2FE" : pingState.ok ? "#A7F3D0" : "#FECACA") }}>
+            {pingState.loading && <>⏳ 正在调用 {provider}…</>}
+            {pingState.ok && <>✅ 连通成功 · 延迟 {pingState.latencyMs}ms · 模型 <code style={{ background: "#fff", padding: "0 5px", borderRadius: 4 }}>{pingState.model}</code></>}
+            {!pingState.loading && !pingState.ok && <>❌ 连接失败：{pingState.error || "未知错误"}</>}
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={handlePing}
+            disabled={pingState?.loading}
+            style={{ padding: "12px 14px", fontSize: 13, fontWeight: 700, fontFamily: "inherit", background: "#fff", color: "#374151", border: "1.5px solid #E5E7EB", borderRadius: 12, cursor: pingState?.loading ? "wait" : "pointer", whiteSpace: "nowrap" }}>
+            🔌 测试连接
+          </button>
           <button onClick={handleSave} style={{ flex: 1, padding: "12px 0", fontSize: 15, fontWeight: 700, fontFamily: "inherit", background: saved ? "#4caf50" : G.teal, color: "#fff", border: "none", borderRadius: 12, cursor: "pointer" }}>
             {saved ? "✓ 已保存" : "保存设置"}
           </button>
@@ -4912,6 +4945,155 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
   );
 }
 
+// ── AI 知识点详情弹窗 ────────────────────────────────────────────────────────
+// 复用 TopicModal 的视觉骨架（核心概念 / 公式 / 步骤 / 例题），但内容来自 /api/topic-detail 即时生成
+// 顶部条带颜色 = 出此 topic 的 AI 主色（GPT/Groq/Gemini 等）
+function AITopicDetailModal({ state, providerMeta, onClose, onPractice }) {
+  const { topic, loading, data, error } = state || {};
+  if (!topic) return null;
+  const color = providerMeta?.color || "#7C3AED";
+  const renderLatex = (latex) => {
+    try {
+      const html = katex.renderToString(String(latex || ""), { throwOnError: false, displayMode: true });
+      return <span dangerouslySetInnerHTML={{ __html: html }} />;
+    } catch { return <code>{latex}</code>; }
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,20,40,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: "1rem" }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, maxWidth: 760, width: "100%", maxHeight: "92vh", overflowY: "auto", boxShadow: "0 32px 80px rgba(0,0,0,0.3)" }}>
+        {/* Header */}
+        <div style={{ position: "sticky", top: 0, zIndex: 20, background: "#fff", borderBottom: "1px solid #f0f0f0" }}>
+          <div style={{ height: 4, background: color, borderRadius: "20px 20px 0 0" }} />
+          <div style={{ padding: "1.2rem 1.6rem", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+              <span style={{ width: 36, height: 36, borderRadius: 10, background: color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 900, flexShrink: 0 }}>{providerMeta?.avatar || "🤖"}</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 4 }}>{providerMeta?.label || "AI"} · {topic.chapter || "AI 抽取"}</div>
+                <div style={{ fontSize: 21, fontWeight: 800, color: "#0f172a", lineHeight: 1.3 }}>{topic.name}</div>
+              </div>
+            </div>
+            <button onClick={onClose} style={{ flexShrink: 0, width: 32, height: 32, borderRadius: "50%", border: "none", background: "#f3f4f6", cursor: "pointer", fontSize: 14, color: "#6b7280" }}>✕</button>
+          </div>
+        </div>
+
+        <div style={{ padding: "1.4rem 1.6rem 2rem" }}>
+          {loading && (
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "20px 0", color: "#6B7280", fontSize: 13.5 }}>
+              <span style={{ width: 18, height: 18, borderRadius: "50%", border: `3px solid ${color}`, borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} />
+              {providerMeta?.label || "AI"} 正在为你生成详细讲解（约 5-15 秒）…
+            </div>
+          )}
+          {error && !loading && (
+            <div style={{ padding: "16px 18px", borderRadius: 12, background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", fontSize: 13.5, lineHeight: 1.6 }}>
+              ❌ 生成失败：{error}
+              <div style={{ marginTop: 8, fontSize: 12, color: "#7F1D1D" }}>建议：去"AI 设置"填一个免费 Key（推荐 Groq / Gemini / 智谱），或检查 Vercel 环境变量。</div>
+            </div>
+          )}
+
+          {data && !loading && (
+            <>
+              {/* AI 摘要（已知数据，立刻显示） */}
+              {topic.summary && (
+                <div style={{ marginBottom: 18, padding: "10px 14px", background: providerMeta?.bg || "#F5F3FF", borderRadius: 10, fontSize: 12.5, color: "#475569", lineHeight: 1.6 }}>
+                  <strong style={{ color }}>📝 AI 摘要：</strong>{topic.summary}
+                </div>
+              )}
+
+              {/* §1 核心概念 */}
+              <section style={{ marginBottom: 24 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: 8, background: color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📖</div>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>核心概念</span>
+                </div>
+                <div style={{ fontSize: 14.5, color: "#374151", lineHeight: 1.85, padding: "16px 20px", background: "#f8fafc", borderRadius: 12, borderLeft: `4px solid ${color}` }}>
+                  {data.intro || "（AI 未给出讲解）"}
+                </div>
+              </section>
+
+              {/* §2 关键公式 */}
+              {Array.isArray(data.formulas) && data.formulas.length > 0 && (
+                <section style={{ marginBottom: 24 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: "#8B5CF6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📐</div>
+                    <span style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>关键公式</span>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {data.formulas.map((f, i) => (
+                      <div key={i} style={{ padding: "14px 20px", background: "#faf5ff", borderRadius: 12, border: "1px solid #e9d5ff" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#8B5CF6", marginBottom: 8, display: "flex", gap: 6 }}>
+                          <span style={{ background: "#8B5CF6", color: "#fff", width: 18, height: 18, borderRadius: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10 }}>{i+1}</span>
+                          {(f.label || "").toUpperCase()}
+                        </div>
+                        <div style={{ overflowX: "auto" }}>{renderLatex(f.latex || f.tex || "")}</div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* §3 解题思路 */}
+              {Array.isArray(data.steps) && data.steps.length > 0 && (
+                <section style={{ marginBottom: 24 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: "#3B82F6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🔢</div>
+                    <span style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>解题思路</span>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {data.steps.map((s, i) => (
+                      <div key={i} style={{ display: "flex", gap: 12, padding: "10px 14px", background: "#f0f9ff", borderRadius: 10 }}>
+                        <div style={{ width: 24, height: 24, borderRadius: "50%", background: "#3B82F6", color: "#fff", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i+1}</div>
+                        <div style={{ fontSize: 13.5, color: "#1F2937", lineHeight: 1.65, flex: 1 }}>{String(s).replace(/^第\s*\d+\s*步[：:]\s*/, "")}</div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* §4 例题 */}
+              {Array.isArray(data.examples) && data.examples.length > 0 && (
+                <section style={{ marginBottom: 18 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 8, background: "#F59E0B", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>✏️</div>
+                    <span style={{ fontSize: 15, fontWeight: 800, color: "#0f172a" }}>例题</span>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {data.examples.map((ex, i) => (
+                      <div key={i} style={{ padding: "14px 18px", background: "#FFFBEB", borderRadius: 12, border: "1px solid #FDE68A" }}>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: "#92400E", marginBottom: 6 }}>例题 {i+1}</div>
+                        <div style={{ fontSize: 13.5, color: "#1F2937", lineHeight: 1.7, marginBottom: 8 }}>{ex.question}</div>
+                        <div style={{ fontSize: 12.5, color: "#047857", marginBottom: 4 }}><strong>答案：</strong>{ex.answer}</div>
+                        {ex.explanation && <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6 }}>{ex.explanation}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* §5 可视化提示（文字版） */}
+              {data.viz_hint && (
+                <div style={{ padding: "10px 14px", background: "#ECFDF5", border: "1px dashed #6EE7B7", borderRadius: 10, fontSize: 12.5, color: "#047857", marginBottom: 14 }}>
+                  🎨 <strong>可视化建议：</strong>{data.viz_hint}
+                </div>
+              )}
+
+              {data.apiUsed && <div style={{ fontSize: 10.5, color: "#9CA3AF", textAlign: "right" }}>由 {data.apiUsed} 即时生成</div>}
+            </>
+          )}
+        </div>
+
+        {/* 底部行动栏 */}
+        <div style={{ position: "sticky", bottom: 0, padding: "12px 1.6rem", borderTop: "1px solid #f0f0f0", background: "#fff", display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={{ padding: "8px 16px", borderRadius: 10, border: "1px solid #E5E7EB", background: "#fff", color: "#374151", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>关闭</button>
+          <button onClick={() => onPractice(topic)}
+            style={{ padding: "8px 18px", borderRadius: 10, border: "none", background: color, color: "#fff", fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit", boxShadow: `0 4px 14px ${color}40` }}>
+            ✏️ 按此知识点做题 →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTab, currentMaterial }) {
   // 在学习工作台中，"题库练习"页并不会被渲染；此时应切 StudyWorkspace 的"小测"tab
   const routeSetPage = (p) => {
@@ -5010,10 +5192,39 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
 
   const [selectedTopic, setSelectedTopic] = useState(null);
   const [selectedTopicMeta, setSelectedTopicMeta] = useState(null);
+  // AI 知识点详情弹窗 —— 点 AI 卡片打开，调 /api/topic-detail 即时生成讲解 + 公式 + 步骤 + 例题
+  const [aiTopicDetail, setAiTopicDetail] = useState(null); // { topic, loading, data, error }
   // AI 知识点 provider tab：null = 全部；否则匹配 t.provider
   const [providerFilter, setProviderFilter] = useState(null);
   // "用 XX 重抽"运行状态：{ provider, status: "running"|"done"|"error", msg }
   const [reExtractStatus, setReExtractStatus] = useState(null);
+  // "用 XX 重抽"按钮组是否展开（默认收起，避免占太多版面）
+  const [reExtractExpanded, setReExtractExpanded] = useState(false);
+
+  // 打开 AI topic 详情：先显示骨架，异步调 /api/topic-detail 拉详细内容
+  const openAITopicDetail = async (t) => {
+    setAiTopicDetail({ topic: t, loading: true, data: null, error: null });
+    try {
+      const aiCfg = getAIConfig();
+      const resp = await fetch("/api/topic-detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topicName: t.name,
+          summary: t.summary || "",
+          course: selectedMaterial?.course || "",
+          chapter: t.chapter || "",
+          materialContext: selectedMaterial?.title || "",
+          userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+        }),
+      });
+      const d = await resp.json();
+      if (d.error && !d.intro) setAiTopicDetail({ topic: t, loading: false, data: null, error: d.error });
+      else setAiTopicDetail({ topic: t, loading: false, data: d, error: null });
+    } catch (e) {
+      setAiTopicDetail({ topic: t, loading: false, data: null, error: e?.message || "请求失败" });
+    }
+  };
 
   // 用指定 provider 触发一次知识点重抽：免费的 Groq / Gemini / DeepSeek / Kimi 都可以
   // 设计意图：让用户对比同一份资料在不同 AI 眼里的"知识点骨架"——这是免费多 AI 抽取的核心价值
@@ -5096,16 +5307,23 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     });
     return Array.from(m.values()).sort((a, b) => b.latestAt - a.latestAt || b.count - a.count);
   })();
+  // PROVIDER_META —— 每个 AI 自带头像字符 + 主色 + 浅底色，让用户一眼分清不同 AI 出的知识点
   const PROVIDER_META = {
-    gemini:    { label: "Gemini",   color: "#4285F4", bg: "#EFF6FF" },
-    groq:      { label: "Groq",     color: "#F97316", bg: "#FFF7ED" },
-    deepseek:  { label: "DeepSeek", color: "#0EA5E9", bg: "#F0F9FF" },
-    kimi:      { label: "Kimi",     color: "#8B5CF6", bg: "#F5F3FF" },
-    anthropic: { label: "Claude",   color: "#D97706", bg: "#FFFBEB" },
-    custom:    { label: "自定义",   color: "#6B7280", bg: "#F9FAFB" },
-    legacy:    { label: "历史",     color: "#9CA3AF", bg: "#F9FAFB" },
-    unknown:   { label: "未标记",   color: "#9CA3AF", bg: "#F9FAFB" },
+    gemini:      { label: "Gemini",     avatar: "✦", color: "#4285F4", bg: "#EFF6FF" },
+    groq:        { label: "Groq",       avatar: "G", color: "#F97316", bg: "#FFF7ED" },
+    deepseek:    { label: "DeepSeek",   avatar: "🐋", color: "#0EA5E9", bg: "#F0F9FF" },
+    kimi:        { label: "Kimi",       avatar: "K", color: "#8B5CF6", bg: "#F5F3FF" },
+    anthropic:   { label: "Claude",     avatar: "A", color: "#D97706", bg: "#FFFBEB" },
+    openrouter:  { label: "OpenRouter", avatar: "OR", color: "#7C3AED", bg: "#F5F3FF" },
+    siliconflow: { label: "硅基流动",   avatar: "硅", color: "#0EA5E9", bg: "#F0F9FF" },
+    zhipu:       { label: "智谱 GLM",   avatar: "智", color: "#1F75FE", bg: "#EFF6FF" },
+    cerebras:    { label: "Cerebras",   avatar: "C", color: "#FF6F61", bg: "#FFF1F0" },
+    custom:      { label: "自定义",     avatar: "⚙", color: "#6B7280", bg: "#F9FAFB" },
+    legacy:      { label: "历史",       avatar: "·", color: "#9CA3AF", bg: "#F9FAFB" },
+    unknown:     { label: "未标记",     avatar: "?", color: "#9CA3AF", bg: "#F9FAFB" },
   };
+  // 全部可重抽的免费档 provider，按推荐顺序展开
+  const RE_EXTRACT_PROVIDERS = ["groq", "gemini", "zhipu", "openrouter", "siliconflow", "cerebras", "deepseek", "kimi"];
   const totalTopicCount = courseTopics.length + aiTopicsForMaterial.length;
 
   return (
@@ -5118,6 +5336,26 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           setChapterFilter={setChapterFilter}
           chapterNum={selectedTopicMeta?.chapterNum}
           course={selectedTopicMeta?.course}
+        />
+      )}
+      {aiTopicDetail && (
+        <AITopicDetailModal
+          state={aiTopicDetail}
+          providerMeta={PROVIDER_META[(aiTopicDetail.topic?.provider || "legacy")] || PROVIDER_META.unknown}
+          onClose={() => setAiTopicDetail(null)}
+          onPractice={(t) => {
+            if (typeof setQuizIntent === "function") {
+              setQuizIntent({
+                source: "ai_topic",
+                materialId: selectedMaterialId,
+                topicId: t.id, topicName: t.name, topicSummary: t.summary || "",
+                chapter: t.chapter || null, count: 5,
+              });
+            }
+            setAiTopicDetail(null);
+            if (typeof switchStudyTab === "function") switchStudyTab("小测");
+            else if (selectedMaterial) setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
+          }}
         />
       )}
       <div style={{ padding: "0 0 18px", maxWidth: 1200, margin: "0 auto" }}>
@@ -5142,37 +5380,44 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
             </div>
           </div>
 
-          {/* 用不同 AI 重抽 —— 免费档 provider 全列出来，让用户能对比不同 AI 的知识点结构 */}
+          {/* 用不同 AI 重抽 —— 默认折叠为单按钮，点击后展开全部免费 provider 选择 */}
           {selectedMaterial?.id && (
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 12px", borderRadius: 12, background: "linear-gradient(90deg, #FEF3C7 0%, #EFF6FF 100%)", border: "1px solid #FDE68A", marginBottom: 18 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 800, color: "#92400E" }}>🔁 用不同 AI 重抽（免费）</span>
-              <span style={{ fontSize: 11.5, color: "#78350F", fontWeight: 500 }}>对比不同 AI 视角下的知识点骨架</span>
-              <span style={{ flex: 1 }} />
-              {[
-                { id: "groq",     label: "Groq",     color: "#F97316" },
-                { id: "gemini",   label: "Gemini",   color: "#4285F4" },
-                { id: "deepseek", label: "DeepSeek", color: "#0EA5E9" },
-                { id: "kimi",     label: "Kimi",     color: "#8B5CF6" },
-              ].map(p => {
-                const running = reExtractStatus?.provider === p.id && reExtractStatus?.status === "running";
-                return (
-                  <button key={p.id}
-                    disabled={running}
-                    onClick={() => triggerReExtract(p.id)}
-                    style={{
-                      padding: "5px 12px", borderRadius: 999,
-                      background: running ? p.color + "55" : "#fff",
-                      color: p.color, border: `1.5px solid ${p.color}`,
-                      fontSize: 11.5, fontWeight: 800, cursor: running ? "wait" : "pointer", fontFamily: "inherit",
-                      display: "inline-flex", alignItems: "center", gap: 6,
-                    }}
-                    title={`让 ${p.label} 重新读这份资料并抽知识点；结果会以独立 tab 出现，不覆盖现有内容`}
-                  >
-                    {running && <span style={{ width: 10, height: 10, borderRadius: "50%", border: `2px solid ${p.color}`, borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} />}
-                    🤖 {p.label}
-                  </button>
-                );
-              })}
+            <div style={{ padding: "10px 12px", borderRadius: 12, background: "linear-gradient(90deg, #FEF3C7 0%, #EFF6FF 100%)", border: "1px solid #FDE68A", marginBottom: 18 }}>
+              <button
+                onClick={() => setReExtractExpanded(v => !v)}
+                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: "#92400E" }}>🔁 用不同 AI 重抽知识点</span>
+                <span style={{ fontSize: 11.5, color: "#78350F", fontWeight: 500 }}>{reExtractExpanded ? "（点击收起）" : "（点击展开 · 免费档共 8 个 AI 可选）"}</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 12, color: "#92400E", transform: reExtractExpanded ? "rotate(90deg)" : "none", transition: "transform .15s" }}>▶</span>
+              </button>
+              {reExtractExpanded && (
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #FDE68A", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
+                  {RE_EXTRACT_PROVIDERS.map(pid => {
+                    const meta = PROVIDER_META[pid] || PROVIDER_META.unknown;
+                    const running = reExtractStatus?.provider === pid && reExtractStatus?.status === "running";
+                    return (
+                      <button key={pid}
+                        disabled={running}
+                        onClick={() => triggerReExtract(pid)}
+                        style={{
+                          padding: "8px 10px", borderRadius: 10,
+                          background: running ? meta.color + "20" : "#fff",
+                          color: meta.color, border: `1.5px solid ${meta.color}`,
+                          fontSize: 12, fontWeight: 800, cursor: running ? "wait" : "pointer", fontFamily: "inherit",
+                          display: "inline-flex", alignItems: "center", gap: 7, justifyContent: "flex-start",
+                        }}
+                        title={`让 ${meta.label} 重新读这份资料并抽知识点；结果以独立 tab 出现，不覆盖现有内容`}
+                      >
+                        <span style={{ width: 22, height: 22, borderRadius: 6, background: meta.color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900, flexShrink: 0 }}>{meta.avatar}</span>
+                        {running ? <span style={{ width: 10, height: 10, borderRadius: "50%", border: `2px solid ${meta.color}`, borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} /> : null}
+                        <span style={{ flex: 1, textAlign: "left" }}>{meta.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
           {reExtractStatus && reExtractStatus.status !== "running" && (
@@ -5238,20 +5483,34 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
                 {(providerFilter ? aiTopicsForMaterial.filter(t => (t.provider || "legacy") === providerFilter) : aiTopicsForMaterial).map(t => {
                   const mastery = topicMastery[t.id]?.status || "todo";
+                  const provKey = (t.provider && String(t.provider).trim()) || "legacy";
+                  const provMeta = PROVIDER_META[provKey] || PROVIDER_META.unknown;
                   return (
                     <div
                       key={t.id}
-                      style={{ border: `1.5px solid ${mastery === "done" ? G.teal + "55" : "#ede9fe"}`, borderRadius: 14, padding: "16px", background: mastery === "done" ? "#f0fdf4" : "linear-gradient(180deg,#faf5ff 0%,#ffffff 80%)", display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease" }}
-                      onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 6px 20px rgba(124,58,237,0.15)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
+                      onClick={() => openAITopicDetail(t)}
+                      role="button" tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openAITopicDetail(t); } }}
+                      style={{
+                        border: `1.5px solid ${mastery === "done" ? G.teal + "55" : provMeta.color + "44"}`,
+                        borderRadius: 14, padding: "16px", cursor: "pointer",
+                        background: mastery === "done" ? "#f0fdf4" : `linear-gradient(180deg,${provMeta.bg} 0%,#ffffff 70%)`,
+                        display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease",
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 6px 20px ${provMeta.color}33`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = provMeta.color; }}
+                      onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = mastery === "done" ? G.teal + "55" : provMeta.color + "44"; }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", lineHeight: 1.45, flex: 1 }}>{t.name}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+                          <span style={{ width: 26, height: 26, borderRadius: 7, background: provMeta.color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, flexShrink: 0 }} title={provMeta.label}>{provMeta.avatar}</span>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", lineHeight: 1.45, flex: 1, minWidth: 0 }}>{t.name}</div>
+                        </div>
                         {mastery === "done" && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: G.tealDark, background: G.tealLight, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap", marginTop: 2 }}>已掌握 ✓</span>}
                       </div>
                       <div style={{ fontSize: 12.5, color: "#4b5563", lineHeight: 1.65, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 40 }}>
                         {t.summary || "（AI 未给出摘要）"}
                       </div>
+                      <div style={{ fontSize: 10.5, color: provMeta.color, fontWeight: 700, opacity: 0.8 }}>👆 点击查看 AI 即时讲解 / 公式 / 例题</div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {(() => {
                           const provKey = (t.provider && String(t.provider).trim()) || "legacy";
@@ -5268,12 +5527,11 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                         })()}
                         {t.chapter && <span style={{ fontSize: 10, color: G.blue, background: G.blueLight, padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>{t.chapter}</span>}
                       </div>
-                      <div style={{ display: "flex", gap: 7, marginTop: 2 }}>
+                      <div style={{ display: "flex", gap: 7, marginTop: 2 }} onClick={e => e.stopPropagation()}>
                         <button
-                          onClick={() => {
-                            // 按资料 + topic 直达做题：
-                            //  · 在沙盒里 → switchStudyTab("小测")，autoStartIntent 自动开练
-                            //  · 不在沙盒（legacy 全屏路由）→ 回退到 quiz_material_xxx
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // 按资料 + topic 直达做题
                             if (typeof setQuizIntent === "function") {
                               setQuizIntent({
                                 source: "ai_topic",
@@ -5291,12 +5549,12 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                               setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
                             }
                           }}
-                          style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
+                          style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: provMeta.color, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
                         >
                           ✏️ 按此知识点做题
                         </button>
                         <button
-                          onClick={() => markTopicMastery(t, mastery === "done" ? "todo" : "done")}
+                          onClick={(e) => { e.stopPropagation(); markTopicMastery(t, mastery === "done" ? "todo" : "done"); }}
                           title={mastery === "done" ? "取消掌握" : "标记已掌握"}
                           style={{ padding: "7px 10px", fontSize: 15, background: mastery === "done" ? G.tealLight : "#f9fafb", border: `1.5px solid ${mastery === "done" ? G.teal : "#e5e7eb"}`, borderRadius: 8, cursor: "pointer", lineHeight: 1 }}
                         >
@@ -5555,7 +5813,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         material,
         file: fetchedFile,
         fallbackText: `${material.title || ""} ${material.description || ""}`,
-        genCount: 15,
+        genCount: 20,
         actorName: "系统自动补题",
       });
       const inserted = result?.insertedCount ?? result?.questions?.length ?? 0;
@@ -5635,7 +5893,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       // 自动补题：资料题池小于 12 道时，后台静默调一次 AI 生成 —— 用户反馈"题库题目太少"
       // 只在已绑定 material 的入口触发（小测沙盒会绑当前教材）；非教材入口不动 ALL_QUESTIONS。
       // 用 ref 守卫保证一次只跑一次，防止 race。
-      if (effectiveMaterialId && pool.length > 0 && pool.length < 12 && !autoTopUpTriedRef.current) {
+      if (effectiveMaterialId && pool.length > 0 && pool.length < 20 && !autoTopUpTriedRef.current) {
         autoTopUpTriedRef.current = true;
         // 不阻塞 UI：异步 fire-and-forget；完成后悄悄 reload 题池
         (async () => {
@@ -9194,7 +9452,7 @@ function UploadPage({ setPage, profile }) {
       aiResult = await processMaterialWithAI({
         material: insertedMaterial,
         file: tFile,
-        genCount: 18,
+        genCount: 25,
         actorName: profile?.name || "用户",
       });
     } catch (e) {
@@ -12723,7 +12981,7 @@ function TeacherPage({ setPage, profile }) {
             material: { ...material, status: "approved" },
             file: null,
             fallbackText: `${material?.title || ""} ${material?.description || ""}`,
-            genCount: 18,
+            genCount: 25,
             actorName: profile?.name || "教师",
           });
         } catch (e) {}
@@ -12743,7 +13001,7 @@ function TeacherPage({ setPage, profile }) {
             material: { ...material, status: "approved" },
             file: null,
             fallbackText: `${material?.title || ""} ${material?.description || ""}`,
-            genCount: 18,
+            genCount: 25,
             actorName: profile?.name || "教师",
           });
         } catch (e) {}
