@@ -95,7 +95,7 @@ async function runHandler(req, res) {
   const DEEPSEEK_KEY    = process.env.DEEPSEEK_KEY    || __fromPlatformSlot("deepseek");
   const KIMI_KEY        = process.env.KIMI_KEY        || __fromPlatformSlot("kimi");
   const OPENROUTER_KEY  = process.env.OPENROUTER_KEY  || __fromPlatformSlot("openrouter");
-  const SILICONFLOW_KEY = process.env.SILICONFLOW_KEY || __fromPlatformSlot("siliconflow");
+  const SILICONFLOW_KEY = process.env.SILICONFLOW_KEY || process.env.GUIJI_KEY || __fromPlatformSlot("siliconflow");
   const ZHIPU_KEY       = process.env.ZHIPU_KEY       || __fromPlatformSlot("zhipu");
   const CEREBRAS_KEY    = process.env.CEREBRAS_KEY    || __fromPlatformSlot("cerebras");
 

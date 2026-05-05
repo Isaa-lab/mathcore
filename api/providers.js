@@ -9,18 +9,21 @@
 const looksSet = (v) => typeof v === "string" && v.trim().length > 8;
 
 function hasKeyFor(provider) {
-  const explicitVar = {
-    groq:        "GROQ_KEY",
-    gemini:      "GEMINI_KEY",
-    deepseek:    "DEEPSEEK_KEY",
-    kimi:        "KIMI_KEY",
-    anthropic:   "ANTHROPIC_KEY",
-    openrouter:  "OPENROUTER_KEY",
-    siliconflow: "SILICONFLOW_KEY",
-    zhipu:       "ZHIPU_KEY",
-    cerebras:    "CEREBRAS_KEY",
-  }[provider];
-  if (explicitVar && looksSet(process.env[explicitVar])) return true;
+  // 每个 provider 可以有多个候选环境变量名（兼容 GUIJI_KEY 这种拼音命名）
+  const explicitVars = {
+    groq:        ["GROQ_KEY"],
+    gemini:      ["GEMINI_KEY"],
+    deepseek:    ["DEEPSEEK_KEY"],
+    kimi:        ["KIMI_KEY"],
+    anthropic:   ["ANTHROPIC_KEY"],
+    openrouter:  ["OPENROUTER_KEY"],
+    siliconflow: ["SILICONFLOW_KEY", "GUIJI_KEY"],
+    zhipu:       ["ZHIPU_KEY"],
+    cerebras:    ["CEREBRAS_KEY"],
+  }[provider] || [];
+  for (const v of explicitVars) {
+    if (looksSet(process.env[v])) return true;
+  }
   const platformProvider = String(process.env.PLATFORM_PROVIDER || "").trim().toLowerCase();
   if (platformProvider === provider && looksSet(process.env.PLATFORM_API_KEY)) return true;
   return false;

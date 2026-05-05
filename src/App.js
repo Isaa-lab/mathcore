@@ -1754,6 +1754,11 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
   let topics = [], questions = [], usedApi = false;
   let apiQuotaExceeded = false;
   let apiErrorMsg = "";
+  // 记录这次抽取实际用到的 provider —— 写库时打到每条 topic 上，方便 KnowledgePage 按来源分 tab
+  // 必须声明在 hasText 块之外，因为 Step 5b 入库时还要读它（之前漏了导致 ReferenceError → "用 XX 重抽失败"）
+  let lastApiUsed = null;
+  // forceProvider 来自"用 XX 重抽"按钮，作为 provider 的兜底身份，即使 AI 抽不到 topic 也能记录到
+  if (forceProvider) lastApiUsed = `${forceProvider}(forced)`;
 
   // Step 3: 语义分块 + 引用解析 → 分批调 /api/extract
   //   - 短文档（<4200 字）仍走单次调用，不增加请求数
@@ -1774,8 +1779,6 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
     const aggregatedTopics = [];
     const aggregatedQuestions = [];
     const seenTopicNames = new Set();
-    // 记录这次抽取实际用到的 provider —— 写库时打到每条 topic 上，方便 KnowledgePage 按来源分 tab
-    let lastApiUsed = null;
 
     for (let idx = 0; idx < chunks.length; idx++) {
       const chunk = chunks[idx];
@@ -5319,8 +5322,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     zhipu:       { label: "智谱 GLM",   avatar: "智", color: "#1F75FE", bg: "#EFF6FF" },
     cerebras:    { label: "Cerebras",   avatar: "C", color: "#FF6F61", bg: "#FFF1F0" },
     custom:      { label: "自定义",     avatar: "⚙", color: "#6B7280", bg: "#F9FAFB" },
-    legacy:      { label: "历史",       avatar: "·", color: "#9CA3AF", bg: "#F9FAFB" },
-    unknown:     { label: "未标记",     avatar: "?", color: "#9CA3AF", bg: "#F9FAFB" },
+    legacy:      { label: "AI 抽取",    avatar: "🤖", color: "#7C3AED", bg: "#F5F3FF" },
+    unknown:     { label: "AI 抽取",    avatar: "🤖", color: "#7C3AED", bg: "#F5F3FF" },
   };
   // 全部可重抽的免费档 provider，按推荐顺序展开
   const RE_EXTRACT_PROVIDERS = ["groq", "gemini", "zhipu", "openrouter", "siliconflow", "cerebras", "deepseek", "kimi"];
@@ -5380,43 +5383,37 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
             </div>
           </div>
 
-          {/* 用不同 AI 重抽 —— 默认折叠为单按钮，点击后展开全部免费 provider 选择 */}
+          {/* 用不同 AI 重抽 —— 紧凑单行：标题 + 头像胶囊一字排开，悬停显示名字 */}
           {selectedMaterial?.id && (
-            <div style={{ padding: "10px 12px", borderRadius: 12, background: "linear-gradient(90deg, #FEF3C7 0%, #EFF6FF 100%)", border: "1px solid #FDE68A", marginBottom: 18 }}>
-              <button
-                onClick={() => setReExtractExpanded(v => !v)}
-                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}
-              >
-                <span style={{ fontSize: 12.5, fontWeight: 800, color: "#92400E" }}>🔁 用不同 AI 重抽知识点</span>
-                <span style={{ fontSize: 11.5, color: "#78350F", fontWeight: 500 }}>{reExtractExpanded ? "（点击收起）" : "（点击展开 · 免费档共 8 个 AI 可选）"}</span>
-                <span style={{ flex: 1 }} />
-                <span style={{ fontSize: 12, color: "#92400E", transform: reExtractExpanded ? "rotate(90deg)" : "none", transition: "transform .15s" }}>▶</span>
-              </button>
-              {reExtractExpanded && (
-                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #FDE68A", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8 }}>
-                  {RE_EXTRACT_PROVIDERS.map(pid => {
-                    const meta = PROVIDER_META[pid] || PROVIDER_META.unknown;
-                    const running = reExtractStatus?.provider === pid && reExtractStatus?.status === "running";
-                    return (
-                      <button key={pid}
-                        disabled={running}
-                        onClick={() => triggerReExtract(pid)}
-                        style={{
-                          padding: "8px 10px", borderRadius: 10,
-                          background: running ? meta.color + "20" : "#fff",
-                          color: meta.color, border: `1.5px solid ${meta.color}`,
-                          fontSize: 12, fontWeight: 800, cursor: running ? "wait" : "pointer", fontFamily: "inherit",
-                          display: "inline-flex", alignItems: "center", gap: 7, justifyContent: "flex-start",
-                        }}
-                        title={`让 ${meta.label} 重新读这份资料并抽知识点；结果以独立 tab 出现，不覆盖现有内容`}
-                      >
-                        <span style={{ width: 22, height: 22, borderRadius: 6, background: meta.color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 900, flexShrink: 0 }}>{meta.avatar}</span>
-                        {running ? <span style={{ width: 10, height: 10, borderRadius: "50%", border: `2px solid ${meta.color}`, borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} /> : null}
-                        <span style={{ flex: 1, textAlign: "left" }}>{meta.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 10, background: "#FAFAFA", border: "1px solid #F1F5F9", marginBottom: 14, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#475569", flexShrink: 0 }}>🔁 用 AI 重抽：</span>
+              {RE_EXTRACT_PROVIDERS.map(pid => {
+                const meta = PROVIDER_META[pid] || PROVIDER_META.unknown;
+                const running = reExtractStatus?.provider === pid && reExtractStatus?.status === "running";
+                return (
+                  <button key={pid}
+                    disabled={running}
+                    onClick={() => triggerReExtract(pid)}
+                    title={`用 ${meta.label} 重新抽取知识点（结果会作为独立来源出现，不覆盖已有）`}
+                    style={{
+                      width: 28, height: 28, borderRadius: 8, padding: 0,
+                      background: running ? meta.color + "33" : meta.color,
+                      color: "#fff", border: "none",
+                      fontSize: 12, fontWeight: 900, cursor: running ? "wait" : "pointer", fontFamily: "inherit",
+                      display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                      transition: "transform .12s, box-shadow .12s",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = `0 4px 12px ${meta.color}55`; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}
+                  >
+                    {running ? <span style={{ width: 10, height: 10, borderRadius: "50%", border: "2px solid #fff", borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} /> : meta.avatar}
+                  </button>
+                );
+              })}
+              {reExtractStatus?.status === "running" && (
+                <span style={{ marginLeft: 4, fontSize: 11.5, color: "#0EA5E9", fontWeight: 600 }}>
+                  {PROVIDER_META[reExtractStatus.provider]?.label || reExtractStatus.provider} 抽取中…
+                </span>
               )}
             </div>
           )}
@@ -5510,23 +5507,22 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                       <div style={{ fontSize: 12.5, color: "#4b5563", lineHeight: 1.65, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 40 }}>
                         {t.summary || "（AI 未给出摘要）"}
                       </div>
-                      <div style={{ fontSize: 10.5, color: provMeta.color, fontWeight: 700, opacity: 0.8 }}>👆 点击查看 AI 即时讲解 / 公式 / 例题</div>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {(() => {
-                          const provKey = (t.provider && String(t.provider).trim()) || "legacy";
-                          const meta = PROVIDER_META[provKey] || PROVIDER_META.unknown;
-                          return (
+                      {/* 紧凑徽章行：legacy/unknown 不显示来源 chip（无信息量），只在有真实 provider 时才显示。
+                          chapter 改为更小的纯文字小字，不再弄成胶囊降低视觉噪音。 */}
+                      {((provKey !== "legacy" && provKey !== "unknown") || t.chapter) && (
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 10.5 }}>
+                          {(provKey !== "legacy" && provKey !== "unknown") && (
                             <span
-                              title={t.provider_model ? `${meta.label} · ${t.provider_model}` : meta.label}
-                              style={{ fontSize: 10, color: meta.color, background: meta.bg, padding: "2px 7px", borderRadius: 20, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}
+                              title={t.provider_model ? `${provMeta.label} · ${t.provider_model}` : provMeta.label}
+                              style={{ color: provMeta.color, background: provMeta.bg, padding: "2px 7px", borderRadius: 20, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}
                             >
-                              <span style={{ width: 5, height: 5, borderRadius: 999, background: meta.color }} />
-                              {meta.label}
+                              <span style={{ width: 5, height: 5, borderRadius: 999, background: provMeta.color }} />
+                              {provMeta.label}
                             </span>
-                          );
-                        })()}
-                        {t.chapter && <span style={{ fontSize: 10, color: G.blue, background: G.blueLight, padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>{t.chapter}</span>}
-                      </div>
+                          )}
+                          {t.chapter && <span style={{ color: "#94A3B8", fontWeight: 500 }}>· {t.chapter}</span>}
+                        </div>
+                      )}
                       <div style={{ display: "flex", gap: 7, marginTop: 2 }} onClick={e => e.stopPropagation()}>
                         <button
                           onClick={(e) => {

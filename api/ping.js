@@ -52,13 +52,17 @@ export default async function handler(req, res) {
     // 决定使用哪个 Key：用户 Key 优先；否则用 server 端对应 env
     let key = userKey && String(userKey).trim().length > 8 ? String(userKey).trim() : null;
     if (!key) {
-      const envName = {
-        groq:"GROQ_KEY", gemini:"GEMINI_KEY", deepseek:"DEEPSEEK_KEY", kimi:"KIMI_KEY",
-        anthropic:"ANTHROPIC_KEY", openrouter:"OPENROUTER_KEY", siliconflow:"SILICONFLOW_KEY",
-        zhipu:"ZHIPU_KEY", cerebras:"CEREBRAS_KEY",
-      }[provider];
-      if (envName && process.env[envName] && String(process.env[envName]).trim().length > 8) {
-        key = String(process.env[envName]).trim();
+      const envNames = {
+        groq:["GROQ_KEY"], gemini:["GEMINI_KEY"], deepseek:["DEEPSEEK_KEY"], kimi:["KIMI_KEY"],
+        anthropic:["ANTHROPIC_KEY"], openrouter:["OPENROUTER_KEY"],
+        siliconflow:["SILICONFLOW_KEY", "GUIJI_KEY"],
+        zhipu:["ZHIPU_KEY"], cerebras:["CEREBRAS_KEY"],
+      }[provider] || [];
+      for (const envName of envNames) {
+        if (process.env[envName] && String(process.env[envName]).trim().length > 8) {
+          key = String(process.env[envName]).trim();
+          break;
+        }
       }
     }
     if (!key) {

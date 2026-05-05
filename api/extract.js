@@ -12,7 +12,8 @@ export default async function handler(req, res) {
   const ANTHROPIC_KEY   = process.env.ANTHROPIC_KEY;
   const GROQ_KEY        = process.env.GROQ_KEY;
   const OPENROUTER_KEY  = process.env.OPENROUTER_KEY;
-  const SILICONFLOW_KEY = process.env.SILICONFLOW_KEY;
+  // 硅基流动 SiliconFlow 支持两套环境变量名：SILICONFLOW_KEY 或 GUIJI_KEY（拼音简写）
+  const SILICONFLOW_KEY = process.env.SILICONFLOW_KEY || process.env.GUIJI_KEY;
   const ZHIPU_KEY       = process.env.ZHIPU_KEY;
   const CEREBRAS_KEY    = process.env.CEREBRAS_KEY;
 

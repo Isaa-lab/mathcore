@@ -9,6 +9,7 @@ const FALLBACK_ENV_ORDER = [
   ["zhipu",       "ZHIPU_KEY"],
   ["openrouter",  "OPENROUTER_KEY"],
   ["siliconflow", "SILICONFLOW_KEY"],
+  ["siliconflow", "GUIJI_KEY"],
   ["cerebras",    "CEREBRAS_KEY"],
   ["kimi",        "KIMI_KEY"],
   ["deepseek",    "DEEPSEEK_KEY"],
