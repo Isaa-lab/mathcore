@@ -1801,6 +1801,8 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
             chunkIndex: idx,
             chunkCount: chunks.length,
             refContext: refs,
+            // forceProvider 让后端严格只走指定 provider，不偷偷 fallback 到别家
+            forceProvider: forceProvider || null,
             userProvider: effectiveProvider, userKey: effectiveKey, userCustomUrl: aiCfg.customUrl,
           }),
         });
@@ -5063,9 +5065,9 @@ function AITopicDetailModal({ state, providerMeta, onClose, onPractice }) {
                     {data.examples.map((ex, i) => (
                       <div key={i} style={{ padding: "14px 18px", background: "#FFFBEB", borderRadius: 12, border: "1px solid #FDE68A" }}>
                         <div style={{ fontSize: 11, fontWeight: 800, color: "#92400E", marginBottom: 6 }}>例题 {i+1}</div>
-                        <div style={{ fontSize: 13.5, color: "#1F2937", lineHeight: 1.7, marginBottom: 8 }}>{ex.question}</div>
-                        <div style={{ fontSize: 12.5, color: "#047857", marginBottom: 4 }}><strong>答案：</strong>{ex.answer}</div>
-                        {ex.explanation && <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6 }}>{ex.explanation}</div>}
+                        <div style={{ fontSize: 13.5, color: "#1F2937", lineHeight: 1.7, marginBottom: 8 }}><MathText text={String(ex.question || "")} /></div>
+                        <div style={{ fontSize: 12.5, color: "#047857", marginBottom: 4 }}><strong>答案：</strong><MathText text={String(ex.answer || "")} /></div>
+                        {ex.explanation && <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.6 }}><MathText text={String(ex.explanation)} /></div>}
                       </div>
                     ))}
                   </div>
@@ -5242,8 +5244,16 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   // 设计意图：让用户对比同一份资料在不同 AI 眼里的"知识点骨架"——这是免费多 AI 抽取的核心价值
   const triggerReExtract = async (provider) => {
     if (!selectedMaterial?.id) return;
+    // 用户语义："直接换一批"，所以二次确认后清掉本资料的所有 AI 知识点，再用新 provider 抽。
+    const ok = window.confirm(`将清空本资料已有的 AI 知识点，改用 ${provider.toUpperCase()} 重新抽取一批。\n\n确定继续？`);
+    if (!ok) return;
     setReExtractStatus({ provider, status: "running", msg: `正在用 ${provider} 重抽（约 10-25 秒）…` });
     try {
+      // (1) 删除本资料原有 AI 知识点 —— 完整替换语义
+      try {
+        await supabase.from("material_topics").delete().eq("material_id", selectedMaterial.id);
+      } catch { /* 静默：删失败也继续插入，最差就是累加 */ }
+
       const { data: matRow, error: matErr } = await supabase
         .from("materials")
         .select("id,title,course,chapter,description,file_name,file_data")
@@ -5259,20 +5269,19 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         material: matRow,
         file: fetchedFile,
         fallbackText: `${matRow.title || ""} ${matRow.description || ""}`,
-        genCount: 8,
+        genCount: 12,
         forceProvider: provider,
         forceUserKey: userKeyForProvider,
         actorName: `用户重抽（${provider}）`,
       });
       if (result?.apiQuotaExceeded) {
-        setReExtractStatus({ provider, status: "error", msg: `⚠️ ${provider} 配额用尽。免费档每分钟有上限，过 1 分钟再试，或换一个 provider。` });
+        setReExtractStatus({ provider, status: "error", msg: `⚠️ ${provider} 配额用尽。过 1 分钟再试，或换一个 provider。` });
       } else if ((result?.topicsLinked || 0) > 0) {
-        setReExtractStatus({ provider, status: "done", msg: `✅ ${provider} 抽到 ${result.topicsLinked} 个知识点。` });
+        setReExtractStatus({ provider, status: "done", msg: `✅ ${provider} 抽到 ${result.topicsLinked} 个知识点（已替换原有 AI 抽取）。` });
         await reloadKnowledge();
-        // 自动切到刚抽出来的 provider tab，让结果立刻可见
         setProviderFilter(provider);
       } else {
-        setReExtractStatus({ provider, status: "error", msg: `${provider} 抽取完成，但没有新增知识点（可能 PDF 文字提取不充分 / 列未建出来）。` });
+        setReExtractStatus({ provider, status: "error", msg: `${provider} 抽取完成，但没有新增知识点（可能 PDF 文字提取不充分，或 ${provider} 没拿到 Key）。` });
       }
     } catch (e) {
       setReExtractStatus({ provider, status: "error", msg: `用 ${provider} 重抽失败：${e?.message || "未知错误"}` });
@@ -5431,7 +5440,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   {/* (A) 切换显示来源 */}
                   {providerStats.length >= 2 && (
                     <div style={{ marginBottom: 14, paddingBottom: 14, borderBottom: "1px dashed #F3F4F6" }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", marginBottom: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>切换显示</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase" }}>查看哪个 AI 抽的</div>
+                      <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 10 }}>这本资料用过多个 AI 时，点这里切换查看不同 AI 给出的知识点骨架</div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                         <button
                           onClick={() => setProviderFilter(null)}
@@ -5457,7 +5467,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   )}
 
                   {/* (B) 用其他 AI 重抽 —— 同样极简幽灵风 */}
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", marginBottom: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>用其他 AI 重抽 · 独立结果</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase" }}>换一个 AI 重抽（替换现有）</div>
+                  <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 10 }}>点击会清空已有 AI 知识点，用新 AI 全部重抽一遍</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {RE_EXTRACT_PROVIDERS.map(pid => {
                       const meta = PROVIDER_META[pid] || PROVIDER_META.unknown;
@@ -12305,6 +12316,12 @@ function rescueQuizMath(input) {
   //     典型症状：页面里出现 "♦rac{1}{s-a}" —— \f 被吃了。
   // 0b) 再把 \( \) / \[ \] 归一成 $…$ / $$…$$
   input = normalizeLatexDelimiters(reviveLatexControlChars(String(input)));
+  // 0c) 自动包裹 \begin{...}...\end{...} 环境（cases / pmatrix / aligned 等），AI 经常忘了套 $$
+  // 只对未被 $ / $$ 包围的环境补包裹；已经在 $...$ 里就不动
+  input = input.replace(
+    /(?<!\$)\\begin\{(cases|pmatrix|bmatrix|matrix|vmatrix|aligned|align|array)\}([\s\S]*?)\\end\{\1\}(?!\$)/g,
+    (m) => "$$" + m + "$$"
+  );
   // 0c) AI 偶尔混用 Unicode 数学符号(∫/∑/∏/∮) 和半吊子 $...$：
   //     "∫^∞_0 e^{-st}$e^{at}$\,dt$=1/(s-a)$"
   //     结果下游规则在第一个 $ 就断裂，整段泄漏成原文。把 ∫/∑/… 与紧随 d<letter>
