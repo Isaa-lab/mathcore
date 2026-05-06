@@ -18,6 +18,31 @@ const DAY = 24 * 60 * 60 * 1000;
 // 内部工具
 // ────────────────────────────────────────────────────────────────────────────
 
+// 把入库时的 question 对象瘦身成一份"自包含快照"（snapshot）。
+// 为什么需要 snapshot：
+//   错题本卡片显示时要重新查找题干，旧实现只在硬编码 ALL_QUESTIONS 里查；
+//   而 DB 题（UUID id）不在该数组里，加上服务端低质过滤会把题"从题库移除"，
+//   就出现"题目 #xxx 已从题库移除"。把题目本体直接缓存进错题本 → 题永远拿得到。
+function snapshotOf(question) {
+  if (!question || typeof question !== "object") return null;
+  return {
+    id: String(question.id || ""),
+    question: String(question.question || question.text || question.content || ""),
+    options: Array.isArray(question.options) ? question.options.slice(0, 8).map(String) : null,
+    options_en: Array.isArray(question.options_en) ? question.options_en.slice(0, 8).map(String) : null,
+    answer: question.answer == null ? "" : String(question.answer),
+    explanation: question.explanation ? String(question.explanation) : "",
+    explanation_en: question.explanation_en ? String(question.explanation_en) : "",
+    type: question.type || (Array.isArray(question.options) ? "单选题" : "判断题"),
+    chapter: question.chapter || "未分类",
+    course: question.course || null,
+    knowledgePoints: Array.isArray(question.knowledgePoints) ? question.knowledgePoints :
+                     Array.isArray(question.knowledge_points) ? question.knowledge_points : null,
+    optionRationales: Array.isArray(question.optionRationales) ? question.optionRationales : null,
+    misconceptions: question.misconceptions && typeof question.misconceptions === "object" ? question.misconceptions : null,
+  };
+}
+
 function newItem({ question, userAnswer, timeMs, now }) {
   return {
     id: String(question.id),
@@ -43,6 +68,8 @@ function newItem({ question, userAnswer, timeMs, now }) {
     status: "active",
     mastered_at: null,
     variants_generated: 0,
+    // 入库时把整道题瘦身存一份；后续显示 / 重做都先用这份，不依赖 ALL_QUESTIONS
+    question_snapshot: snapshotOf(question),
   };
 }
 
@@ -84,6 +111,8 @@ export function recordWrongAnswer({ question, userAnswer, timeMs }) {
     // 即使之前 mastered，再错一次就复活回 active —— 说明那不算真掌握
     existing.status = "active";
     existing.mastered_at = null;
+    // 治愈旧数据：如果之前那次入库时还没存 snapshot（旧版本错题），趁这次 question 在手补一份
+    if (!existing.question_snapshot && question) existing.question_snapshot = snapshotOf(question);
     next[idx] = existing;
     return next;
   }, []);
