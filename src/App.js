@@ -5205,10 +5205,18 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const [reExtractExpanded, setReExtractExpanded] = useState(false);
 
   // 打开 AI topic 详情：先显示骨架，异步调 /api/topic-detail 拉详细内容
+  // 关键：把 topic 自身的 provider（如智谱）作为 preferProvider，让详情用同源 AI 生成，
+  // 避免出现"智谱抽的知识点 → 详情却由 Groq 生成"的 UX 错位。
   const openAITopicDetail = async (t) => {
     setAiTopicDetail({ topic: t, loading: true, data: null, error: null });
     try {
       const aiCfg = getAIConfig();
+      const topicProvider = (t.provider && String(t.provider).trim()) || null;
+      // 优先使用与 topic 同源 provider；如果没有 provider（legacy 数据）回退到全局 AI 设置
+      const preferProvider = topicProvider && topicProvider !== "legacy" && topicProvider !== "unknown"
+        ? topicProvider : aiCfg.provider;
+      const preferKey = topicProvider && aiCfg.allKeys?.[topicProvider]
+        ? aiCfg.allKeys[topicProvider] : aiCfg.key;
       const resp = await fetch("/api/topic-detail", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -5218,7 +5226,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           course: selectedMaterial?.course || "",
           chapter: t.chapter || "",
           materialContext: selectedMaterial?.title || "",
-          userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+          preferProvider, // 后端会优先用这个 provider，其次再走 fallback 链
+          userProvider: preferProvider, userKey: preferKey, userCustomUrl: aiCfg.customUrl,
         }),
       });
       const d = await resp.json();
@@ -5416,17 +5425,17 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                 <div style={{ flex: 1, height: 1, background: "#f3f4f6" }} />
               </div>
 
-              {/* Dropdown 面板：包含「切换显示」+「用其他 AI 重抽」两组操作 */}
+              {/* Dropdown 面板：极简风 —— 单色幽灵 chip，仅靠 provider 头像方块的小色块作色彩锚点 */}
               {reExtractExpanded && (
-                <div style={{ padding: "12px 14px", marginBottom: 14, borderRadius: 12, background: "#FAFAFB", border: "1px solid #E5E7EB" }}>
-                  {/* (A) 切换显示来源 —— 仅当有多个 provider 时出现 */}
+                <div style={{ padding: "14px 16px", marginBottom: 14, borderRadius: 12, background: "#FFFFFF", border: "1px solid #E5E7EB", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" }}>
+                  {/* (A) 切换显示来源 */}
                   {providerStats.length >= 2 && (
-                    <>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 8, letterSpacing: "0.05em" }}>📂 切换显示来源</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+                    <div style={{ marginBottom: 14, paddingBottom: 14, borderBottom: "1px dashed #F3F4F6" }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", marginBottom: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>切换显示</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                         <button
                           onClick={() => setProviderFilter(null)}
-                          style={{ padding: "5px 12px", borderRadius: 999, background: providerFilter === null ? "#111827" : "#fff", color: providerFilter === null ? "#fff" : "#6B7280", border: `1px solid ${providerFilter === null ? "#111827" : "#e5e7eb"}`, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ padding: "6px 14px", borderRadius: 8, background: providerFilter === null ? "#111827" : "#F9FAFB", color: providerFilter === null ? "#fff" : "#374151", border: `1px solid ${providerFilter === null ? "#111827" : "#E5E7EB"}`, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
                         >全部 · {aiTopicsForMaterial.length}</button>
                         {providerStats.map((p) => {
                           const meta = PROVIDER_META[p.provider] || PROVIDER_META.unknown;
@@ -5435,19 +5444,20 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                             <button key={p.provider}
                               onClick={() => setProviderFilter(active ? null : p.provider)}
                               title={p.model ? `模型：${p.model}` : meta.label}
-                              style={{ padding: "5px 12px", borderRadius: 999, background: active ? meta.color : meta.bg, color: active ? "#fff" : meta.color, border: `1px solid ${active ? meta.color : meta.color + "33"}`, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}
+                              style={{ padding: "6px 12px", borderRadius: 8, background: active ? "#111827" : "#F9FAFB", color: active ? "#fff" : "#374151", border: `1px solid ${active ? "#111827" : "#E5E7EB"}`, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 7 }}
                             >
-                              <span style={{ width: 16, height: 16, borderRadius: 4, background: active ? "rgba(255,255,255,0.25)" : meta.color, color: active ? "#fff" : "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 900 }}>{meta.avatar}</span>
-                              {meta.label} · {p.count}
+                              <span style={{ width: 18, height: 18, borderRadius: 5, background: meta.color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800 }}>{meta.avatar}</span>
+                              {meta.label}
+                              <span style={{ color: active ? "#9CA3AF" : "#9CA3AF", fontWeight: 500 }}>{p.count}</span>
                             </button>
                           );
                         })}
                       </div>
-                    </>
+                    </div>
                   )}
 
-                  {/* (B) 用其他 AI 重抽 —— 总是出现，紧凑头像方块 */}
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 8, letterSpacing: "0.05em" }}>🔁 用其他 AI 重抽（独立结果·不覆盖现有）</div>
+                  {/* (B) 用其他 AI 重抽 —— 同样极简幽灵风 */}
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", marginBottom: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>用其他 AI 重抽 · 独立结果</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {RE_EXTRACT_PROVIDERS.map(pid => {
                       const meta = PROVIDER_META[pid] || PROVIDER_META.unknown;
@@ -5457,9 +5467,11 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                           disabled={running}
                           onClick={() => triggerReExtract(pid)}
                           title={`用 ${meta.label} 重新抽取`}
-                          style={{ padding: "5px 10px", borderRadius: 999, background: "#fff", color: meta.color, border: `1.5px solid ${meta.color}`, fontSize: 12, fontWeight: 700, cursor: running ? "wait" : "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 6 }}
+                          style={{ padding: "6px 12px", borderRadius: 8, background: "#F9FAFB", color: "#374151", border: "1px solid #E5E7EB", fontSize: 12, fontWeight: 600, cursor: running ? "wait" : "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 7, transition: "all .15s" }}
+                          onMouseEnter={(e) => { if (!running) { e.currentTarget.style.background = "#F3F4F6"; e.currentTarget.style.borderColor = meta.color + "55"; } }}
+                          onMouseLeave={(e) => { if (!running) { e.currentTarget.style.background = "#F9FAFB"; e.currentTarget.style.borderColor = "#E5E7EB"; } }}
                         >
-                          <span style={{ width: 16, height: 16, borderRadius: 4, background: meta.color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 900 }}>{running ? "…" : meta.avatar}</span>
+                          <span style={{ width: 18, height: 18, borderRadius: 5, background: meta.color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800 }}>{running ? "…" : meta.avatar}</span>
                           {meta.label}
                         </button>
                       );
@@ -5468,7 +5480,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
 
                   {/* 状态栏 */}
                   {reExtractStatus && reExtractStatus.status !== "running" && (
-                    <div style={{ marginTop: 10, padding: "6px 10px", borderRadius: 8, fontSize: 12, color: reExtractStatus.status === "done" ? "#047857" : "#991B1B", background: reExtractStatus.status === "done" ? "#ECFDF5" : "#FEF2F2", border: `1px solid ${reExtractStatus.status === "done" ? "#A7F3D0" : "#FECACA"}` }}>
+                    <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, fontSize: 12, color: reExtractStatus.status === "done" ? "#047857" : "#991B1B", background: reExtractStatus.status === "done" ? "#ECFDF5" : "#FEF2F2", border: `1px solid ${reExtractStatus.status === "done" ? "#A7F3D0" : "#FECACA"}` }}>
                       {reExtractStatus.msg}
                     </div>
                   )}
@@ -5486,14 +5498,17 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                       role="button" tabIndex={0}
                       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openAITopicDetail(t); } }}
                       style={{
-                        border: `1.5px solid ${mastery === "done" ? G.teal + "55" : provMeta.color + "44"}`,
+                        border: `1px solid ${mastery === "done" ? G.teal + "55" : "#E5E7EB"}`,
                         borderRadius: 14, padding: "16px", cursor: "pointer",
-                        background: mastery === "done" ? "#f0fdf4" : `linear-gradient(180deg,${provMeta.bg} 0%,#ffffff 70%)`,
+                        background: mastery === "done" ? "#f0fdf4" : "#ffffff",
                         display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease",
+                        position: "relative", overflow: "hidden",
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 6px 20px ${provMeta.color}33`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = provMeta.color; }}
-                      onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = mastery === "done" ? G.teal + "55" : provMeta.color + "44"; }}
+                      onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 8px 24px ${provMeta.color}1A`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = provMeta.color + "66"; }}
+                      onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = mastery === "done" ? G.teal + "55" : "#E5E7EB"; }}
                     >
+                      {/* provider 极细色条 — 唯一颜色锚点，不喧宾夺主 */}
+                      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: provMeta.color }} />
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
                           <span style={{ width: 26, height: 26, borderRadius: 7, background: provMeta.color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, flexShrink: 0 }} title={provMeta.label}>{provMeta.avatar}</span>
@@ -5542,7 +5557,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                               setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
                             }
                           }}
-                          style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: provMeta.color, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
+                          style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: "#111827", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
                         >
                           ✏️ 按此知识点做题
                         </button>
@@ -10847,7 +10862,17 @@ function SocraticCoachDrawer({ item, question, onClose, onMarkMastered }) {
           userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
         }),
       });
-      const data = await res.json();
+      // 防御 Vercel 函数超时/崩溃返回 HTML 错误页（"A server error..."）—— 用 text() 先看再 parse
+      const contentType = res.headers.get("content-type") || "";
+      const raw = await res.text();
+      let data;
+      if (contentType.includes("application/json") || raw.trim().startsWith("{")) {
+        try { data = JSON.parse(raw); }
+        catch { throw new Error(`后端返回不是合法 JSON（HTTP ${res.status}）。请稍后重试，或在 AI 设置里换一个 provider。`); }
+      } else {
+        // HTML / plain text → Vercel function 崩溃或超时
+        throw new Error(`后端返回 HTTP ${res.status}（非 JSON）。可能是 AI 调用超时；建议换一个 provider 重试。`);
+      }
       if (data?.error) throw new Error(data.error);
       const content = data.answer || data.reply || data.content || data.text || data.result || "(AI 暂无回复)";
       setMessages((prev) => [...prev, { role: "assistant", content }]);

@@ -70,7 +70,7 @@ async function dispatch(provider, key, prompt) {
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   try {
-    const { topicName, summary = "", course = "", chapter = "", materialContext = "", userProvider, userKey } = req.body || {};
+    const { topicName, summary = "", course = "", chapter = "", materialContext = "", userProvider, userKey, preferProvider } = req.body || {};
     if (!topicName) return res.status(400).json({ error: "topicName required" });
 
     const prompt = `你是一位数学老师，正在为学生制作"${course || "数学"} · ${chapter || ""}"中"${topicName}"这一知识点的卡片。
@@ -108,9 +108,16 @@ ${materialContext ? `教材上下文：${String(materialContext).slice(0, 800)}`
       if (raw) used = `${userProvider}(user)`;
     }
 
-    // 2) 平台兜底 —— 按免费档优先顺序
+    // 2) 平台兜底 —— 优先尝试 preferProvider 指定的 provider（同源生成），失败再走免费档 fallback
     if (!raw) {
-      for (const [pid, env] of FALLBACK_ENV_ORDER) {
+      let order = FALLBACK_ENV_ORDER;
+      if (preferProvider) {
+        // 把 preferProvider 提到队首，让"智谱抽的 topic → 详情用智谱写"
+        const pref = FALLBACK_ENV_ORDER.filter(([pid]) => pid === preferProvider);
+        const rest = FALLBACK_ENV_ORDER.filter(([pid]) => pid !== preferProvider);
+        order = [...pref, ...rest];
+      }
+      for (const [pid, env] of order) {
         const k = process.env[env];
         if (!k || String(k).trim().length < 8) continue;
         raw = await dispatch(pid, String(k).trim(), prompt);
