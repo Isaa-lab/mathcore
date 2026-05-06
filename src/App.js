@@ -5315,9 +5315,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   // AI-extracted topics from DB (for future use when AI extraction works)
   const aiTopicsForMaterial = aiTopics.filter((t) => t.material_id === selectedMaterialId);
 
-  // 按 provider 聚合：tabs 上显示 "全部 AI / Gemini / Groq / DeepSeek / ..."
-  // 同一 provider 内可能有多次抽取（不同 topic_group_id），最近一批置顶
-  const providerStats = (() => {
+  // 按 provider 聚合：tabs 上显示各 AI；同一 provider 内可能有多次抽取，最近一批置顶
+  const providerStats = useMemo(() => {
     const m = new Map();
     aiTopicsForMaterial.forEach(t => {
       const key = (t.provider && String(t.provider).trim()) || "legacy";
@@ -5329,7 +5328,20 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
       if (!slot.model && t.provider_model) slot.model = t.provider_model;
     });
     return Array.from(m.values()).sort((a, b) => b.latestAt - a.latestAt || b.count - a.count);
-  })();
+  }, [aiTopicsForMaterial]);
+
+  // 默认锁定到第一个 provider tab，避免"全部"混合视图导致不同 AI 的卡堆在一起
+  // 用户切教材或重抽后，自动选最近抽的那家
+  const defaultProviderRef = useRef(null);
+  useEffect(() => {
+    if (providerStats.length === 0) return;
+    const top = providerStats[0]?.provider || null;
+    // 仅在还没人为锁定，或当前选中的 provider 在新一轮里已不存在时，自动设回 top
+    if (providerFilter === null || !providerStats.some(p => p.provider === providerFilter)) {
+      setProviderFilter(top);
+      defaultProviderRef.current = top;
+    }
+  }, [providerStats]); // eslint-disable-line react-hooks/exhaustive-deps
   // PROVIDER_META —— 每个 AI 自带头像字符 + 主色 + 浅底色，让用户一眼分清不同 AI 出的知识点
   const PROVIDER_META = {
     gemini:      { label: "Gemini",     avatar: "✦", color: "#4285F4", bg: "#EFF6FF" },
@@ -5439,22 +5451,17 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
               {/* Dropdown 面板：极简风 —— 单色幽灵 chip，仅靠 provider 头像方块的小色块作色彩锚点 */}
               {reExtractExpanded && (
                 <div style={{ padding: "14px 16px", marginBottom: 14, borderRadius: 12, background: "#FFFFFF", border: "1px solid #E5E7EB", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" }}>
-                  {/* (A) 切换显示来源 */}
-                  {providerStats.length >= 2 && (
+                  {/* (A) 切换查看哪个 AI —— 总是出现，即使只有 1 个 AI 也清晰显示当前在看哪家 */}
+                  {providerStats.length >= 1 && (
                     <div style={{ marginBottom: 14, paddingBottom: 14, borderBottom: "1px dashed #F3F4F6" }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase" }}>查看哪个 AI 抽的</div>
-                      <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 10 }}>这本资料用过多个 AI 时，点这里切换查看不同 AI 给出的知识点骨架</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase" }}>查看哪个 AI 抽的（每个 AI 独立一页·点击切换）</div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        <button
-                          onClick={() => setProviderFilter(null)}
-                          style={{ padding: "6px 14px", borderRadius: 8, background: providerFilter === null ? "#111827" : "#F9FAFB", color: providerFilter === null ? "#fff" : "#374151", border: `1px solid ${providerFilter === null ? "#111827" : "#E5E7EB"}`, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
-                        >全部 · {aiTopicsForMaterial.length}</button>
                         {providerStats.map((p) => {
                           const meta = PROVIDER_META[p.provider] || PROVIDER_META.unknown;
                           const active = providerFilter === p.provider;
                           return (
                             <button key={p.provider}
-                              onClick={() => setProviderFilter(active ? null : p.provider)}
+                              onClick={() => setProviderFilter(p.provider)}
                               title={p.model ? `模型：${p.model}` : meta.label}
                               style={{ padding: "6px 12px", borderRadius: 8, background: active ? "#111827" : "#F9FAFB", color: active ? "#fff" : "#374151", border: `1px solid ${active ? "#111827" : "#E5E7EB"}`, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 7 }}
                             >
