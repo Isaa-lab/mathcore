@@ -5244,15 +5244,17 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   // 设计意图：让用户对比同一份资料在不同 AI 眼里的"知识点骨架"——这是免费多 AI 抽取的核心价值
   const triggerReExtract = async (provider) => {
     if (!selectedMaterial?.id) return;
-    // 用户语义："直接换一批"，所以二次确认后清掉本资料的所有 AI 知识点，再用新 provider 抽。
-    const ok = window.confirm(`将清空本资料已有的 AI 知识点，改用 ${provider.toUpperCase()} 重新抽取一批。\n\n确定继续？`);
-    if (!ok) return;
+    // 语义："各 AI 独立保留"——只删除本资料下"同一 provider"的旧批次，避免同一 AI 越点越多
+    // 但不动其他 AI 抽的（智谱抽的不会因为你点 Groq 就消失）。
     setReExtractStatus({ provider, status: "running", msg: `正在用 ${provider} 重抽（约 10-25 秒）…` });
     try {
-      // (1) 删除本资料原有 AI 知识点 —— 完整替换语义
+      // 只清同一 provider 的历史，让 tab 切换能保留多 AI 对照
       try {
-        await supabase.from("material_topics").delete().eq("material_id", selectedMaterial.id);
-      } catch { /* 静默：删失败也继续插入，最差就是累加 */ }
+        await supabase.from("material_topics")
+          .delete()
+          .eq("material_id", selectedMaterial.id)
+          .eq("provider", provider);
+      } catch { /* provider 列未建出来 / RLS 时静默；旧数据可能会重复，但不影响功能 */ }
 
       const { data: matRow, error: matErr } = await supabase
         .from("materials")
@@ -5277,7 +5279,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
       if (result?.apiQuotaExceeded) {
         setReExtractStatus({ provider, status: "error", msg: `⚠️ ${provider} 配额用尽。过 1 分钟再试，或换一个 provider。` });
       } else if ((result?.topicsLinked || 0) > 0) {
-        setReExtractStatus({ provider, status: "done", msg: `✅ ${provider} 抽到 ${result.topicsLinked} 个知识点（已替换原有 AI 抽取）。` });
+        setReExtractStatus({ provider, status: "done", msg: `✅ ${provider} 抽到 ${result.topicsLinked} 个知识点。在上方 tab 点 "${provider}" 查看。` });
         await reloadKnowledge();
         setProviderFilter(provider);
       } else {
@@ -5467,8 +5469,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   )}
 
                   {/* (B) 用其他 AI 重抽 —— 同样极简幽灵风 */}
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase" }}>换一个 AI 重抽（替换现有）</div>
-                  <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 10 }}>点击会清空已有 AI 知识点，用新 AI 全部重抽一遍</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#94A3B8", marginBottom: 6, letterSpacing: "0.06em", textTransform: "uppercase" }}>换 AI 重抽（独立保留）</div>
+                  <div style={{ fontSize: 11, color: "#94A3B8", marginBottom: 10 }}>每个 AI 抽出来的结果各自占一个 tab，互不覆盖；上方"查看哪个 AI 抽的"切换查看</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {RE_EXTRACT_PROVIDERS.map(pid => {
                       const meta = PROVIDER_META[pid] || PROVIDER_META.unknown;
@@ -5513,13 +5515,10 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                         borderRadius: 14, padding: "16px", cursor: "pointer",
                         background: mastery === "done" ? "#f0fdf4" : "#ffffff",
                         display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease",
-                        position: "relative", overflow: "hidden",
                       }}
-                      onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 8px 24px ${provMeta.color}1A`; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = provMeta.color + "66"; }}
+                      onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 8px 24px rgba(15,23,42,0.06)"; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = "#CBD5E1"; }}
                       onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = mastery === "done" ? G.teal + "55" : "#E5E7EB"; }}
                     >
-                      {/* provider 极细色条 — 唯一颜色锚点，不喧宾夺主 */}
-                      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: provMeta.color }} />
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
                           <span style={{ width: 26, height: 26, borderRadius: 7, background: provMeta.color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, flexShrink: 0 }} title={provMeta.label}>{provMeta.avatar}</span>

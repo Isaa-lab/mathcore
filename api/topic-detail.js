@@ -136,15 +136,46 @@ ${materialContext ? `教材上下文：${String(materialContext).slice(0, 800)}`
 
     if (!raw) return res.status(200).json({ error: "AI 调用失败：所有 provider 都返回空。请检查 Vercel 环境变量是否配了至少一个免费 Key（GROQ_KEY/GEMINI_KEY/ZHIPU_KEY），或在 AI 设置里填自己的 Key。" });
 
-    // 解析 JSON（容错）
-    const cleaned = String(raw).replace(/```json\s*/gi, "").replace(/```\s*$/g, "").trim();
-    let parsed = null;
-    try { parsed = JSON.parse(cleaned); }
-    catch {
-      const m = cleaned.match(/\{[\s\S]*\}/);
-      if (m) { try { parsed = JSON.parse(m[0]); } catch {} }
+    // 强力 JSON 解析：先剥 markdown fence、抠出第一个 {...} 外壳、修复常见尾随逗号 / unescaped backslash 问题
+    function tryParseLoose(s) {
+      const stripped = String(s).replace(/```json\s*/gi, "").replace(/```\s*$/g, "").trim();
+      // (1) 直接 parse
+      try { return JSON.parse(stripped); } catch {}
+      // (2) 抠 outermost {...}
+      const m = stripped.match(/\{[\s\S]*\}/);
+      if (!m) return null;
+      let candidate = m[0];
+      try { return JSON.parse(candidate); } catch {}
+      // (3) 修尾随逗号
+      candidate = candidate.replace(/,(\s*[}\]])/g, "$1");
+      try { return JSON.parse(candidate); } catch {}
+      // (4) LaTeX 反斜杠双倍转义（\frac → \\frac），但只对 string 内的反斜杠
+      try {
+        const fixed = candidate.replace(/(?<!\\)\\(?!["\\/bfnrtu])/g, "\\\\");
+        return JSON.parse(fixed);
+      } catch {}
+      return null;
     }
-    if (!parsed) return res.status(200).json({ error: "AI 返回不是合法 JSON，重试一次", raw: cleaned.slice(0, 200), used });
+
+    let parsed = tryParseLoose(raw);
+
+    // 重试一次：用更严格的 prompt 强调"必须只输出 JSON"。某些小模型（Qwen/Mistral 7B）需要
+    // 强提示才稳定。第二次失败才报错给用户。
+    if (!parsed && used) {
+      const retryPrompt = `请只输出一个 JSON 对象，不要写任何解释、不要 markdown 围栏、不要前后空话。结构如下，必须每个字段都有值：
+{"intro":"...", "formulas":[{"label":"...","latex":"..."}], "steps":["第1步:...","第2步:..."], "examples":[{"question":"...","answer":"...","explanation":"..."},{"question":"...","answer":"...","explanation":"..."}], "viz_hint":"..."}
+
+主题："${topicName}"。中文输出。LaTeX 公式里的反斜杠请写两次（如 \\\\frac \\\\int \\\\sum）。`;
+      const [provider] = used.split("(");
+      const envName = ({ groq: "GROQ_KEY", gemini: "GEMINI_KEY", zhipu: "ZHIPU_KEY", openrouter: "OPENROUTER_KEY", siliconflow: "SILICONFLOW_KEY", cerebras: "CEREBRAS_KEY", deepseek: "DEEPSEEK_KEY", kimi: "KIMI_KEY" })[provider];
+      const k = envName ? process.env[envName] : null;
+      if (k && String(k).trim().length > 8) {
+        const raw2 = await dispatch(provider, String(k).trim(), retryPrompt);
+        if (raw2) parsed = tryParseLoose(raw2);
+      }
+    }
+
+    if (!parsed) return res.status(200).json({ error: `AI（${used || "未知"}）返回非 JSON，已自动重试一次仍失败。换一个 AI（如 Gemini / 智谱）试试。`, raw: String(raw).slice(0, 200), used });
 
     return res.status(200).json({
       intro: String(parsed.intro || ""),
