@@ -246,29 +246,78 @@ export function incrementVariantsGenerated(questionIds, delta = 1) {
 }
 
 /**
- * 保存 AI 归因诊断结果（持久化到卡片）
- * @param {string|number} questionId
- * @param {string} reasoning - AI 生成的错因文字
- * @param {string[]} tags - AI 建议的错因标签（可选，非空则覆盖现有）
+ * 保存 AI 归因诊断结果 v2（结构化版）。兼容 v1 调用：旧调用 `saveAiReasoning(id, reasoning, tags)`
+ * 仍然有效——会把 reasoning 当成 wrong_step 的弱兜底写进新 schema，但 v2 字段为空。
+ * 推荐用 saveAiDiagnosis 传完整对象。
+ *
+ * v2 schema（每条错题项的可选字段）：
+ *   ai_reasoning       legacy（一句话），保留给老 UI 兜底显示
+ *   ai_wrong_step      "你在第几步出了什么错"（30~200 字）
+ *   ai_misconception   "你可能信以为真的错误命题"（30~200 字）
+ *   ai_correct_path    "正确做法的关键 1~2 步"（最多 200 字）
+ *   ai_remedy_focus    "建议练什么子技能"（短语，10~80 字）
+ *   ai_weak_topics     ["指数函数求导", "链式法则"]
+ *   ai_confidence      "high" | "medium" | "low"
+ *   ai_diagnosed_at    timestamp
  */
-export function saveAiReasoning(questionId, reasoning, tags) {
+export function saveAiDiagnosis(questionId, diagnosis) {
+  if (!questionId || !diagnosis || typeof diagnosis !== "object") return;
   storage.update(KEY, (items) => (items || []).map((w) => {
     if (w.id !== String(questionId)) return w;
-    const next = { ...w, ai_reasoning: reasoning || "", ai_reasoning_at: Date.now() };
-    if (Array.isArray(tags) && tags.length > 0) {
-      next.error_tags = Array.from(new Set([...(w.error_tags || []), ...tags]));
+    const next = { ...w, ai_diagnosed_at: Date.now() };
+    // 兼容字段：仍写 ai_reasoning（取 wrong_step → misconception → reasoning）
+    next.ai_reasoning = diagnosis.wrong_step || diagnosis.misconception || diagnosis.reasoning || w.ai_reasoning || "";
+    next.ai_reasoning_at = Date.now();
+    if (typeof diagnosis.wrong_step === "string")    next.ai_wrong_step = diagnosis.wrong_step;
+    if (typeof diagnosis.misconception === "string") next.ai_misconception = diagnosis.misconception;
+    if (typeof diagnosis.correct_path === "string")  next.ai_correct_path = diagnosis.correct_path;
+    if (typeof diagnosis.remedy_focus === "string")  next.ai_remedy_focus = diagnosis.remedy_focus;
+    if (Array.isArray(diagnosis.weak_topics))        next.ai_weak_topics = diagnosis.weak_topics.slice(0, 3);
+    if (["high", "medium", "low"].includes(diagnosis.confidence)) next.ai_confidence = diagnosis.confidence;
+    if (Array.isArray(diagnosis.tags) && diagnosis.tags.length > 0) {
+      next.error_tags = Array.from(new Set([...(w.error_tags || []), ...diagnosis.tags]));
     }
     return next;
   }), []);
 }
 
+/**
+ * v1 兼容入口：旧调用 saveAiReasoning(id, "一句话", ["formula"]) 继续可用。
+ * 推荐改用 saveAiDiagnosis 传完整结构。
+ */
+export function saveAiReasoning(questionId, reasoning, tags) {
+  saveAiDiagnosis(questionId, {
+    wrong_step: reasoning,
+    misconception: "",
+    correct_path: "",
+    remedy_focus: "",
+    weak_topics: [],
+    confidence: "medium",
+    reasoning: reasoning,
+    tags: Array.isArray(tags) ? tags : [],
+  });
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // 错因标签定义（单源真实，前后端/UI 都从这里取）
+// v2：从 4 类扩到 10 类细分类别 + unknown 兜底；旧错题上的 4 类标签自动兼容。
+// 颜色按"语义近似度"分组：
+//   暖色（公式 / 定义 / 符号 / 边界）—— 知识点本身记错
+//   紫色（概念 / 条件）             —— 概念边界 / 适用条件没把握住
+//   蓝色（计算 / 代数 / 中间步骤）  —— 思路对但执行掉链子
+//   红色（方法 / unknown）          —— 选错方法 / 暂未归类
 // ────────────────────────────────────────────────────────────────────────────
 
 export const ERROR_TAGS = [
-  { id: "formula",  label: "公式记错", color: "#F59E0B", bg: "#FFFBEB" },
-  { id: "concept",  label: "概念混淆", color: "#A855F7", bg: "#FAF5FF" },
-  { id: "careless", label: "计算粗心", color: "#3B82F6", bg: "#EFF6FF" },
-  { id: "method",   label: "方法错误", color: "#EF4444", bg: "#FEF2F2" },
+  { id: "formula",    label: "公式记错",     color: "#F59E0B", bg: "#FFFBEB", group: "knowledge" },
+  { id: "definition", label: "定义不清",     color: "#D97706", bg: "#FEF3C7", group: "knowledge" },
+  { id: "sign",       label: "符号错误",     color: "#EA580C", bg: "#FFF7ED", group: "knowledge" },
+  { id: "boundary",   label: "边界 / 特殊值", color: "#DB2777", bg: "#FDF2F8", group: "knowledge" },
+  { id: "concept",    label: "概念混淆",     color: "#A855F7", bg: "#FAF5FF", group: "concept" },
+  { id: "condition",  label: "前提条件",     color: "#7C3AED", bg: "#F5F3FF", group: "concept" },
+  { id: "careless",   label: "计算粗心",     color: "#3B82F6", bg: "#EFF6FF", group: "execution" },
+  { id: "algebra",    label: "代数变形",     color: "#0EA5E9", bg: "#F0F9FF", group: "execution" },
+  { id: "derivation", label: "中间步骤",     color: "#06B6D4", bg: "#ECFEFF", group: "execution" },
+  { id: "method",     label: "方法选错",     color: "#EF4444", bg: "#FEF2F2", group: "method" },
+  { id: "unknown",    label: "暂未归类",     color: "#6B7280", bg: "#F9FAFB", group: "other" },
 ];

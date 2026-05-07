@@ -12,7 +12,7 @@ import SprintWorkspace from "./layouts/SprintWorkspace";
 import { isEditableFocused } from "./utils/keyboard";
 import { detectVizIntent, logVizIntent } from "./utils/vizIntent";
 import { resolveDialogueMode, deriveQuizState, DIALOGUE_MODE_LABELS } from "./utils/dialogueMode";
-import { recordWrongAnswer, recordCorrectAnswer, getWrongItems as getWrongItemsFromStore, getDueWrongItems, markMastered, suspendItem, tagWrongItem, incrementVariantsGenerated, saveAiReasoning, ERROR_TAGS, getChapterMistakeStats } from "./utils/wrongItems";
+import { recordWrongAnswer, recordCorrectAnswer, getWrongItems as getWrongItemsFromStore, getDueWrongItems, markMastered, suspendItem, tagWrongItem, incrementVariantsGenerated, saveAiReasoning, saveAiDiagnosis, ERROR_TAGS, getChapterMistakeStats } from "./utils/wrongItems";
 import { storage } from "./utils/storage";
 import { getUserChapters } from "./utils/chapters";
 import { generateDailyPlans, dayKey as planDayKey, markTaskCompleted, rolloverIncompleteTasks, importBacklogToToday, dismissBacklog, getTodayBacklog, priorityWeight } from "./utils/planGenerator";
@@ -6596,6 +6596,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             correct_answer: q.answer,
             user_answer: userAns,
             chapter: q.chapter || "",
+            explanation: q.explanation || "",
+            knowledge_points: q.knowledgePoints || q.knowledge_points || [],
             userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
           }),
         });
@@ -6608,10 +6610,27 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           loading: false,
           tags: Array.isArray(data.tags) ? data.tags : [],
           reasoning: data.reasoning || "",
+          wrong_step: data.wrong_step || "",
+          misconception: data.misconception || "",
+          correct_path: data.correct_path || "",
+          remedy_focus: data.remedy_focus || "",
+          weak_topics: Array.isArray(data.weak_topics) ? data.weak_topics : [],
+          confidence: data.confidence || "medium",
         } }));
-        // 同步把诊断写回错题本，让错题本卡片省得再点一次"AI 猜错因"
-        if (q.id && data.reasoning) {
-          try { saveAiReasoning(q.id, data.reasoning, data.tags || []); } catch {}
+        // 同步把结构化诊断写回错题本，错题本卡片就不用再点"让 AI 诊断"了
+        if (q.id && (data.reasoning || data.wrong_step)) {
+          try {
+            saveAiDiagnosis(q.id, {
+              tags: Array.isArray(data.tags) ? data.tags : [],
+              wrong_step: data.wrong_step || "",
+              misconception: data.misconception || "",
+              correct_path: data.correct_path || "",
+              remedy_focus: data.remedy_focus || "",
+              weak_topics: Array.isArray(data.weak_topics) ? data.weak_topics : [],
+              confidence: data.confidence || "medium",
+              reasoning: data.reasoning || "",
+            });
+          } catch {}
         }
       } catch (err) {
         setAutoAnalysis(prev => ({ ...prev, [current]: { loading: false, error: err?.message || "请求失败" } }));
@@ -7791,10 +7810,14 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                   if (t) return t;
                   return { id, label: id === "unknown" ? "暂未分类" : id, color: "#6B7280", bg: "#F9FAFB" };
                 };
+                const conf = aa.confidence || "medium";
+                const confColor = conf === "high" ? "#047857" : conf === "low" ? "#B45309" : "#5B21B6";
+                const confLabel = conf === "high" ? "高置信" : conf === "low" ? "低置信·可能不准" : "中等置信";
                 return (
-                  <div style={{ marginBottom: 12, padding: "12px 14px", background: "#F5F3FF", borderRadius: 12, border: "1px solid #DDD6FE" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+                  <div style={{ marginBottom: 12, padding: "12px 14px", background: "#F5F3FF", borderRadius: 12, border: "1px solid #DDD6FE", display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <span style={{ fontSize: 12, fontWeight: 800, color: "#5B21B6" }}>🧠 AI 错因诊断</span>
+                      <span style={{ fontSize: 9.5, color: confColor, fontWeight: 700, padding: "1px 6px", borderRadius: 4, border: `1px solid ${confColor}33`, background: confColor + "0F", letterSpacing: "0.03em" }}>{confLabel}</span>
                       {(aa.tags || []).map(id => {
                         const m = tagMeta(id);
                         return (
@@ -7805,7 +7828,28 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                       })}
                       <span style={{ marginLeft: "auto", fontSize: 10.5, color: "#9CA3AF" }}>已同步到错题本</span>
                     </div>
-                    {aa.reasoning && (
+                    {aa.wrong_step && (
+                      <DiagnosisLine label="在哪里走错" labelColor="#B91C1C" text={aa.wrong_step} />
+                    )}
+                    {aa.misconception && (
+                      <DiagnosisLine label="可能的错信念" labelColor="#A16207" text={aa.misconception} />
+                    )}
+                    {aa.correct_path && (
+                      <DiagnosisLine label="正确思路" labelColor="#047857" text={aa.correct_path} />
+                    )}
+                    {aa.remedy_focus && (
+                      <DiagnosisLine label="重点补救" labelColor="#4338CA" text={aa.remedy_focus} />
+                    )}
+                    {Array.isArray(aa.weak_topics) && aa.weak_topics.length > 0 && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, color: "#6B7280", letterSpacing: "0.04em" }}>薄弱知识点</span>
+                        {aa.weak_topics.map((wt, i) => (
+                          <span key={i} style={{ padding: "1.5px 7px", background: "#F1F5F9", color: "#475569", borderRadius: 999, fontSize: 10.5, fontWeight: 600, border: "1px solid #E2E8F0" }}>{wt}</span>
+                        ))}
+                      </div>
+                    )}
+                    {/* 旧诊断兜底：如果后端只给了 reasoning 没给 wrong_step 时 */}
+                    {!aa.wrong_step && !aa.misconception && aa.reasoning && (
                       <div style={{ fontSize: 13, lineHeight: 1.65, color: "#4C1D95" }}>{aa.reasoning}</div>
                     )}
                   </div>
@@ -10240,16 +10284,26 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChap
       const count = Math.min(Math.max(selectedItems.length, 5), 10);
       const aiCfg = getAIConfig();
       // 把每道错题 + 错因诊断打包成 errorContext，让后端 prompt 按错因策略针对性变式
+      // v2：传入结构化诊断（wrongStep / misconception / weakTopics），后端可以更精准
+      // 设计陷阱选项（让用户在变式里再次有机会"重蹈同一步骤的覆辙"）
       const errorContext = selectedItems.map((w) => {
         const lastWrong = (w.attempts || []).filter(a => !a.correct).slice(-1)[0];
         const q = resolveQuestion(w);
+        // 同一道题做错次数：越多越要加难度（避免学生"换皮做对"逃过实质考查）
+        const wrongCount = (w.attempts || []).filter(a => !a.correct).length;
         return {
           question: q?.question || "",
           correctAnswer: q?.answer || "",
           userAnswer: lastWrong?.user_answer || "",
           errorTags: Array.isArray(w.error_tags) ? w.error_tags : [],
           reasoning: w.ai_reasoning || "",
+          wrongStep: w.ai_wrong_step || "",
+          misconception: w.ai_misconception || "",
+          correctPath: w.ai_correct_path || "",
           remedyFocus: w.ai_remedy_focus || "",
+          weakTopics: Array.isArray(w.ai_weak_topics) ? w.ai_weak_topics : [],
+          confidence: w.ai_confidence || "",
+          wrongCount,
         };
       }).filter(e => e.question);
       const res = await fetch("/api/generate", {
@@ -10589,7 +10643,7 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChap
                       const seed = resolveTopicSeed(it, qq || q);
                       setTopicTarget(seed);
                     }}
-                    onAiDiagnosed={(reasoning, tags) => { saveAiReasoning(item.id, reasoning, tags); refresh(); }}
+                    onAiDiagnosed={(diagnosis) => { saveAiDiagnosis(item.id, diagnosis); refresh(); }}
                     onTagsChange={(tags) => { tagWrongItem(item.id, tags); refresh(); }}
                     onAskAI={() => {
                       if (!q) return;
@@ -10703,6 +10757,22 @@ function miniChip(primary, loading) {
   };
 }
 
+// 错题诊断里每个字段的展示行：左侧短色标签 + 右侧文本
+function DiagnosisLine({ label, labelColor, text }) {
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5, lineHeight: 1.55 }}>
+      <span style={{
+        flexShrink: 0, fontSize: 10, fontWeight: 800, color: labelColor || "#4338CA",
+        background: (labelColor || "#4338CA") + "10",
+        border: `1px solid ${(labelColor || "#4338CA")}33`,
+        padding: "1.5px 7px", borderRadius: 5, marginTop: 1,
+        whiteSpace: "nowrap", letterSpacing: "0.04em",
+      }}>{label}</span>
+      <span style={{ color: "#374151", fontWeight: 500, flex: 1, minWidth: 0, wordBreak: "break-word" }}>{text}</span>
+    </div>
+  );
+}
+
 // ———————— 错题胶囊卡片（诊断 + 三大联动传送门） ————————
 function MistakeCard({ item, question, selected, onToggleSelect, onMarkMastered, onSuspend, onRetry, onAiPractice, onStartSocratic, onOpenTopic, onAiDiagnosed, onTagsChange, onAskAI }) {
   const [hover, setHover] = useState(false);
@@ -10734,7 +10804,7 @@ function MistakeCard({ item, question, selected, onToggleSelect, onMarkMastered,
     statusKey = "review"; statusLabel = "需重练"; statusColor = "#F59E0B";
   }
 
-  // AI 归因诊断
+  // AI 归因诊断（v2：把整份结构化诊断 push 上去；onAiDiagnosed 接收一个对象）
   async function askAI() {
     setAiLoading(true);
     setAiError(null);
@@ -10750,12 +10820,24 @@ function MistakeCard({ item, question, selected, onToggleSelect, onMarkMastered,
           correct_answer: question.answer,
           user_answer: lastAttempt?.user_answer || "",
           chapter: chapterLabel,
+          explanation: question.explanation || "",
+          knowledge_points: question.knowledgePoints || question.knowledge_points || [],
           userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
         }),
       });
       const data = await resp.json();
-      if (data.error) throw new Error(data.error);
-      onAiDiagnosed(data.reasoning || "", data.tags || []);
+      if (data.error && !data.tags) throw new Error(data.error);
+      // 把全部结构化字段都丢给上层 saveAiDiagnosis；后端没给的字段会自然为空
+      onAiDiagnosed({
+        tags: Array.isArray(data.tags) ? data.tags : [],
+        wrong_step: data.wrong_step || "",
+        misconception: data.misconception || "",
+        correct_path: data.correct_path || "",
+        remedy_focus: data.remedy_focus || "",
+        weak_topics: Array.isArray(data.weak_topics) ? data.weak_topics : [],
+        confidence: data.confidence || "medium",
+        reasoning: data.reasoning || data.wrong_step || "",
+      });
     } catch (e) {
       setAiError(e.message || "未知错误");
     }
@@ -10897,58 +10979,110 @@ function MistakeCard({ item, question, selected, onToggleSelect, onMarkMastered,
         );
       })()}
 
-      {/* AI 归因诊断框 —— 卡片核心 */}
-      <div style={{
-        background: hasReasoning ? "#FAFAFC" : "#FDFDFD",
-        border: "1px solid " + (hasReasoning ? "#E0E7FF" : "#F3F4F6"),
-        borderRadius: 12, padding: "10px 12px",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: hasReasoning || aiError ? 6 : 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 13 }}>✨</span>
-            <span style={{ fontSize: 11.5, fontWeight: 800, color: hasReasoning ? "#4338CA" : "#6B7280", letterSpacing: "0.04em" }}>AI 归因诊断</span>
+      {/* AI 归因诊断框 —— 卡片核心（v2：结构化展示）
+            标签栏 → 一句"在哪里走错"的标题 → 折叠的细节（可能信念 / 正确做法 / 重点补救 / 薄弱知识点）
+            没有诊断时给单按钮入口；有诊断时分段呈现，避免大段文字糊成一团。 */}
+      {(() => {
+        const hasStructured = !!(item.ai_wrong_step || item.ai_misconception || item.ai_correct_path);
+        const conf = item.ai_confidence || (hasStructured ? "medium" : null);
+        const confColor = conf === "high" ? "#047857" : conf === "low" ? "#B45309" : "#4338CA";
+        const confLabel = conf === "high" ? "高置信" : conf === "low" ? "低置信·可能不准" : "中等置信";
+        const weakTopics = Array.isArray(item.ai_weak_topics) ? item.ai_weak_topics : [];
+        return (
+          <div style={{
+            background: hasReasoning ? "#FAFAFC" : "#FDFDFD",
+            border: "1px solid " + (hasReasoning ? "#E0E7FF" : "#F3F4F6"),
+            borderRadius: 12, padding: "10px 12px",
+            display: "flex", flexDirection: "column", gap: 8,
+          }}>
+            {/* 顶栏：标题 + confidence + 重新分析 */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                <span style={{ fontSize: 13 }}>✨</span>
+                <span style={{ fontSize: 11.5, fontWeight: 800, color: hasReasoning ? "#4338CA" : "#6B7280", letterSpacing: "0.04em" }}>AI 错因诊断</span>
+                {conf && (
+                  <span title={confLabel} style={{ fontSize: 9.5, color: confColor, fontWeight: 700, padding: "1px 6px", borderRadius: 4, border: `1px solid ${confColor}33`, background: confColor + "0F", letterSpacing: "0.03em" }}>
+                    {confLabel}
+                  </span>
+                )}
+              </div>
+              {!hasReasoning && !aiLoading && (
+                <button onClick={askAI} style={{ padding: "3px 10px", background: "#EEF2FF", color: "#4338CA", border: "1px solid #C7D2FE", borderRadius: 999, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                  让 AI 诊断
+                </button>
+              )}
+              {hasReasoning && (
+                <button onClick={askAI} disabled={aiLoading} title="重新分析" style={{ padding: 0, width: 22, height: 22, background: "transparent", border: "none", cursor: aiLoading ? "wait" : "pointer", color: "#9CA3AF", fontSize: 12 }}>
+                  {aiLoading ? "…" : "⟳"}
+                </button>
+              )}
+            </div>
+
+            {/* 标签 */}
+            {activeTags.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {activeTags.map((t) => {
+                  const tc = tagColor(t);
+                  return (
+                    <span key={t} style={{ padding: "2px 8px", background: tc.bg, color: tc.color, borderRadius: 999, fontSize: 10.5, fontWeight: 700, border: "1px solid " + tc.color + "33" }}>
+                      {tagLabel(t)}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* loading / error */}
+            {aiLoading && <div style={{ fontSize: 12, color: "#6B7280", fontStyle: "italic" }}>分析中…</div>}
+            {aiError && (
+              <div style={{ fontSize: 11.5, color: "#DC2626" }}>
+                分析失败：{aiError}
+                <button onClick={askAI} style={{ marginLeft: 6, padding: "2px 8px", background: "#FEF2F2", color: "#DC2626", border: "1px solid #FECACA", borderRadius: 6, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>重试</button>
+              </div>
+            )}
+
+            {/* 结构化诊断字段 —— 各字段独立小段，不糊成一团 */}
+            {hasStructured && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {item.ai_wrong_step && (
+                  <DiagnosisLine label="在哪里走错" labelColor="#B91C1C" text={item.ai_wrong_step} />
+                )}
+                {item.ai_misconception && (
+                  <DiagnosisLine label="可能的错信念" labelColor="#A16207" text={item.ai_misconception} />
+                )}
+                {item.ai_correct_path && (
+                  <DiagnosisLine label="正确思路" labelColor="#047857" text={item.ai_correct_path} />
+                )}
+                {item.ai_remedy_focus && (
+                  <DiagnosisLine label="重点补救" labelColor="#4338CA" text={item.ai_remedy_focus} />
+                )}
+                {weakTopics.length > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: "#6B7280", letterSpacing: "0.04em" }}>薄弱知识点</span>
+                    {weakTopics.map((wt, i) => (
+                      <span key={i} style={{ padding: "1.5px 7px", background: "#F1F5F9", color: "#475569", borderRadius: 999, fontSize: 10.5, fontWeight: 600, border: "1px solid #E2E8F0" }}>{wt}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 旧诊断兜底：只有 ai_reasoning 没有结构化字段时显示 */}
+            {!hasStructured && hasReasoning && (
+              <p style={{ fontSize: 12.5, color: "#4B5563", margin: 0, lineHeight: 1.55, fontWeight: 500 }}>
+                {item.ai_reasoning}
+              </p>
+            )}
+
+            {/* 完全空态 */}
+            {!hasReasoning && !aiLoading && !aiError && (
+              <div style={{ fontSize: 11.5, color: "#9CA3AF" }}>
+                点右上"让 AI 诊断"，AI 会指出你在哪一步走错、给出正确思路与补救方向
+              </div>
+            )}
           </div>
-          {!hasReasoning && !aiLoading && (
-            <button onClick={askAI} style={{ padding: "3px 10px", background: "#EEF2FF", color: "#4338CA", border: "1px solid #C7D2FE", borderRadius: 999, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
-              让 AI 猜
-            </button>
-          )}
-          {hasReasoning && (
-            <button onClick={askAI} disabled={aiLoading} title="重新分析" style={{ padding: 0, width: 22, height: 22, background: "transparent", border: "none", cursor: aiLoading ? "wait" : "pointer", color: "#9CA3AF", fontSize: 12 }}>
-              {aiLoading ? "…" : "⟳"}
-            </button>
-          )}
-        </div>
-        {aiLoading && <div style={{ fontSize: 12, color: "#6B7280", fontStyle: "italic" }}>分析中…</div>}
-        {aiError && (
-          <div style={{ fontSize: 11.5, color: "#DC2626" }}>
-            分析失败：{aiError}
-            <button onClick={askAI} style={{ marginLeft: 6, padding: "2px 8px", background: "#FEF2F2", color: "#DC2626", border: "1px solid #FECACA", borderRadius: 6, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>重试</button>
-          </div>
-        )}
-        {hasReasoning && (
-          <p style={{ fontSize: 12.5, color: "#4B5563", margin: 0, lineHeight: 1.55, fontWeight: 500 }}>
-            {item.ai_reasoning}
-          </p>
-        )}
-        {!hasReasoning && !aiLoading && !aiError && (
-          <div style={{ fontSize: 11.5, color: "#9CA3AF", marginTop: 4 }}>
-            点右上"让 AI 猜"，获得这道题的错因分析
-          </div>
-        )}
-        {activeTags.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
-            {activeTags.map((t) => {
-              const tc = tagColor(t);
-              return (
-                <span key={t} style={{ padding: "2px 8px", background: tc.bg, color: tc.color, borderRadius: 999, fontSize: 10.5, fontWeight: 700, border: "1px solid " + tc.color + "33" }}>
-                  {tagLabel(t)}
-                </span>
-              );
-            })}
-          </div>
-        )}
-      </div>
+        );
+      })()}
 
       {/* 底部：状态 + hover 出现的 AI 带练按钮 */}
       <div style={{ marginTop: "auto", paddingTop: 6, borderTop: "1px solid #F9FAFB", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -11022,6 +11156,8 @@ function SocraticCoachDrawer({ item, question, onClose, onMarkMastered }) {
     : null;
 
   // 构造错题上下文（给 AI 的 seed）
+  // v2：把 AI 已经做过的结构化诊断（wrong_step / misconception / correct_path）注入 seed，
+  // 让 Socratic 老师不必从零猜，直接对准"错信念"开问，节奏更准。
   const buildContext = () => {
     const lastAttempt = (item?.attempts || []).filter((a) => !a.correct).slice(-1)[0];
     const userAns = lastAttempt?.user_answer || "(未记录)";
@@ -11029,13 +11165,26 @@ function SocraticCoachDrawer({ item, question, onClose, onMarkMastered }) {
     const optsText = Array.isArray(opts)
       ? opts.map((o, i) => `${"ABCD"[i]}. ${o}`).join("\n")
       : "(判断题)";
-    const diagnosisHint = item?.ai_reasoning
-      ? `\n\n【AI 之前诊断的错因】：${item.ai_reasoning}`
-      : "";
     const tagsHint = errorTagLabels ? `\n【已标注错因类型】：${errorTagLabels}` : "";
 
+    // 优先用结构化诊断；没诊断过就退到旧的 ai_reasoning（保持向后兼容）
+    const hasStructured = !!(item?.ai_wrong_step || item?.ai_misconception || item?.ai_correct_path);
+    let diagnosisBlock = "";
+    if (hasStructured) {
+      const lines = [];
+      if (item.ai_wrong_step)    lines.push(`- 在哪一步走错：${item.ai_wrong_step}`);
+      if (item.ai_misconception) lines.push(`- 学生的错信念：${item.ai_misconception}`);
+      if (item.ai_correct_path)  lines.push(`- 正确思路要点：${item.ai_correct_path}`);
+      if (Array.isArray(item.ai_weak_topics) && item.ai_weak_topics.length) {
+        lines.push(`- 涉及的薄弱知识点：${item.ai_weak_topics.slice(0, 3).join(" / ")}`);
+      }
+      diagnosisBlock = `\n\n【AI 已做的结构化诊断】\n${lines.join("\n")}`;
+    } else if (item?.ai_reasoning) {
+      diagnosisBlock = `\n\n【AI 之前诊断的错因】：${item.ai_reasoning}`;
+    }
+
     return [
-      `我刚刚做错了一道 ${chapterLabel} 的题目，想请你用【苏格拉底式提问法】带我一步步重新推导，不要直接给答案。`,
+      `我刚刚做错了一道 ${chapterLabel} 的题目，请你用【苏格拉底式提问法】带我重新推导，不要直接给答案。`,
       ``,
       `【题目】`,
       question?.question || "",
@@ -11046,17 +11195,24 @@ function SocraticCoachDrawer({ item, question, onClose, onMarkMastered }) {
       `【正确答案】${question?.answer || ""}`,
       `【我当时选的】${userAns}`,
       tagsHint,
-      diagnosisHint,
+      diagnosisBlock,
       ``,
-      `请遵守以下规则：`,
-      `1. 一次只问一个关键问题，帮助我看清自己的思维卡点；`,
-      `2. 鼓励我先说自己的思路，再根据我的回答决定下一步引导；`,
-      `3. 不要把完整推导一口气讲完；`,
-      `4. 用简短文字 + LaTeX（用 $...$ 包裹）表达公式；`,
-      `5. 当我真的推不下去时，再给一个最小提示（不是完整答案）。`,
+      `请严格遵守以下苏格拉底带练规则（很重要）：`,
+      `1. **靶心提问**：${hasStructured && item.ai_wrong_step ? `先围绕"${(item.ai_wrong_step || "").slice(0, 50)}…"这一步发问` : "先识别我最可能卡住的那一步"}，不要从最简单的概念再讲一遍。`,
+      `2. **三级提示制（必须遵守）**：`,
+      `   · 第 1 级：只问一个开放性问题，让我先说思路（如"这一步你是怎么想的？为什么选 ${userAns}？"）；`,
+      `   · 第 2 级：我答不上来或答错时，给一个**指向但不揭穿**的反问（如"那当 x→0 时，这个表达式会怎样？"）；`,
+      `   · 第 3 级：再答不出，给**最小公式提示**（如"想想链式法则 $(e^u)' = u'\\,e^u$"），但**仍不要把答案给出来**；`,
+      `   · 我说"我懂了"或"再来一题"才允许总结，否则只能引导。`,
+      `3. **一次一问**：每次回复只问一个问题，**绝对不要**一口气列出 3、4 个问题。`,
+      `4. **回应我的回答**：先回应我刚才说的（哪里对、哪里偏），再给下一个问题；不要忽略我的发言直接给下一题。`,
+      `5. **公式格式**：行内公式用 $...$，块级用 $$...$$；不要写成纯文本 dy/dx。`,
+      `6. **避免直接给完整答案**：即使我表现得很沮丧，也只能给"提示"而不是"完整解"，除非我打"放弃，请直接讲解"。`,
       ``,
-      `现在请先问我一个引导性的问题开始。`,
-    ].join("\n");
+      `${hasStructured && item.ai_misconception ? `提示：根据已有诊断，我可能信以为真的是「${(item.ai_misconception || "").slice(0, 80)}」——你可以从这个错信念入手，用反问引导我自己发现它哪里错了。` : ""}`,
+      ``,
+      `现在请用第 1 级提问开场。`,
+    ].filter(Boolean).join("\n");
   };
 
   async function sendToAI(userText, historyForAI) {
