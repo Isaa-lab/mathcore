@@ -1444,6 +1444,22 @@ const isLowQualityQuestion = (q) => {
     // 如果题干同时谈这些产品元素 + 询问"是正确的 / 包含 / 提供"，几乎一定是元数据题
     if (/(?:正确的|包含|提供|附带|配有|是否|哪一?项|哪个|哪些)/.test(text)) return true;
   }
+  // 英文教材前言 / 致谢 / 出版信息：作者第一人称 + edition / preface / acknowledgments 等
+  // 反例：「I am pleased to see the text reach its ninth edition」「In this book we...」
+  {
+    const optStr = Array.isArray(opts) ? opts.join(" ") : "";
+    const blob = text + " " + optStr;
+    const prefaceLike =
+      /\b(?:I am (?:pleased|delighted|honored|grateful|happy)|We (?:are|would like|hope)|It is (?:my|our) (?:pleasure|hope|honor))\b/i.test(blob) ||
+      /\b(?:this (?:book|text|edition|volume)|the (?:author|publisher)|reach(?:ed)? its \w+ edition|new edition|second printing|errat(?:a|um)|preface|acknowledg?ments|foreword|in this (?:book|edition))\b/i.test(blob) ||
+      /\b(?:ninth|tenth|eleventh|twelfth|first|second|third|fourth|fifth|sixth|seventh|eighth)\s+edition\b/i.test(blob);
+    const hasFormula = /\$[^$]+\$|\\(?:frac|int|sum|sqrt|prod|lim|partial|begin\{)/i.test(blob)
+      || /[=≤≥≠→∈∉∀∃∫∑∏√].{0,40}[a-zA-Z0-9]/.test(blob);
+    if (prefaceLike && !hasFormula) return true;
+    // 出版信息：ISBN / 出版社 / 版权
+    if (/\b(?:ISBN|copyright|©|All rights reserved|Pearson|Springer|McGraw|Wiley|Cambridge University Press|Oxford University Press)\b/i.test(blob)) return true;
+    if (/(?:版权所有|出版社|出版集团|印次|装帧|定价|本书由)/.test(blob)) return true;
+  }
 
   // 选项里如果出现作者姓名 + 时间戳 组合，基本 100% 是元数据污染
   if (Array.isArray(opts)) {
@@ -1659,7 +1675,7 @@ const findChunkRefContext = (chunk, refDefs) => {
   return hits;
 };
 
-const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvider = null, forceUserKey = null }) => {
+const processMaterialWithAI = async ({ material, file, genCount = 30, forceProvider = null, forceUserKey = null }) => {
   const materialId = material?.id;
   if (!materialId) return { topics: [], questions: [], insertedCount: 0, materialLinked: false };
 
@@ -4973,14 +4989,14 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
   );
 }
 
-// ── AI 知识点卡片（行式 row-card） ───────────────────────────────────────────
-// 设计目标 v2（按 Brilliant / Notion 章节列表的"行"做密度优先）：
-//   · 单行高度 ~52-72px：标题 + parent 面包屑同行；摘要 1 行 clamp 在下方
-//   · 操作按钮收回到右侧"做题→"小胶囊，标为掌握缩成单字符图标按钮
-//   · 当前 AI 的主色驱动：左侧 3px 边线、provider chip、做题按钮 —— 切到不同 AI tab
-//     时整张页面"换皮"，同 AI 内只用一种调子，不会多 AI 撞色
-//   · 已掌握：左侧绿色 + 右上角小 ✓ 圆点，不再覆盖整张卡的色调
-function AITopicCard({ t, PROVIDER_META, G, topicMastery, onOpen, onMastery, onPractice, compact = false }) {
+// ── AI 知识点行（file-tree row 风格） ─────────────────────────────────────────
+// 设计目标 v3（去掉每条独立 border，让一个 section 内的行像 Notion / Linear 的子页列表）：
+//   · 行高 ~40-56px，无独立边框/圆角；hover 时整行染色
+//   · 缩进表达 parent → children 关系，左侧画一根连续的 1px "trunk" 线
+//   · 标题 + parent 面包屑 + meta + 主操作 都在同一行
+//   · 摘要单独行，1 行 clamp，颜色更弱化
+//   · 已掌握：左侧 2px 翠绿描边（不抢全行）；mastery 切换是单字符按钮
+function AITopicCard({ t, PROVIDER_META, G, topicMastery, onOpen, onMastery, onPractice, compact = false, asRow = false, accentColor = null }) {
   const SLATE_TEXT = "#0F172A";
   const SLATE_MUTED = "#64748B";
   const SLATE_FAINT = "#94A3B8";
@@ -4991,14 +5007,111 @@ function AITopicCard({ t, PROVIDER_META, G, topicMastery, onOpen, onMastery, onP
   const mastery = topicMastery[t.id]?.status || "todo";
   const provKey = (t.provider && String(t.provider).trim()) || "legacy";
   const provMeta = PROVIDER_META[provKey] || PROVIDER_META.unknown;
-  const accent = provMeta.color || "#4F46E5"; // provider 主色，作为整张卡的语义色
+  // accentColor 优先使用上层传入（让"切到 X AI 整页换皮"的语义稳定）；
+  // 不传时退回该卡片自己 provider 的色（多 AI 混排时保留差异）
+  const accent = accentColor || provMeta.color || "#4F46E5";
   const isChild = (t._hLevel || 0) > 0;
   const isMastered = mastery === "done";
   const showProviderChip = provKey !== "legacy" && provKey !== "unknown";
 
-  // 左侧色条颜色：已掌握 → 翠绿；否则 → AI 主色（淡）
-  const leftStripe = isMastered ? MASTERED_GREEN : accent;
+  // ===== 行模式 (asRow=true) —— file-tree 风格，无独立边框 =====
+  if (asRow) {
+    return (
+      <div
+        onClick={() => onOpen(t)}
+        role="button" tabIndex={0}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(t); } }}
+        style={{
+          position: "relative",
+          padding: "8px 10px 8px 14px",
+          cursor: "pointer",
+          background: isMastered ? "#F0FDF4" : "transparent",
+          borderLeft: `2px solid ${isMastered ? MASTERED_GREEN : "transparent"}`,
+          borderRadius: 6,
+          display: "flex", flexDirection: "column", gap: 2,
+          transition: "background 0.12s ease",
+        }}
+        onMouseEnter={e => { if (!isMastered) e.currentTarget.style.background = accent + "0A"; }}
+        onMouseLeave={e => { if (!isMastered) e.currentTarget.style.background = "transparent"; }}
+      >
+        {/* 主行 */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          {/* 名字 + 父级面包屑（小） */}
+          <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13.5, fontWeight: isChild ? 600 : 700, color: SLATE_TEXT, letterSpacing: "-0.005em", lineHeight: 1.4 }}>{t.name}</span>
+            {t.parent_name && (
+              <span style={{ fontSize: 10.5, color: SLATE_FAINT, fontWeight: 500 }}>
+                <span style={{ color: "#CBD5E1" }}>·</span> {t.parent_name}
+              </span>
+            )}
+          </div>
 
+          {/* meta */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, fontSize: 10.5, color: SLATE_MUTED }}>
+            {Number.isFinite(t.depth) && (
+              <span style={{ color: SLATE_FAINT, fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>L{t.depth}</span>
+            )}
+            {t.chapter && (
+              <span style={{ color: SLATE_MUTED, fontWeight: 500 }}>{t.chapter}</span>
+            )}
+            {showProviderChip && !accentColor && (
+              <span title={t.provider_model ? `${provMeta.label} · ${t.provider_model}` : provMeta.label}
+                style={{
+                  color: provMeta.color, background: provMeta.color + "10",
+                  padding: "1px 6px", borderRadius: 4, fontWeight: 600,
+                  fontSize: 10,
+                }}>
+                {provMeta.label}
+              </span>
+            )}
+          </div>
+
+          {/* 操作 */}
+          <div style={{ display: "flex", gap: 4, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+            <button
+              onClick={(e) => { e.stopPropagation(); onPractice(t); }}
+              style={{
+                padding: "3.5px 10px", fontSize: 11.5, fontWeight: 600,
+                background: "transparent", color: accent,
+                border: `1px solid ${accent}44`,
+                borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap",
+                fontFamily: "inherit",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = accent; e.currentTarget.style.color = "#fff"; e.currentTarget.style.borderColor = accent; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = accent; e.currentTarget.style.borderColor = accent + "44"; }}
+            >
+              做题
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onMastery(t, isMastered ? "todo" : "done"); }}
+              title={isMastered ? "取消已掌握" : "标记已掌握"}
+              aria-label={isMastered ? "取消已掌握" : "标记已掌握"}
+              style={{
+                width: 24, height: 24, padding: 0, fontSize: 11, fontFamily: "inherit",
+                background: isMastered ? "#ECFDF5" : "transparent",
+                color: isMastered ? "#047857" : SLATE_FAINT,
+                border: `1px solid ${isMastered ? "#A7F3D0" : "#E2E8F0"}`,
+                borderRadius: 6, cursor: "pointer", lineHeight: 1, fontWeight: 700,
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              {isMastered ? "✓" : "○"}
+            </button>
+          </div>
+        </div>
+
+        {/* 摘要（不锁高度，1 行） */}
+        {t.summary && (
+          <div style={{ fontSize: 12, color: SLATE_MUTED, lineHeight: 1.55, display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden", paddingRight: 8 }}>
+            {t.summary}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ===== 卡片模式（旧扁平视图兜底） =====
+  const leftStripe = isMastered ? MASTERED_GREEN : accent;
   return (
     <div
       onClick={() => onOpen(t)}
@@ -5026,7 +5139,6 @@ function AITopicCard({ t, PROVIDER_META, G, topicMastery, onOpen, onMastery, onP
         e.currentTarget.style.borderLeftColor = isMastered ? leftStripe : leftStripe + "55";
       }}
     >
-      {/* 行 1：标题 · 父级面包屑 · meta · 操作 */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
         {isChild && (
           <span aria-hidden style={{ color: SLATE_FAINT, fontSize: 12, fontWeight: 500, flexShrink: 0, lineHeight: 1 }}>└</span>
@@ -5034,70 +5146,37 @@ function AITopicCard({ t, PROVIDER_META, G, topicMastery, onOpen, onMastery, onP
         <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: SLATE_TEXT, letterSpacing: "-0.005em", lineHeight: 1.35 }}>{t.name}</span>
           {t.parent_name && (
-            <span style={{ fontSize: 11, color: SLATE_FAINT, fontWeight: 500 }}>
-              ← {t.parent_name}
-            </span>
+            <span style={{ fontSize: 11, color: SLATE_FAINT, fontWeight: 500 }}>← {t.parent_name}</span>
           )}
         </div>
-
-        {/* meta：章节 + depth + provider；之前是单独一行，现在挪进 header 节省一行高度 */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, fontSize: 10.5, color: SLATE_MUTED }}>
           {Number.isFinite(t.depth) && (
             <span style={{ color: SLATE_FAINT, fontWeight: 500, fontVariantNumeric: "tabular-nums", padding: "1px 5px", border: `1px solid ${SLATE_BORDER}`, borderRadius: 4 }}>L{t.depth}</span>
           )}
-          {t.chapter && (
-            <span style={{ color: SLATE_MUTED, fontWeight: 500 }}>{t.chapter}</span>
-          )}
+          {t.chapter && <span style={{ color: SLATE_MUTED, fontWeight: 500 }}>{t.chapter}</span>}
           {showProviderChip && (
             <span title={t.provider_model ? `${provMeta.label} · ${t.provider_model}` : provMeta.label}
-              style={{
-                color: accent, background: accent + "11",
-                border: `1px solid ${accent}33`,
-                padding: "1.5px 7px", borderRadius: 999, fontWeight: 600,
-                display: "inline-flex", alignItems: "center", gap: 4,
-              }}>
+              style={{ color: accent, background: accent + "11", border: `1px solid ${accent}33`, padding: "1.5px 7px", borderRadius: 999, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}>
               <span aria-hidden style={{ width: 4, height: 4, borderRadius: 999, background: accent }} />
               {provMeta.label}
             </span>
           )}
         </div>
-
-        {/* 操作组：紧凑、在右侧 —— "做题→" 用 provider 主色，掌握切换是单字符按钮 */}
         <div style={{ display: "flex", gap: 5, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
           <button
             onClick={(e) => { e.stopPropagation(); onPractice(t); }}
-            style={{
-              padding: "5px 10px", fontSize: 12, fontWeight: 600,
-              background: accent + "12", color: accent,
-              border: `1px solid ${accent}33`,
-              borderRadius: 7, cursor: "pointer", whiteSpace: "nowrap",
-              fontFamily: "inherit", letterSpacing: "0.01em", lineHeight: 1.4,
-              transition: "background 0.15s ease, border-color 0.15s ease",
-            }}
+            style={{ padding: "5px 10px", fontSize: 12, fontWeight: 600, background: accent + "12", color: accent, border: `1px solid ${accent}33`, borderRadius: 7, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "inherit", letterSpacing: "0.01em", lineHeight: 1.4 }}
             onMouseEnter={e => { e.currentTarget.style.background = accent; e.currentTarget.style.color = "#fff"; e.currentTarget.style.borderColor = accent; }}
             onMouseLeave={e => { e.currentTarget.style.background = accent + "12"; e.currentTarget.style.color = accent; e.currentTarget.style.borderColor = accent + "33"; }}
-          >
-            做题 →
-          </button>
+          >做题 →</button>
           <button
             onClick={(e) => { e.stopPropagation(); onMastery(t, isMastered ? "todo" : "done"); }}
             title={isMastered ? "取消已掌握" : "标记已掌握"}
             aria-label={isMastered ? "取消已掌握" : "标记已掌握"}
-            style={{
-              width: 28, height: 28, padding: 0, fontSize: 12, fontFamily: "inherit",
-              background: isMastered ? "#ECFDF5" : "#FFFFFF",
-              color: isMastered ? "#047857" : SLATE_FAINT,
-              border: `1px solid ${isMastered ? "#A7F3D0" : SLATE_BORDER}`,
-              borderRadius: 7, cursor: "pointer", lineHeight: 1, fontWeight: 700,
-              display: "inline-flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            {isMastered ? "✓" : "○"}
-          </button>
+            style={{ width: 28, height: 28, padding: 0, fontSize: 12, fontFamily: "inherit", background: isMastered ? "#ECFDF5" : "#FFFFFF", color: isMastered ? "#047857" : SLATE_FAINT, border: `1px solid ${isMastered ? "#A7F3D0" : SLATE_BORDER}`, borderRadius: 7, cursor: "pointer", lineHeight: 1, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+          >{isMastered ? "✓" : "○"}</button>
         </div>
       </div>
-
-      {/* 行 2：摘要（单行 clamp）—— 摘要为空就不渲染这一行，让卡片更短 */}
       {t.summary && (
         <div style={{ fontSize: 12.5, color: SLATE_MUTED, lineHeight: 1.55, paddingLeft: isChild ? 18 : 0, display: "-webkit-box", WebkitLineClamp: compact ? 1 : 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
           {t.summary}
@@ -5436,7 +5515,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         material: matRow,
         file: fetchedFile,
         fallbackText: `${matRow.title || ""} ${matRow.description || ""}`,
-        genCount: 12,
+        genCount: 30,
         forceProvider: provider,
         forceUserKey: userKeyForProvider,
         actorName: `用户重抽（${provider}）`,
@@ -5740,44 +5819,75 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                     </div>
                   );
                 }
-                // 当前激活的 provider 主色 —— 章节头取自这里，让"切到不同 AI tab 整页换皮"
+                // 当前激活的 provider 主色 —— 整个层级视图按这个色调，让"切到不同 AI tab 整页换皮"
                 const activeProvMeta = providerFilter ? (PROVIDER_META[providerFilter] || PROVIDER_META.unknown) : null;
                 const sectionAccent = activeProvMeta?.color || "#4F46E5";
                 return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
                     {groups.map(({ section, items }) => (
-                      <div key={section}>
-                        {/* 大标题：左侧 provider 主色细色条 + 章节名 + 计数；切 AI 时颜色跟着换 */}
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #EEF2F7" }}>
-                          <span aria-hidden style={{ width: 3, height: 16, background: sectionAccent, borderRadius: 2 }} />
-                          <span style={{ fontSize: 10, fontWeight: 700, color: sectionAccent, letterSpacing: "0.14em", textTransform: "uppercase", opacity: 0.85 }}>章节</span>
-                          <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", letterSpacing: "-0.005em" }}>{section}</div>
-                          <span style={{ marginLeft: "auto", fontSize: 11, color: "#94A3B8", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{items.length} 个</span>
+                      <section key={section} style={{
+                        background: "#FFFFFF",
+                        border: "1px solid #EEF2F7",
+                        borderRadius: 12,
+                        overflow: "hidden",
+                      }}>
+                        {/* section 头：色条 + 标题 + 计数；切 AI 时颜色跟着换 */}
+                        <header style={{
+                          display: "flex", alignItems: "center", gap: 10,
+                          padding: "12px 14px",
+                          background: sectionAccent + "08",
+                          borderBottom: `1px solid ${sectionAccent}1F`,
+                        }}>
+                          <span aria-hidden style={{ width: 4, height: 18, background: sectionAccent, borderRadius: 2 }} />
+                          <span style={{ fontSize: 10, fontWeight: 700, color: sectionAccent, letterSpacing: "0.14em", textTransform: "uppercase" }}>章节</span>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.005em" }}>{section}</div>
+                          <span style={{ marginLeft: "auto", fontSize: 11, color: "#64748B", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{items.length} 个知识点</span>
+                        </header>
+
+                        {/* file-tree 主干：一根纵向 1px 线贯穿；rows 用 padding-left 表示 _hLevel */}
+                        <div style={{ position: "relative", padding: "6px 8px 8px 8px" }}>
+                          {/* 主干线，从 section 头底部到最后一行；只在有层级时显示 */}
+                          {items.some(t => (t._hLevel || 0) > 0) && (
+                            <span aria-hidden style={{
+                              position: "absolute", left: 18, top: 6, bottom: 6, width: 1,
+                              background: sectionAccent + "22",
+                            }} />
+                          )}
+                          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                            {items.map(t => {
+                              const lvl = t._hLevel || 0;
+                              return (
+                                <div key={t.id} style={{ position: "relative", paddingLeft: lvl * 18 }}>
+                                  {/* 横向连接短线：只在子节点出现，从主干指向行首 */}
+                                  {lvl > 0 && (
+                                    <span aria-hidden style={{
+                                      position: "absolute",
+                                      left: 18 + (lvl - 1) * 18,
+                                      top: 18, width: lvl * 18 - 12, height: 1,
+                                      background: sectionAccent + "33",
+                                    }} />
+                                  )}
+                                  <AITopicCard
+                                    asRow
+                                    accentColor={sectionAccent}
+                                    t={t}
+                                    PROVIDER_META={PROVIDER_META} G={G} topicMastery={topicMastery}
+                                    onOpen={openAITopicDetail} onMastery={markTopicMastery}
+                                    onPractice={(t) => {
+                                      if (typeof setQuizIntent === "function") {
+                                        setQuizIntent({ source: "ai_topic", materialId: selectedMaterialId, topicId: t.id, topicName: t.name, topicSummary: t.summary || "", chapter: t.chapter || null, count: 5 });
+                                      }
+                                      if (typeof switchStudyTab === "function") switchStudyTab("小测");
+                                      else if (selectedMaterial) setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
+                                    }}
+                                    compact
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                        {/* 该 section 下的小标题 + 叶子，按 _hLevel 缩进 */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          {items.map(t => (
-                            <div key={t.id} style={{ paddingLeft: (t._hLevel || 0) * 20, position: "relative" }}>
-                              {(t._hLevel || 0) > 0 && (
-                                <span aria-hidden style={{ position: "absolute", left: (t._hLevel - 1) * 20 + 6, top: 18, width: 11, height: 1, background: "#E2E8F0" }} />
-                              )}
-                              <AITopicCard
-                                t={t}
-                                PROVIDER_META={PROVIDER_META} G={G} topicMastery={topicMastery}
-                                onOpen={openAITopicDetail} onMastery={markTopicMastery}
-                                onPractice={(t) => {
-                                  if (typeof setQuizIntent === "function") {
-                                    setQuizIntent({ source: "ai_topic", materialId: selectedMaterialId, topicId: t.id, topicName: t.name, topicSummary: t.summary || "", chapter: t.chapter || null, count: 5 });
-                                  }
-                                  if (typeof switchStudyTab === "function") switchStudyTab("小测");
-                                  else if (selectedMaterial) setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
-                                }}
-                                compact
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      </section>
                     ))}
                   </div>
                 );
@@ -6030,7 +6140,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         material,
         file: fetchedFile,
         fallbackText: `${material.title || ""} ${material.description || ""}`,
-        genCount: 20,
+        genCount: 35,
         actorName: "系统自动补题",
       });
       const inserted = result?.insertedCount ?? result?.questions?.length ?? 0;
@@ -9740,7 +9850,7 @@ function UploadPage({ setPage, profile }) {
       aiResult = await processMaterialWithAI({
         material: insertedMaterial,
         file: tFile,
-        genCount: 25,
+        genCount: 35,
         actorName: profile?.name || "用户",
       });
     } catch (e) {
@@ -10402,19 +10512,28 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChap
   // 单题 AI 带练：基于这一道错题生成一批变式并进入 drill
   async function startAIPractice(item) {
     setRegenLoading(true);
-    setRegenMsg("");
+    setRegenMsg("正在用结构化诊断生成针对性变式…");
     try {
       const aiCfg = getAIConfig();
       const lastWrong = (item.attempts || []).filter(a => !a.correct).slice(-1)[0];
       const q = resolveQuestion(item);
-      const errorContext = q?.question ? [{
+      if (!q?.question) throw new Error("找不到原题内容；请刷新错题本后重试");
+      const wrongCount = (item.attempts || []).filter(a => !a.correct).length;
+      // v2：注入结构化诊断字段，让后端按 wrong_step / misconception 精准设计陷阱
+      const errorContext = [{
         question: q.question,
         correctAnswer: q.answer || "",
         userAnswer: lastWrong?.user_answer || "",
         errorTags: Array.isArray(item.error_tags) ? item.error_tags : [],
         reasoning: item.ai_reasoning || "",
+        wrongStep: item.ai_wrong_step || "",
+        misconception: item.ai_misconception || "",
+        correctPath: item.ai_correct_path || "",
         remedyFocus: item.ai_remedy_focus || "",
-      }] : [];
+        weakTopics: Array.isArray(item.ai_weak_topics) ? item.ai_weak_topics : [],
+        confidence: item.ai_confidence || "",
+        wrongCount,
+      }];
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -10426,22 +10545,32 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChap
           userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
         }),
       });
-      const data = await res.json();
+      // 防御后端 500 返回 HTML —— 之前的 res.json() 会直接抛 SyntaxError
+      const ct = res.headers.get("content-type") || "";
+      const raw = await res.text();
+      let data;
+      if (ct.includes("application/json") || raw.trim().startsWith("{")) {
+        try { data = JSON.parse(raw); }
+        catch { throw new Error(`后端返回不是 JSON（HTTP ${res.status}）。建议在 AI 设置里换一个 provider 重试。`); }
+      } else {
+        throw new Error(`后端 HTTP ${res.status}：${raw.slice(0, 120) || "无内容"}。建议换一个 provider。`);
+      }
       if (data?.error) throw new Error(data.error);
-      const rows = (data.questions || []).map((q, idx2) => ({
+      const rows = (data.questions || []).map((qq, idx2) => ({
         id: "ai_wrong_" + Date.now() + "_" + idx2,
         chapter: item.chapter_label || item.chapter,
-        type: q.type || "单选题",
-        question: q.question,
-        options: q.options || null,
-        answer: q.answer,
-        explanation: q.explanation || "",
+        type: qq.type || "单选题",
+        question: qq.question,
+        options: qq.options || null,
+        answer: qq.answer,
+        explanation: qq.explanation || "",
       }));
-      if (rows.length === 0) throw new Error("AI 未返回题目，请检查 API Key 配置");
+      if (rows.length === 0) throw new Error("AI 未返回题目，可能题源信息太少；请先点「让 AI 诊断」补全结构化错因后重试");
       incrementVariantsGenerated([item.id], rows.length);
       refresh();
       setDrillQueue(rows);
       setDrillKind("variant");
+      setRegenMsg("");
     } catch (err) {
       setRegenMsg("❌ AI 带练生成失败：" + (err?.message || "请检查 API 设置"));
     }
@@ -10606,11 +10735,23 @@ function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChap
               <button onClick={clearSelection} style={miniChip()}>取消选中</button>
             </div>
           )}
-          {regenMsg && (
-            <div style={{ padding: "10px 14px", borderRadius: 10, background: regenMsg.startsWith("❌") ? "#FEF2F2" : "#ECFDF5", color: regenMsg.startsWith("❌") ? "#991B1B" : "#047857", marginBottom: 16, fontSize: 13, border: "1px solid " + (regenMsg.startsWith("❌") ? "#FECACA" : "#A7F3D0") }}>
-              {regenMsg}
-            </div>
-          )}
+          {regenMsg && (() => {
+            const isErr = regenMsg.startsWith("❌");
+            const isOk = regenMsg.startsWith("✅");
+            const palette = isErr
+              ? { bg: "#FEF2F2", color: "#991B1B", border: "#FECACA" }
+              : isOk
+                ? { bg: "#ECFDF5", color: "#047857", border: "#A7F3D0" }
+                : { bg: "#EEF2FF", color: "#4338CA", border: "#C7D2FE" }; // info / loading
+            return (
+              <div style={{ padding: "10px 14px", borderRadius: 10, background: palette.bg, color: palette.color, marginBottom: 16, fontSize: 13, border: `1px solid ${palette.border}`, display: "flex", alignItems: "center", gap: 8 }}>
+                {regenLoading && !isErr && !isOk && (
+                  <span style={{ width: 12, height: 12, borderRadius: "50%", border: `2px solid ${palette.color}`, borderRightColor: "transparent", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
+                )}
+                <span style={{ flex: 1, minWidth: 0 }}>{regenMsg}</span>
+              </div>
+            );
+          })()}
 
           {/* 卡片网格 */}
           {filteredItems.length === 0 ? (
@@ -11093,7 +11234,9 @@ function MistakeCard({ item, question, selected, onToggleSelect, onMarkMastered,
             <span style={{ fontSize: 11, color: "#9CA3AF" }}>· 连对 {reps}/3</span>
           )}
         </div>
-        <div style={{ display: "flex", gap: 6, opacity: hover ? 1 : 0, transform: hover ? "translateX(0)" : "translateX(4px)", transition: "all .15s ease" }}>
+        {/* 操作按钮：永远可见——之前 opacity: hover ? 1 : 0 在触屏 / 慢速指针上等于点不到，
+            用户反映"变式按钮点不进去"的根因就是这个 hover-only 隐藏。 */}
+        <div style={{ display: "flex", gap: 6, transition: "all .15s ease" }}>
           <button onClick={(e) => { e.stopPropagation(); onRetry(); }} title="原题重做" style={{ padding: "6px 11px", background: "#fff", color: "#374151", border: "1px solid #E5E7EB", borderRadius: 9, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>重做</button>
           <button onClick={(e) => { e.stopPropagation(); if (onAiPractice) onAiPractice(); }} title="AI 生成同类变式" style={{ padding: "6px 11px", background: "#EEF2FF", color: "#4338CA", border: "1px solid #C7D2FE", borderRadius: 9, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>变式</button>
           <button onClick={(e) => { e.stopPropagation(); if (onStartSocratic) onStartSocratic(item, question); }} title="打开苏格拉底式 AI 带练" style={{ padding: "6px 14px", background: "#111827", color: "#fff", border: "none", borderRadius: 9, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -13406,7 +13549,7 @@ function TeacherPage({ setPage, profile }) {
             material: { ...material, status: "approved" },
             file: null,
             fallbackText: `${material?.title || ""} ${material?.description || ""}`,
-            genCount: 25,
+            genCount: 35,
             actorName: profile?.name || "教师",
           });
         } catch (e) {}
@@ -13426,7 +13569,7 @@ function TeacherPage({ setPage, profile }) {
             material: { ...material, status: "approved" },
             file: null,
             fallbackText: `${material?.title || ""} ${material?.description || ""}`,
-            genCount: 25,
+            genCount: 35,
             actorName: profile?.name || "教师",
           });
         } catch (e) {}
@@ -14428,11 +14571,33 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     };
   }, [aiTopicsLoaded]);
 
-  // 知识树只渲染人工策划的 SKILL_TREE（带依赖箭头），不再把 AI 抽取的扁平节点堆到画布右侧。
-  // —— 用户反馈："知识树的综合需要体现逻辑关系，不是单纯全列出来"。
-  // AI 抽取的知识点已经在"知识点"tab 按 provider 分组展示，这里不再重复堆放，避免视觉撞车。
-  const treeNodes = useMemo(() => SKILL_TREE, []);
-  const nodeIndex = useMemo(() => NODE_INDEX, []);
+  // 知识树渲染：人工策划的 SKILL_TREE（核心 + 依赖箭头）+ 当前教材的 AI 抽取节点。
+  // 之前为避免"扁平堆叠"暂时关掉了 AI 节点；现在 AI 节点带 section/parent 层级，能稳定布局，
+  // 重新打开。同时下方还有 AIHierarchyOverlay 提供"目录树"视图，画布 + 列表互补。
+  //
+  // 当前教材的 AI 节点筛选规则：
+  //   · 沙盒模式（currentMaterial 有值）→ 只显示该材料的 AI 节点
+  //   · 全局模式 → 显示全部已抽取的 AI 节点（用 inferCourseFromChapterTree 自动归课程）
+  const aiNodesForTree = useMemo(() => {
+    const list = Array.isArray(aiTopics) ? aiTopics : [];
+    const filtered = currentMaterial?.id
+      ? list.filter(t => t && t.material_id === currentMaterial.id)
+      : list;
+    if (filtered.length === 0) return [];
+    return placeAiTopicsToTree(filtered, SKILL_TREE);
+  }, [aiTopics, currentMaterial?.id]);
+
+  const treeNodes = useMemo(() => {
+    if (!aiNodesForTree.length) return SKILL_TREE;
+    return [...SKILL_TREE, ...aiNodesForTree];
+  }, [aiNodesForTree]);
+
+  const nodeIndex = useMemo(() => {
+    if (!aiNodesForTree.length) return NODE_INDEX;
+    const idx = { ...NODE_INDEX };
+    for (const n of aiNodesForTree) idx[n.id] = n;
+    return idx;
+  }, [aiNodesForTree]);
 
   // ══ 悬浮高亮：沿依赖链向上/向下扫描，点亮前置 + 后续，其他节点/边暗化 ══
   const [hoveredId, setHoveredId] = useState(null);
@@ -14482,8 +14647,8 @@ function SkillTreePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     else if (typeof setPage === "function") setPage(p);
   };
 
-  // "综合" 已废弃（AI 节点不再注入 canvas），过滤掉避免再出现一个空 tab
-  const courses = useMemo(() => ["全部", ...Array.from(new Set(treeNodes.map(s => s.course))).filter(c => c !== "综合")], [treeNodes]);
+  // 课程筛选 tabs：从 treeNodes 自动汇总；包括 AI 节点带进来的"综合"（章节归不进任一课程时）
+  const courses = useMemo(() => ["全部", ...Array.from(new Set(treeNodes.map(s => s.course)))], [treeNodes]);
   const visibleNodes = useMemo(() => (
     selectedCourse === "全部" ? treeNodes : treeNodes.filter(n => n.course === selectedCourse)
   ), [selectedCourse, treeNodes]);

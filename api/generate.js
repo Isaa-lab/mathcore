@@ -791,9 +791,15 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
 
   // ── Timeout budget ─────────────────────────────────────────────────────────
   // Vercel Hobby = 10s 硬超时，超过会返回 HTML 错误页（前端解析失败就全归到 5xx）。
-  // 这里每个 provider 最多 8s；整个 handler 用 startedAt 追剩余预算，绝不超出。
-  const HANDLER_BUDGET_MS = 28000; // Pro 60s 也够用；Hobby 上最多 10s 由 Vercel 兜底
-  const PER_PROVIDER_MS = isChatMode ? 8000 : 14000;
+  // 之前 28s 的预算只在 Pro 计划下安全，Hobby 上每次都会让 Socratic 路径触发平台
+  // HTML 500（用户看到 "后端返回 HTTP 500（非 JSON）"）。这里把整体预算压到 9.5s，
+  // 单 provider 压到 chat=5s / 非 chat=8s，总能在 Vercel 砍我们之前先返回 JSON 错误。
+  // VERCEL_PLAN=pro 时（环境变量自报），自动放宽到 28s。
+  const isProPlan = String(process.env.VERCEL_PLAN || "").toLowerCase() === "pro";
+  const HANDLER_BUDGET_MS = isProPlan ? 28000 : 9500;
+  const PER_PROVIDER_MS = isProPlan
+    ? (isChatMode ? 8000 : 14000)
+    : (isChatMode ? 5000 : 8000);
   const startedAt = Date.now();
   const remainingBudget = () => Math.max(0, HANDLER_BUDGET_MS - (Date.now() - startedAt));
   const providerDiag = []; // 每个 provider 的诊断信息，失败时一并返回给前端
