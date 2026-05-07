@@ -4973,31 +4973,31 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
   );
 }
 
-// ── AI 知识点卡片（复用版本） ────────────────────────────────────────────────
-// 设计准则（参考 Brilliant / Khan Academy / Coursera 的简洁感）：
-//   · 一种主色（INDIGO_ACCENT）当语义；provider 改用低饱和"边色 + 字"的小徽章，
-//     避免多 AI 排在一起像彩虹糖。
-//   · 卡片靠白底 + 1px 中性边 + 悬停柔和阴影建立层次，不再用 mastery=绿底 的整片色块。
-//   · "已掌握"用左侧 2px 翠绿描边 + 右上角对勾，状态信息留在边缘不抢内容。
-//   · 主操作按钮改为副层级（淡 indigo），不要全黑 CTA 抢走每张卡的注意力。
+// ── AI 知识点卡片（行式 row-card） ───────────────────────────────────────────
+// 设计目标 v2（按 Brilliant / Notion 章节列表的"行"做密度优先）：
+//   · 单行高度 ~52-72px：标题 + parent 面包屑同行；摘要 1 行 clamp 在下方
+//   · 操作按钮收回到右侧"做题→"小胶囊，标为掌握缩成单字符图标按钮
+//   · 当前 AI 的主色驱动：左侧 3px 边线、provider chip、做题按钮 —— 切到不同 AI tab
+//     时整张页面"换皮"，同 AI 内只用一种调子，不会多 AI 撞色
+//   · 已掌握：左侧绿色 + 右上角小 ✓ 圆点，不再覆盖整张卡的色调
 function AITopicCard({ t, PROVIDER_META, G, topicMastery, onOpen, onMastery, onPractice, compact = false }) {
-  const INDIGO_ACCENT = "#4F46E5";
-  const INDIGO_SOFT = "#EEF2FF";
   const SLATE_TEXT = "#0F172A";
   const SLATE_MUTED = "#64748B";
+  const SLATE_FAINT = "#94A3B8";
   const SLATE_BORDER = "#E2E8F0";
   const SLATE_HOVER_BORDER = "#CBD5E1";
-  const SLATE_BG = "#F8FAFC";
   const MASTERED_GREEN = "#10B981";
 
   const mastery = topicMastery[t.id]?.status || "todo";
   const provKey = (t.provider && String(t.provider).trim()) || "legacy";
   const provMeta = PROVIDER_META[provKey] || PROVIDER_META.unknown;
+  const accent = provMeta.color || "#4F46E5"; // provider 主色，作为整张卡的语义色
   const isChild = (t._hLevel || 0) > 0;
-  const padding = compact ? "13px 15px" : "18px 18px 16px";
-  const titleSize = compact ? 13.5 : 14.5;
-  const showProviderChip = provKey !== "legacy" && provKey !== "unknown";
   const isMastered = mastery === "done";
+  const showProviderChip = provKey !== "legacy" && provKey !== "unknown";
+
+  // 左侧色条颜色：已掌握 → 翠绿；否则 → AI 主色（淡）
+  const leftStripe = isMastered ? MASTERED_GREEN : accent;
 
   return (
     <div
@@ -5007,103 +5007,102 @@ function AITopicCard({ t, PROVIDER_META, G, topicMastery, onOpen, onMastery, onP
       style={{
         position: "relative",
         border: `1px solid ${SLATE_BORDER}`,
-        borderLeft: isMastered ? `3px solid ${MASTERED_GREEN}` : `1px solid ${SLATE_BORDER}`,
-        borderRadius: compact ? 10 : 14,
-        padding, cursor: "pointer",
+        borderLeft: `3px solid ${isMastered ? leftStripe : leftStripe + "55"}`,
+        borderRadius: 10,
+        padding: "10px 12px 10px 14px",
+        cursor: "pointer",
         background: "#FFFFFF",
-        display: "flex", flexDirection: "column", gap: compact ? 8 : 10,
-        transition: "border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease",
+        display: "flex", flexDirection: "column", gap: 4,
+        transition: "border-color 0.18s ease, box-shadow 0.18s ease",
       }}
       onMouseEnter={e => {
-        e.currentTarget.style.boxShadow = "0 10px 30px -8px rgba(15,23,42,0.08), 0 2px 6px -2px rgba(15,23,42,0.05)";
-        e.currentTarget.style.transform = "translateY(-1px)";
-        if (!isMastered) e.currentTarget.style.borderColor = SLATE_HOVER_BORDER;
+        e.currentTarget.style.boxShadow = "0 6px 18px -6px rgba(15,23,42,0.10), 0 1px 4px rgba(15,23,42,0.04)";
+        e.currentTarget.style.borderColor = SLATE_HOVER_BORDER;
+        e.currentTarget.style.borderLeftColor = leftStripe;
       }}
       onMouseLeave={e => {
         e.currentTarget.style.boxShadow = "none";
-        e.currentTarget.style.transform = "none";
-        if (!isMastered) e.currentTarget.style.borderColor = SLATE_BORDER;
+        e.currentTarget.style.borderColor = SLATE_BORDER;
+        e.currentTarget.style.borderLeftColor = isMastered ? leftStripe : leftStripe + "55";
       }}
     >
-      {/* 已掌握的角标：右上角朴素对勾，不喧宾夺主 */}
-      {isMastered && (
-        <span aria-label="已掌握" style={{ position: "absolute", top: 12, right: 12, width: 18, height: 18, borderRadius: "50%", background: MASTERED_GREEN, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, lineHeight: 1 }}>✓</span>
-      )}
-
-      {/* 标题区 */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingRight: isMastered ? 22 : 0 }}>
-        <div style={{ fontSize: titleSize, fontWeight: 700, color: SLATE_TEXT, lineHeight: 1.4, letterSpacing: "-0.005em", display: "flex", alignItems: "baseline", gap: 6 }}>
-          {isChild && <span aria-hidden style={{ color: "#CBD5E1", fontSize: 12, fontWeight: 500, flexShrink: 0 }}>└</span>}
-          <span style={{ minWidth: 0, wordBreak: "break-word" }}>{t.name}</span>
-        </div>
-        {t.parent_name && (
-          <div style={{ fontSize: 11, color: SLATE_MUTED, fontWeight: 500, lineHeight: 1.4 }}>
-            <span style={{ color: "#94A3B8" }}>属于</span> {t.parent_name}
-          </div>
+      {/* 行 1：标题 · 父级面包屑 · meta · 操作 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        {isChild && (
+          <span aria-hidden style={{ color: SLATE_FAINT, fontSize: 12, fontWeight: 500, flexShrink: 0, lineHeight: 1 }}>└</span>
         )}
-      </div>
-
-      {/* 摘要 */}
-      <div style={{ fontSize: 12.75, color: "#475569", lineHeight: 1.65, display: "-webkit-box", WebkitLineClamp: compact ? 2 : 3, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: compact ? 28 : 40 }}>
-        {t.summary || <span style={{ color: "#94A3B8", fontStyle: "italic" }}>AI 未给出摘要</span>}
-      </div>
-
-      {/* meta 行：provider chip / 章节 / depth；统一中性色（除 provider 外不再上调色板） */}
-      {(showProviderChip || t.chapter || Number.isFinite(t.depth)) && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 10.5, color: SLATE_MUTED }}>
-          {showProviderChip && (
-            <span title={t.provider_model ? `${provMeta.label} · ${t.provider_model}` : provMeta.label}
-              style={{
-                color: provMeta.color, background: "#FFFFFF",
-                border: `1px solid ${provMeta.color}33`,
-                padding: "1.5px 7px", borderRadius: 999, fontWeight: 600,
-                display: "inline-flex", alignItems: "center", gap: 4,
-                letterSpacing: "0.01em",
-              }}>
-              <span aria-hidden style={{ width: 4, height: 4, borderRadius: 999, background: provMeta.color }} />
-              {provMeta.label}
+        <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: SLATE_TEXT, letterSpacing: "-0.005em", lineHeight: 1.35 }}>{t.name}</span>
+          {t.parent_name && (
+            <span style={{ fontSize: 11, color: SLATE_FAINT, fontWeight: 500 }}>
+              ← {t.parent_name}
             </span>
+          )}
+        </div>
+
+        {/* meta：章节 + depth + provider；之前是单独一行，现在挪进 header 节省一行高度 */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, fontSize: 10.5, color: SLATE_MUTED }}>
+          {Number.isFinite(t.depth) && (
+            <span style={{ color: SLATE_FAINT, fontWeight: 500, fontVariantNumeric: "tabular-nums", padding: "1px 5px", border: `1px solid ${SLATE_BORDER}`, borderRadius: 4 }}>L{t.depth}</span>
           )}
           {t.chapter && (
             <span style={{ color: SLATE_MUTED, fontWeight: 500 }}>{t.chapter}</span>
           )}
-          {Number.isFinite(t.depth) && (
-            <span style={{ color: "#94A3B8", fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>L{t.depth}</span>
+          {showProviderChip && (
+            <span title={t.provider_model ? `${provMeta.label} · ${t.provider_model}` : provMeta.label}
+              style={{
+                color: accent, background: accent + "11",
+                border: `1px solid ${accent}33`,
+                padding: "1.5px 7px", borderRadius: 999, fontWeight: 600,
+                display: "inline-flex", alignItems: "center", gap: 4,
+              }}>
+              <span aria-hidden style={{ width: 4, height: 4, borderRadius: 999, background: accent }} />
+              {provMeta.label}
+            </span>
           )}
         </div>
-      )}
 
-      {/* 操作行：主操作改为淡 indigo（副层级），让多张卡并排时整体更安静 */}
-      <div style={{ display: "flex", gap: 7, marginTop: 4 }} onClick={e => e.stopPropagation()}>
-        <button
-          onClick={(e) => { e.stopPropagation(); onPractice(t); }}
-          style={{
-            flex: 1, padding: "8px 10px", fontSize: 12.5, fontWeight: 600,
-            background: INDIGO_SOFT, color: INDIGO_ACCENT,
-            border: `1px solid ${INDIGO_ACCENT}22`,
-            borderRadius: 9, cursor: "pointer", whiteSpace: "nowrap",
-            fontFamily: "inherit", letterSpacing: "0.01em",
-            transition: "background 0.15s ease, border-color 0.15s ease",
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = "#E0E7FF"; e.currentTarget.style.borderColor = INDIGO_ACCENT + "55"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = INDIGO_SOFT; e.currentTarget.style.borderColor = INDIGO_ACCENT + "22"; }}
-        >
-          按此知识点做题 →
-        </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onMastery(t, isMastered ? "todo" : "done"); }}
-          title={isMastered ? "取消掌握" : "标记已掌握"}
-          style={{
-            padding: "8px 11px", fontSize: 13, fontFamily: "inherit",
-            background: isMastered ? "#ECFDF5" : SLATE_BG,
-            color: isMastered ? "#047857" : SLATE_MUTED,
-            border: `1px solid ${isMastered ? "#A7F3D0" : SLATE_BORDER}`,
-            borderRadius: 9, cursor: "pointer", lineHeight: 1, fontWeight: 600,
-          }}
-        >
-          {isMastered ? "✓ 已掌握" : "标为掌握"}
-        </button>
+        {/* 操作组：紧凑、在右侧 —— "做题→" 用 provider 主色，掌握切换是单字符按钮 */}
+        <div style={{ display: "flex", gap: 5, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+          <button
+            onClick={(e) => { e.stopPropagation(); onPractice(t); }}
+            style={{
+              padding: "5px 10px", fontSize: 12, fontWeight: 600,
+              background: accent + "12", color: accent,
+              border: `1px solid ${accent}33`,
+              borderRadius: 7, cursor: "pointer", whiteSpace: "nowrap",
+              fontFamily: "inherit", letterSpacing: "0.01em", lineHeight: 1.4,
+              transition: "background 0.15s ease, border-color 0.15s ease",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = accent; e.currentTarget.style.color = "#fff"; e.currentTarget.style.borderColor = accent; }}
+            onMouseLeave={e => { e.currentTarget.style.background = accent + "12"; e.currentTarget.style.color = accent; e.currentTarget.style.borderColor = accent + "33"; }}
+          >
+            做题 →
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onMastery(t, isMastered ? "todo" : "done"); }}
+            title={isMastered ? "取消已掌握" : "标记已掌握"}
+            aria-label={isMastered ? "取消已掌握" : "标记已掌握"}
+            style={{
+              width: 28, height: 28, padding: 0, fontSize: 12, fontFamily: "inherit",
+              background: isMastered ? "#ECFDF5" : "#FFFFFF",
+              color: isMastered ? "#047857" : SLATE_FAINT,
+              border: `1px solid ${isMastered ? "#A7F3D0" : SLATE_BORDER}`,
+              borderRadius: 7, cursor: "pointer", lineHeight: 1, fontWeight: 700,
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            {isMastered ? "✓" : "○"}
+          </button>
+        </div>
       </div>
+
+      {/* 行 2：摘要（单行 clamp）—— 摘要为空就不渲染这一行，让卡片更短 */}
+      {t.summary && (
+        <div style={{ fontSize: 12.5, color: SLATE_MUTED, lineHeight: 1.55, paddingLeft: isChild ? 18 : 0, display: "-webkit-box", WebkitLineClamp: compact ? 1 : 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+          {t.summary}
+        </div>
+      )}
     </div>
   );
 }
@@ -5741,22 +5740,26 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                     </div>
                   );
                 }
+                // 当前激活的 provider 主色 —— 章节头取自这里，让"切到不同 AI tab 整页换皮"
+                const activeProvMeta = providerFilter ? (PROVIDER_META[providerFilter] || PROVIDER_META.unknown) : null;
+                const sectionAccent = activeProvMeta?.color || "#4F46E5";
                 return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
                     {groups.map(({ section, items }) => (
                       <div key={section}>
-                        {/* 大标题 —— 不再用左侧色条；改为字号 + 字间距 + 细分隔线建立层次（参考 Brilliant 的章节标题） */}
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 14, paddingBottom: 10, borderBottom: "1px solid #EEF2F7" }}>
-                          <span style={{ fontSize: 10.5, fontWeight: 700, color: "#94A3B8", letterSpacing: "0.14em", textTransform: "uppercase" }}>章节</span>
-                          <div style={{ fontSize: 16, fontWeight: 800, color: "#0F172A", letterSpacing: "-0.01em" }}>{section}</div>
-                          <span style={{ marginLeft: "auto", fontSize: 11, color: "#94A3B8", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{items.length} 个知识点</span>
+                        {/* 大标题：左侧 provider 主色细色条 + 章节名 + 计数；切 AI 时颜色跟着换 */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #EEF2F7" }}>
+                          <span aria-hidden style={{ width: 3, height: 16, background: sectionAccent, borderRadius: 2 }} />
+                          <span style={{ fontSize: 10, fontWeight: 700, color: sectionAccent, letterSpacing: "0.14em", textTransform: "uppercase", opacity: 0.85 }}>章节</span>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", letterSpacing: "-0.005em" }}>{section}</div>
+                          <span style={{ marginLeft: "auto", fontSize: 11, color: "#94A3B8", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{items.length} 个</span>
                         </div>
                         {/* 该 section 下的小标题 + 叶子，按 _hLevel 缩进 */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                           {items.map(t => (
-                            <div key={t.id} style={{ paddingLeft: (t._hLevel || 0) * 22, position: "relative" }}>
+                            <div key={t.id} style={{ paddingLeft: (t._hLevel || 0) * 20, position: "relative" }}>
                               {(t._hLevel || 0) > 0 && (
-                                <span aria-hidden style={{ position: "absolute", left: (t._hLevel - 1) * 22 + 6, top: 26, width: 12, height: 1, background: "#E2E8F0" }} />
+                                <span aria-hidden style={{ position: "absolute", left: (t._hLevel - 1) * 20 + 6, top: 18, width: 11, height: 1, background: "#E2E8F0" }} />
                               )}
                               <AITopicCard
                                 t={t}
@@ -13998,33 +14001,49 @@ class TreeErrorBoundary extends Component {
   }
 }
 
-// ── AI 抽取知识点的"层级视图"——画布下面那块 ─────────────────────────────────
-// 数据来源：material_topics 里 section / parent_name / depth / prerequisites 字段（新 schema）
-// 渲染逻辑：当前教材的所有 topic → 按 section 分组 → 同 section 内 parent → children 缩进
-// 用户行为：点条目 → 直接 setQuizIntent + 跳到"小测"，与 KnowledgePage 上的"按此知识点做题"一致。
-// 旧数据（无 section / parent_name）则只显示一句提示：触发"重抽"获取新结构，避免误展示扁平堆叠。
-function AIHierarchyOverlay({ aiTopics, currentMaterial, setQuizIntent, switchStudyTab }) {
+// ── AI 抽取知识点的"层级树"——画布下面那块 ───────────────────────────────────
+// 显著存在感：上次默认折叠 + currentMaterial 为空就消失，导致用户在知识树 tab 完全
+// 看不到 AI 知识点。现在改：永远渲染（即便没数据也给一行引导）；默认展开；
+// 列改为"小型树"——每个 section 一列，里面用左侧 1px 灰线连接父子，更像树。
+function AIHierarchyOverlay({ aiTopics, currentMaterial, setQuizIntent, switchStudyTab, setPage }) {
   const matId = currentMaterial?.id || null;
-  // 收起 / 展开（默认展开，但记到 localStorage 让用户偏好持久化）
-  const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem("mc_ai_hierarchy_collapsed") === "1"; } catch { return false; }
-  });
-  const toggle = () => {
-    setCollapsed(v => {
-      const next = !v;
-      try { localStorage.setItem("mc_ai_hierarchy_collapsed", next ? "1" : "0"); } catch {}
-      return next;
-    });
-  };
-  const filtered = useMemo(() => {
-    if (!matId) return [];
-    return (aiTopics || []).filter(t => t && t.material_id === matId);
-  }, [aiTopics, matId]);
-  const hasHierarchy = filtered.some(t => (t.section && String(t.section).trim()) || t.parent_name);
-  // 没选教材，或者该教材没抽过 → 不渲染（避免空块占位）
-  if (!matId || filtered.length === 0) return null;
+  // 默认展开 —— 这是知识树最重要的可视区，让它一进来就被看见
+  const [collapsed, setCollapsed] = useState(false);
+  const toggle = () => setCollapsed(v => !v);
 
-  // section → ordered items（与 KnowledgePage.buildHierarchy 同款逻辑，独立一份避免跨组件耦合）
+  // 同 material 的 AI 知识点；没有 currentMaterial 时拿全部（让用户至少看到"我有什么"）
+  const filtered = useMemo(() => {
+    const all = aiTopics || [];
+    if (!matId) return all;
+    return all.filter(t => t && t.material_id === matId);
+  }, [aiTopics, matId]);
+
+  const hasHierarchy = filtered.some(t => (t.section && String(t.section).trim()) || t.parent_name);
+
+  // 空状态分支：不再 return null，而是显示一个引导块，告诉用户去哪里抽 AI 知识点
+  if (filtered.length === 0) {
+    return (
+      <div style={{ marginTop: 14, background: "#FFFFFF", border: "1px dashed #E2E8F0", borderRadius: 14, padding: "16px 18px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <span aria-hidden style={{ width: 22, height: 22, borderRadius: 6, background: "#F1F5F9", color: "#94A3B8", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>✱</span>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A" }}>AI 抽取的知识点</div>
+        </div>
+        <div style={{ fontSize: 12.5, color: "#94A3B8", lineHeight: 1.6, marginBottom: 10 }}>
+          {matId
+            ? "当前教材还没有 AI 抽取的知识点。去「知识点」tab 用 Groq / Gemini / 智谱 等 AI 重抽，结果会自动显示在这里的层级树中。"
+            : "选一份教材后，AI 抽取出的知识点会按「章节 → 子知识点」的目录结构显示在这里。"}
+        </div>
+        {typeof switchStudyTab === "function" && matId && (
+          <button onClick={() => switchStudyTab("知识点")}
+            style={{ padding: "5px 12px", fontSize: 12, fontWeight: 600, background: "#EEF2FF", color: "#4F46E5", border: "1px solid #C7D2FE", borderRadius: 7, cursor: "pointer", fontFamily: "inherit" }}>
+            去知识点 tab 抽一次 →
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // section → ordered items
   const groups = (() => {
     const sections = new Map();
     for (const t of filtered) {
@@ -14060,11 +14079,24 @@ function AIHierarchyOverlay({ aiTopics, currentMaterial, setQuizIntent, switchSt
     return out;
   })();
 
+  // provider 主色聚合：同一份资料里多 AI 共抽时，每个 section 用其大多数 topic 的 provider 着色
+  const sectionColor = (items) => {
+    const counts = new Map();
+    for (const t of items) {
+      const p = (t.provider && String(t.provider).trim()) || "legacy";
+      counts.set(p, (counts.get(p) || 0) + 1);
+    }
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    const provKey = top ? top[0] : "legacy";
+    const PROVIDER_COLORS = { gemini: "#4285F4", groq: "#F97316", deepseek: "#0EA5E9", kimi: "#8B5CF6", anthropic: "#D97706", openrouter: "#7C3AED", siliconflow: "#0EA5E9", zhipu: "#1F75FE", cerebras: "#FF6F61" };
+    return PROVIDER_COLORS[provKey] || "#4F46E5";
+  };
+
   const startQuiz = (t) => {
     if (typeof setQuizIntent === "function") {
       setQuizIntent({
         source: "ai_topic",
-        materialId: matId,
+        materialId: t.material_id || matId,
         topicId: t.id, topicName: t.name, topicSummary: t.summary || "",
         chapter: t.chapter || null, count: 5,
       });
@@ -14076,63 +14108,77 @@ function AIHierarchyOverlay({ aiTopics, currentMaterial, setQuizIntent, switchSt
     <div style={{ marginTop: 14, background: "#FFFFFF", border: "1px solid #EEF2F7", borderRadius: 14, overflow: "hidden" }}>
       <button onClick={toggle}
         style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
-        <span style={{ width: 22, height: 22, borderRadius: 6, background: "#F1F5F9", color: "#475569", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>✱</span>
+        <span style={{ width: 22, height: 22, borderRadius: 6, background: "#EEF2FF", color: "#4F46E5", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800 }}>✱</span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A", letterSpacing: "-0.005em" }}>AI 抽取的知识点 · 层级视图</div>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: "#0F172A", letterSpacing: "-0.005em" }}>AI 抽取知识点 · 层级树</div>
           <div style={{ fontSize: 11.5, color: "#94A3B8", marginTop: 2, fontWeight: 500 }}>
             {hasHierarchy
               ? `${groups.length} 个章节 · ${filtered.length} 个知识点 · 点击直接练`
-              : `${filtered.length} 条扁平知识点（旧批次无层级，去"知识点"tab 用新 AI 重抽）`}
+              : `${filtered.length} 条扁平知识点（旧批次无层级；用新 AI 重抽即可获得目录结构）`}
           </div>
         </div>
         <span style={{ fontSize: 11, color: "#94A3B8", fontWeight: 600 }}>{collapsed ? "展开 ▾" : "收起 ▴"}</span>
       </button>
 
       {!collapsed && (
-        <div style={{ padding: "4px 16px 16px", borderTop: "1px solid #F1F5F9" }}>
-          {!hasHierarchy ? (
-            <div style={{ fontSize: 12.5, color: "#94A3B8", padding: "12px 0" }}>
-              当前批次没有目录结构（section / parent_name 字段为空）。在"知识点"tab 用 Groq / Gemini / 智谱等 AI 重抽即可获得层级目录。
-            </div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(260px, 1fr))`, gap: 14, marginTop: 12 }}>
-              {groups.map(({ section, items }) => (
-                <div key={section} style={{ background: "#FCFCFD", border: "1px solid #EEF2F7", borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #F1F5F9" }}>
-                    <span style={{ fontSize: 9.5, fontWeight: 700, color: "#94A3B8", letterSpacing: "0.14em", textTransform: "uppercase" }}>章节</span>
+        <div style={{ padding: "8px 16px 18px", borderTop: "1px solid #F1F5F9" }}>
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fit, minmax(280px, 1fr))`, gap: 14, marginTop: 10 }}>
+            {groups.map(({ section, items }) => {
+              const accent = sectionColor(items);
+              return (
+                <div key={section} style={{ background: "#FCFCFD", border: "1px solid #EEF2F7", borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 2 }}>
+                  {/* section 头：左侧色条 + 章节名 + 数量 */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid #F1F5F9" }}>
+                    <span aria-hidden style={{ width: 3, height: 14, background: accent, borderRadius: 2 }} />
+                    <span style={{ fontSize: 9.5, fontWeight: 700, color: accent, letterSpacing: "0.14em", textTransform: "uppercase", opacity: 0.85 }}>章节</span>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A", letterSpacing: "-0.005em" }}>{section}</div>
                     <span style={{ marginLeft: "auto", fontSize: 10, color: "#94A3B8", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{items.length}</span>
                   </div>
-                  {items.map(t => (
-                    <button
-                      key={t.id}
-                      onClick={() => startQuiz(t)}
-                      title={t.summary || t.name}
-                      style={{
-                        textAlign: "left", padding: "5px 8px",
-                        marginLeft: (t._hLevel || 0) * 14,
-                        background: "transparent", border: "none", cursor: "pointer",
-                        borderRadius: 6, fontFamily: "inherit",
-                        display: "flex", alignItems: "flex-start", gap: 6,
-                        color: "#334155", fontSize: 12.5,
-                        transition: "background 0.12s ease",
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "#F1F5F9"; e.currentTarget.style.color = "#0F172A"; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#334155"; }}
-                    >
-                      {(t._hLevel || 0) > 0 && <span aria-hidden style={{ color: "#CBD5E1", fontSize: 11, lineHeight: "20px" }}>└</span>}
-                      <span style={{ flex: 1, minWidth: 0, lineHeight: 1.5 }}>
-                        <span style={{ fontWeight: (t._hLevel || 0) === 0 ? 600 : 500 }}>{t.name}</span>
-                        {Number.isFinite(t.depth) && (t._hLevel || 0) === 0 && (
-                          <span style={{ marginLeft: 6, fontSize: 10, color: "#94A3B8", fontWeight: 500, fontVariantNumeric: "tabular-nums" }}>L{t.depth}</span>
-                        )}
-                      </span>
-                    </button>
-                  ))}
+                  {/* 树形列表：父子之间用左侧 1px 竖线 + 横向 ─ 短线连接，看起来像 file-tree */}
+                  <div style={{ position: "relative" }}>
+                    {items.map(t => {
+                      const lvl = t._hLevel || 0;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => startQuiz(t)}
+                          title={t.summary || t.name}
+                          style={{
+                            position: "relative",
+                            width: "100%",
+                            textAlign: "left", padding: "5px 8px 5px 0",
+                            paddingLeft: lvl * 16 + 8,
+                            background: "transparent", border: "none", cursor: "pointer",
+                            borderRadius: 6, fontFamily: "inherit",
+                            display: "flex", alignItems: "center", gap: 6,
+                            color: "#334155", fontSize: 12.5,
+                            transition: "background 0.12s ease",
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = accent + "0F"; e.currentTarget.style.color = "#0F172A"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#334155"; }}
+                        >
+                          {/* 子节点的左侧连接线：纵向 + 横向短线 */}
+                          {lvl > 0 && (
+                            <>
+                              <span aria-hidden style={{ position: "absolute", left: (lvl - 1) * 16 + 12, top: 0, bottom: 0, width: 1, background: "#E2E8F0" }} />
+                              <span aria-hidden style={{ position: "absolute", left: (lvl - 1) * 16 + 12, top: "50%", width: 8, height: 1, background: "#E2E8F0" }} />
+                            </>
+                          )}
+                          <span style={{ flex: 1, minWidth: 0, lineHeight: 1.5, display: "flex", alignItems: "baseline", gap: 6 }}>
+                            <span style={{ fontWeight: lvl === 0 ? 700 : 500, color: lvl === 0 ? "#0F172A" : "#334155" }}>{t.name}</span>
+                            {Number.isFinite(t.depth) && (
+                              <span style={{ fontSize: 10, color: "#94A3B8", fontWeight: 500, fontVariantNumeric: "tabular-nums", padding: "0 5px", border: "1px solid #E2E8F0", borderRadius: 4 }}>L{t.depth}</span>
+                            )}
+                          </span>
+                          <span aria-hidden style={{ fontSize: 11, color: accent, fontWeight: 700, opacity: 0.7 }}>→</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              ))}
-            </div>
-          )}
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
