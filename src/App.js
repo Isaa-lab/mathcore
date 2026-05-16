@@ -1387,6 +1387,20 @@ const isLowQualityQuestion = (q) => {
   if (/《[^《》]{2,40}》[^A-Za-z\u4e00-\u9fff]{0,3}(?:是一本|的作者|的内容|的主题|的主旨|(?:[A-Z][a-z]+\s)+[A-Z][a-z]+)/.test(text)) return true;
   if (/[A-Z][a-z]+\s[A-Z][a-z]+(?:,\s?[A-Z][a-z]+){0,3}/.test(text) && /以下说法是否正确|是否正确[？?]|下列.*正确/.test(text)) return true;
 
+  // ——— 课程平台 / 教学项目 / 在线教学 元信息题 ———
+  // 典型："ATLAST 项目是为了鼓励和促进在线教学而设立的"——考的是平台/项目使命而非数学知识。
+  const PLATFORM_NAMES_RE = /\b(?:ATLAST|MOOC|MOOCs|edX|Coursera|NPTEL|OCW|MIT\s?OpenCourseWare|Khan\s?Academy|Udacity|Udemy)\b|网易公开课|中国大学MOOC|学堂在线|爱课程|智慧树|超星学习通/i;
+  if (PLATFORM_NAMES_RE.test(text)) return true;
+  // 中文式："XX 项目是为了..."、"XX 计划旨在..."、"本课程的目标是..."、"本资料旨在..."
+  if (/(?:项目|计划|课程|资料|平台|教程|系列|工程)(?:是)?(?:为了|旨在|目的(?:是|在于)|意在|设立(?:的目的)?|致力于|的宗旨是)/.test(text)) return true;
+  // "鼓励/促进/推动 + 教学/学习/课程"组合（教学管理类话术）
+  if (/(?:鼓励|促进|推动|推广|普及|加强)(?:在线|远程|网络|线上|开放)?(?:教学|学习|课程|教育|教研|互动|交流)/.test(text)) return true;
+  // "在线/远程/线上 教学/学习"出现，且题干完全没有数学符号或学科术语
+  const stripMath3 = text.replace(/\$[^$]*\$/g, " ").replace(/\$\$[^$]*\$\$/g, " ");
+  if (/(?:在线|远程|线上|网络)(?:教学|学习|课程|授课|教育)/.test(stripMath3) && !/[=∫∑∏√\\]|\\frac|\\int|\\sum|矩阵|向量|函数|极限|导数|积分|微分|方程|级数|定理|引理|特征值|收敛|连续|可微|算法/.test(text)) return true;
+  // 项目使命型："以...为使命"、"承担...任务"、"是一项..."
+  if (/(?:以[^，。]{1,20}为使命|承担[^，。]{1,20}任务|是一项[^，。]{1,20}(?:计划|项目|工程|活动))/.test(text)) return true;
+
   // 元学习题：考的是"该怎么学"而不是学科知识
   if (/关于[《【「『][^》】」』]{1,30}[》】」』][^。]{0,6}(?:说法|态度|方法).{0,6}(?:最合理|最恰当|正确的是)/.test(text)) return true;
   if (/(应同时关注定义|应同时掌握定义|机械套用|通过例题验证理解|学习(方法|态度|策略))/.test(text) && Array.isArray(opts)) return true;
@@ -1654,7 +1668,10 @@ const findChunkRefContext = (chunk, refDefs) => {
   return hits;
 };
 
-const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvider = null, forceUserKey = null }) => {
+const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvider = null, forceUserKey = null, onProgress = null }) => {
+  // onProgress(percent: 0-100, label: string) —— 让 UI 实时显示阶段 + 数字进度
+  const report = (pct, label) => { try { onProgress && onProgress(Math.max(0, Math.min(100, Math.round(pct))), label); } catch {} };
+  report(2, "准备资料元数据…");
   const materialId = material?.id;
   if (!materialId) return { topics: [], questions: [], insertedCount: 0, materialLinked: false };
 
@@ -1667,10 +1684,12 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
 
   if (file) {
     try {
+      report(5, "加载 PDF 解析器…");
       await ensurePdfJs();
       const buf = await file.arrayBuffer();
       const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
       const totalPages = pdf.numPages;
+      report(8, `读取 PDF（共 ${totalPages} 页）…`);
 
       // Sample strategy: skip likely cover/TOC pages (first 3), sample up to 50 content pages
       const startPage = Math.min(4, totalPages);
@@ -1772,6 +1791,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
       ? (forceUserKey || aiCfg.allKeys?.[forceProvider] || "")
       : aiCfg.key;
     const fullText = text.slice(0, 24000); // 上限保护，避免极端长文挤爆
+    report(28, "切分语义片段…");
     const refDefs = extractReferenceDefinitions(fullText);
     const chunks = buildSemanticChunks(fullText, { target: 3500, overlap: 250, max: 4 });
     const perChunk = Math.max(2, Math.ceil(genCount / Math.max(chunks.length, 1)));
@@ -1780,15 +1800,16 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
     const aggregatedQuestions = [];
     const seenTopicNames = new Set();
 
-    for (let idx = 0; idx < chunks.length; idx++) {
-      const chunk = chunks[idx];
+    // ── 并行调 /api/extract ──
+    // 旧版本是串行 for 循环（每块 5~15s × N 块 = 总时长成线性），
+    // 改成 Promise.all 后总时长 ≈ max(各块耗时)，4 块从 ~40s 缩到 ~12s。
+    // 单 chunk 时一样工作；4 个 chunk 时收益最大。
+    report(35, `AI 抽取知识点（共 ${chunks.length} 段并行）…`);
+    let completedChunks = 0;
+    const chunkResults = await Promise.all(chunks.map(async (chunk, idx) => {
       const refs = findChunkRefContext(chunk, refDefs);
-      // 每块最多要 perChunk 题；最后一块兜底把剩余额度拉回来
-      const remaining = genCount - aggregatedQuestions.length;
-      const askCount = idx === chunks.length - 1
-        ? Math.max(2, remaining)
-        : perChunk;
-
+      // 并行模式下每块都按 perChunk；最后总量裁切到 genCount，不再依赖动态 remaining
+      const askCount = perChunk;
       try {
         const resp = await fetch("/api/extract", {
           method: "POST",
@@ -1801,44 +1822,55 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
             chunkIndex: idx,
             chunkCount: chunks.length,
             refContext: refs,
-            // forceProvider 让后端严格只走指定 provider，不偷偷 fallback 到别家
             forceProvider: forceProvider || null,
             userProvider: effectiveProvider, userKey: effectiveKey, userCustomUrl: aiCfg.customUrl,
           }),
         });
         const data = await resp.json();
-        if (resp.status === 429 || data.error === "QUOTA_EXCEEDED") {
-          apiQuotaExceeded = true;
-          apiErrorMsg = data.message || "Gemini API 配额已用完，请等待 1 分钟后重试。";
-          console.warn(`API quota exceeded at chunk ${idx + 1}/${chunks.length}`);
-          break; // 不再继续烧额度
-        } else if (!data.error) {
-          if (data.apiUsed) lastApiUsed = data.apiUsed;
-          const tArr = Array.isArray(data.topics) ? data.topics : [];
-          for (const t of tArr) {
-            const key = String(t?.name || "").trim().toLowerCase();
-            if (!key || seenTopicNames.has(key)) continue;
-            seenTopicNames.add(key);
-            aggregatedTopics.push(t);
-          }
-          const qArr = Array.isArray(data.questions) ? data.questions : [];
-          aggregatedQuestions.push(...qArr);
-          usedApi = true;
-        } else {
-          apiErrorMsg = data.error;
-          console.error(`chunk ${idx + 1} extract error:`, data.error);
-        }
-
-        if (aggregatedQuestions.length >= genCount) break;
-        // 相邻请求间给 LLM 喘口气（也让免费 quota 平滑）
-        if (idx < chunks.length - 1) await new Promise(r => setTimeout(r, 600));
+        completedChunks += 1;
+        // 进度：35% → 80% 区间均匀分布给各 chunk 完成事件
+        const pct = 35 + Math.round((completedChunks / chunks.length) * 45);
+        report(pct, `AI 抽取知识点（${completedChunks}/${chunks.length} 段已完成）…`);
+        return { idx, status: resp.status, data };
       } catch (e) {
-        console.error(`chunk ${idx + 1} fetch error:`, e.message);
+        completedChunks += 1;
+        const pct = 35 + Math.round((completedChunks / chunks.length) * 45);
+        report(pct, `AI 抽取知识点（${completedChunks}/${chunks.length} 段已完成，1 段失败）…`);
+        console.error(`chunk ${idx + 1} fetch error:`, e?.message || e);
+        return { idx, status: 0, data: { error: "fetch_failed" } };
       }
+    }));
+
+    // 按 idx 顺序合并结果（保证 topic 顺序稳定）
+    chunkResults.sort((a, b) => a.idx - b.idx);
+    for (const { idx, status, data } of chunkResults) {
+      if (status === 429 || data?.error === "QUOTA_EXCEEDED") {
+        apiQuotaExceeded = true;
+        apiErrorMsg = data?.message || "AI API 配额已用完，请等待 1 分钟后重试。";
+        console.warn(`API quota exceeded at chunk ${idx + 1}/${chunks.length}`);
+        continue;
+      }
+      if (data?.error) {
+        apiErrorMsg = data.error;
+        console.error(`chunk ${idx + 1} extract error:`, data.error);
+        continue;
+      }
+      if (data?.apiUsed) lastApiUsed = data.apiUsed;
+      const tArr = Array.isArray(data.topics) ? data.topics : [];
+      for (const t of tArr) {
+        const key = String(t?.name || "").trim().toLowerCase();
+        if (!key || seenTopicNames.has(key)) continue;
+        seenTopicNames.add(key);
+        aggregatedTopics.push(t);
+      }
+      const qArr = Array.isArray(data.questions) ? data.questions : [];
+      aggregatedQuestions.push(...qArr);
+      usedApi = true;
     }
 
     topics = aggregatedTopics;
     questions = aggregatedQuestions.slice(0, genCount);
+    report(82, `AI 抽取完成：${topics.length} 个知识点，${questions.length} 道题`);
   }
 
   // Step 4: Fallback sentence-based questions — ONLY when API failed for non-quota reasons
@@ -1879,14 +1911,17 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
   let materialLinked = false;
   // Record concrete DB errors so UploadPage can show actionable feedback (RLS, schema, etc.).
   const dbErrors = { questions: null, topics: null };
+  report(85, "过滤低质量题目…");
   if (!apiQuotaExceeded && questions.length > 0) {
-    // 垃圾题过滤：AI 偶尔会生成元学习题 / 学习方法判断题 / 占位模板，拦截在入库前
+    // 垃圾题过滤：AI 偶尔会生成元学习题 / 学习方法判断题 / 占位模板 / 课程平台元信息题，拦截在入库前
+    const before = questions.length;
     const filteredQuestions = questions.filter(q => !isLowQualityQuestion({
       question: q.question,
       options: q.options,
       explanation: q.explanation,
       type: q.type,
     }));
+    report(88, `过滤完成：${before} → ${filteredQuestions.length} 道，正在保存…`);
     if (filteredQuestions.length === 0) {
       // 全部被过滤掉时也不入库（避免只写入 0 行造成静默"成功"）
       questions.length = 0;
@@ -1997,6 +2032,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
       : `提取到 ${textLen} 字符（${englishRatio > 0.4 ? "英文" : "中文"}教材），题目基于真实教材内容生成`,
   };
 
+  report(100, `完成：${topics.length} 个知识点，${insertedCount} 道题已入库`);
   return {
     topics, questions, insertedCount, materialLinked, topicsLinked,
     hasText, usedApi, pdfLikelyScanned: !hasText,
@@ -5277,6 +5313,9 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         forceProvider: provider,
         forceUserKey: userKeyForProvider,
         actorName: `用户重抽（${provider}）`,
+        onProgress: (pct, label) => {
+          setReExtractStatus({ provider, status: "running", msg: `${label || "处理中"}  ${pct}%` });
+        },
       });
       if (result?.apiQuotaExceeded) {
         setReExtractStatus({ provider, status: "error", msg: `⚠️ ${provider} 配额用尽。过 1 分钟再试，或换一个 provider。` });
@@ -5868,6 +5907,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         fallbackText: `${material.title || ""} ${material.description || ""}`,
         genCount: 20,
         actorName: "系统自动补题",
+        onProgress: (pct, label) => { setMaterialGenerateMsg(`${label || "补题中"}  ${pct}%`); },
       });
       const inserted = result?.insertedCount ?? result?.questions?.length ?? 0;
       const hint = (!fetchedFile && [".doc", ".docx", ".ppt", ".pptx"].includes(getFileExt(material?.file_name || "")))
@@ -9676,7 +9716,7 @@ function UploadPage({ setPage, profile }) {
     }
     if (dbErr) throw dbErr;
 
-    onStep && onStep("解析 PDF + AI 抽知识点…");
+    onStep && onStep("解析 PDF + AI 抽知识点…  0%");
     let aiResult = null;
     try {
       aiResult = await processMaterialWithAI({
@@ -9684,6 +9724,10 @@ function UploadPage({ setPage, profile }) {
         file: tFile,
         genCount: 25,
         actorName: profile?.name || "用户",
+        onProgress: (pct, label) => {
+          // 把进度数字直接拼到状态行上，让用户清楚地看到 0% → 100% 的推进
+          if (onStep) onStep(`${label || "处理中"}  ${pct}%`);
+        },
       });
     } catch (e) {
       aiResult = {

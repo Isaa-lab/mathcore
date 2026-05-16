@@ -1139,6 +1139,14 @@ Q7 这道题是否通过了 LAYER 6 反"简单题"审查（答对不需要推算
     if (META_LEARNING_RE.test(stem)) return false;
     if (TIMESTAMP_RE.test(stem)) return false;                   // 时间戳 / 日期
     if (META_REF_RE.test(stem)) return false;                     // 元指代
+    // ——— 课程平台 / 在线教学 元信息题：典型"ATLAST 项目是为了鼓励和促进在线教学而设立的" ———
+    const PLATFORM_RE = /\b(?:ATLAST|MOOC|MOOCs|edX|Coursera|NPTEL|OCW|MIT\s?OpenCourseWare|Khan\s?Academy|Udacity|Udemy)\b|网易公开课|中国大学MOOC|学堂在线|爱课程|智慧树|超星学习通/i;
+    if (PLATFORM_RE.test(stem)) return false;
+    if (/(?:项目|计划|课程|资料|平台|教程|系列|工程)(?:是)?(?:为了|旨在|目的(?:是|在于)|意在|设立(?:的目的)?|致力于|的宗旨是)/.test(stem)) return false;
+    if (/(?:鼓励|促进|推动|推广|普及|加强)(?:在线|远程|网络|线上|开放)?(?:教学|学习|课程|教育|教研|互动|交流)/.test(stem)) return false;
+    const stripMathStem = stem.replace(/\$[^$]*\$/g, " ").replace(/\$\$[^$]*\$\$/g, " ");
+    if (/(?:在线|远程|线上|网络)(?:教学|学习|课程|授课|教育)/.test(stripMathStem) && !/[=∫∑∏√\\]|矩阵|向量|函数|极限|导数|积分|微分|方程|级数|定理|引理|特征值|收敛|连续|可微|算法/.test(stem)) return false;
+    if (/(?:以[^，。]{1,20}为使命|承担[^，。]{1,20}任务|是一项[^，。]{1,20}(?:计划|项目|工程|活动))/.test(stem)) return false;
     if (countSuspiciousNames(stem) >= 3) return false;            // 3+ 个非白名单英文专有名词
     if (/^\s*关于\s*[「『]?[A-Z][a-z]+[」』]?\s*[，,、]/.test(stem)) { // "关于 Leon," 这种
       const m = stem.match(/^\s*关于\s*[「『]?([A-Z][a-z]+)[」』]?/);
