@@ -1795,6 +1795,10 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
     const refDefs = extractReferenceDefinitions(fullText);
     const chunks = buildSemanticChunks(fullText, { target: 3500, overlap: 250, max: 4 });
     const perChunk = Math.max(2, Math.ceil(genCount / Math.max(chunks.length, 1)));
+    // 每块要 AI 抽多少知识点：目标总数 20，按 chunks 数均分 + 余量。
+    // 4 块 → 每块 6（24 候选，去重后 ~20-22）。少块 → 每块多抽以保证总数。
+    const TARGET_TOTAL_TOPICS = 20;
+    const topicsPerChunk = Math.max(6, Math.ceil(TARGET_TOTAL_TOPICS / Math.max(chunks.length, 1)) + 1);
 
     const aggregatedTopics = [];
     const aggregatedQuestions = [];
@@ -1822,6 +1826,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
             chunkIndex: idx,
             chunkCount: chunks.length,
             refContext: refs,
+            topicsPerChunk,
             forceProvider: forceProvider || null,
             userProvider: effectiveProvider, userKey: effectiveKey, userCustomUrl: aiCfg.customUrl,
           }),
@@ -1866,6 +1871,45 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
       const qArr = Array.isArray(data.questions) ? data.questions : [];
       aggregatedQuestions.push(...qArr);
       usedApi = true;
+    }
+
+    // 知识点总数兜底：如果并行抽完 < 20，再 fire 一次"补抽"调用，让 AI 用整段文本去补差
+    if (aggregatedTopics.length < TARGET_TOTAL_TOPICS && !apiQuotaExceeded && chunks.length > 0) {
+      const missing = TARGET_TOTAL_TOPICS - aggregatedTopics.length;
+      report(78, `知识点不足 20（当前 ${aggregatedTopics.length}），补抽 ${missing + 4} 个…`);
+      try {
+        const existingNames = Array.from(seenTopicNames).slice(0, 30).join("、");
+        const supplementText = `已抽到的知识点（请避免重复）：${existingNames}\n\n${chunks[0]}`;
+        const resp = await fetch("/api/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: supplementText.slice(0, 4000),
+            course: material?.course || "数学",
+            chapter,
+            count: 2,
+            chunkIndex: 0,
+            chunkCount: 1,
+            refContext: [],
+            topicsPerChunk: missing + 4, // 多抽几条留余量
+            forceProvider: forceProvider || null,
+            userProvider: effectiveProvider, userKey: effectiveKey, userCustomUrl: aiCfg.customUrl,
+          }),
+        });
+        const data = await resp.json();
+        if (!data?.error) {
+          const tArr = Array.isArray(data.topics) ? data.topics : [];
+          for (const t of tArr) {
+            const key = String(t?.name || "").trim().toLowerCase();
+            if (!key || seenTopicNames.has(key)) continue;
+            seenTopicNames.add(key);
+            aggregatedTopics.push(t);
+            if (aggregatedTopics.length >= TARGET_TOTAL_TOPICS + 2) break;
+          }
+        }
+      } catch (e) {
+        console.warn("topic top-up failed:", e?.message);
+      }
     }
 
     topics = aggregatedTopics;
@@ -5480,12 +5524,23 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                 <span style={{ fontSize: 12, color: "#9ca3af" }}>
                   {(providerFilter ? aiTopicsForMaterial.filter(t => (t.provider || "legacy") === providerFilter).length : aiTopicsForMaterial.length)} / {aiTopicsForMaterial.length} 个
                 </span>
-                {reExtractStatus?.status === "running" && (
-                  <span style={{ fontSize: 11.5, color: PROVIDER_META[reExtractStatus.provider]?.color || "#0EA5E9", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 5 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: "50%", border: `2px solid ${PROVIDER_META[reExtractStatus.provider]?.color || "#0EA5E9"}`, borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} />
-                    {PROVIDER_META[reExtractStatus.provider]?.label || reExtractStatus.provider} 抽取中…
-                  </span>
-                )}
+                {reExtractStatus?.status === "running" && (() => {
+                  // 把进度消息里"…  53%"这样的尾巴抽出来单独高亮显示，主标签仍是 provider 名
+                  const pctMatch = String(reExtractStatus.msg || "").match(/(\d+)\s*%\s*$/);
+                  const pct = pctMatch ? parseInt(pctMatch[1], 10) : null;
+                  const labelStripped = pctMatch
+                    ? String(reExtractStatus.msg || "").replace(/\s*\d+\s*%\s*$/, "").trim()
+                    : "抽取中…";
+                  return (
+                    <span style={{ fontSize: 11.5, color: PROVIDER_META[reExtractStatus.provider]?.color || "#0EA5E9", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: "50%", border: `2px solid ${PROVIDER_META[reExtractStatus.provider]?.color || "#0EA5E9"}`, borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} />
+                      <span>{PROVIDER_META[reExtractStatus.provider]?.label || reExtractStatus.provider} · {labelStripped}</span>
+                      {pct !== null && (
+                        <span style={{ fontSize: 11, fontWeight: 800, fontVariantNumeric: "tabular-nums", color: "#fff", background: PROVIDER_META[reExtractStatus.provider]?.color || "#0EA5E9", padding: "1px 7px", borderRadius: 999 }}>{pct}%</span>
+                      )}
+                    </span>
+                  );
+                })()}
                 <div style={{ flex: 1, height: 1, background: "#f3f4f6" }} />
               </div>
 
