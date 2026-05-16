@@ -13062,10 +13062,51 @@ function TeacherPage({ setPage, profile }) {
   const [importMsg, setImportMsg] = useState("");
   const csvRef = useRef();
   const [analytics, setAnalytics] = useState({ students: 0, answers: 0, accuracy: 0, weak: [], mastery: [] });
+  const [translating, setTranslating] = useState(false);
+  const [translateMsg, setTranslateMsg] = useState("");
 
   const refreshMaterials = async () => {
     const { data } = await supabase.from("materials").select("*").order("created_at", { ascending: false });
     if (data) setUploadedMaterials(data);
+  };
+
+  const batchTranslateQuestions = async () => {
+    setTranslating(true);
+    setTranslateMsg("正在获取待翻译题目…");
+    try {
+      const { data: allQs } = await supabase.from("questions").select("id,question,options,answer,explanation").is("question_en", null);
+      const todo = (allQs || []).filter(q => q.question && !q.question_en);
+      if (todo.length === 0) { setTranslateMsg("所有题目已有英文版本，无需翻译。"); setTranslating(false); return; }
+      const aiCfg = (() => { try { return JSON.parse(localStorage.getItem("mathcore_ai_config") || "{}"); } catch { return {}; } })();
+      const BATCH = 8;
+      let done = 0;
+      let failed = 0;
+      for (let i = 0; i < todo.length; i += BATCH) {
+        const chunk = todo.slice(i, i + BATCH);
+        setTranslateMsg(`翻译中… ${Math.min(i + BATCH, todo.length)} / ${todo.length} 题`);
+        try {
+          const resp = await fetch("/api/translate-questions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ questions: chunk, userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl }),
+          });
+          const data = await resp.json();
+          if (data.translated && data.translated.length > 0) {
+            await Promise.all(data.translated.map(t =>
+              supabase.from("questions").update({ question_en: t.question_en, options_en: t.options_en.length ? JSON.stringify(t.options_en) : null, explanation_en: t.explanation_en || null }).eq("id", t.id)
+            ));
+            done += data.translated.length;
+          }
+        } catch { failed += chunk.length; }
+        await new Promise(r => setTimeout(r, 400));
+      }
+      const { data: refreshed } = await supabase.from("questions").select("*").order("created_at", { ascending: false });
+      if (refreshed) setDbQuestions(refreshed);
+      setTranslateMsg(`翻译完成：成功 ${done} 题${failed > 0 ? `，失败 ${failed} 题` : ""}。`);
+    } catch (e) {
+      setTranslateMsg("翻译出错：" + (e?.message || "未知错误"));
+    }
+    setTranslating(false);
   };
 
   useEffect(() => {
@@ -13572,11 +13613,13 @@ function TeacherPage({ setPage, profile }) {
               <Badge color="blue">共 {dbQuestions.length} 题</Badge>
               <input ref={csvRef} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportCsv(f); e.target.value = ""; }} />
               <Btn size="sm" onClick={() => csvRef.current?.click()} disabled={importingCsv}>{importingCsv ? "导入中…" : "CSV 批量导入"}</Btn>
+              <Btn size="sm" onClick={batchTranslateQuestions} disabled={translating}>{translating ? "翻译中…" : "🌐 批量刷新英文"}</Btn>
               <Btn size="sm" variant="primary" onClick={seedQuestionBank} disabled={seeding}>{seeding ? "导入中…" : "一键导入基础题库"}</Btn>
             </div>
           </div>
           {seedMsg && <div style={{ padding: "10px 12px", borderRadius: 10, background: G.tealLight, color: G.tealDark, marginBottom: 12, fontSize: 14 }}>{seedMsg}</div>}
           {importMsg && <div style={{ padding: "10px 12px", borderRadius: 10, background: G.blueLight, color: G.blue, marginBottom: 12, fontSize: 14 }}>{importMsg}</div>}
+          {translateMsg && <div style={{ padding: "10px 12px", borderRadius: 10, background: "#F5F3FF", color: "#5B21B6", marginBottom: 12, fontSize: 14 }}>{translateMsg}</div>}
           <div style={{ fontSize: 12, color: "#888", marginBottom: 12 }}>
             CSV 表头格式：chapter,course,type,question,options,answer,explanation,difficulty。<br />
             其中 options 用 | 分隔（示例：A.选项1|B.选项2|C.选项3|D.选项4）。
