@@ -590,12 +590,13 @@ function SprintAnimations() {
 // =============================================================================
 // 主组件
 // =============================================================================
-export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQuestions = [], onAutoStartQuiz, onResetQuizIntent }) {
+export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQuestions = [], materials = [], onAutoStartQuiz, onResetQuizIntent }) {
   const [rightPanelMode, setRightPanelMode] = useState("chat");
   const [setupOpen, setSetupOpen] = useState(false);
   const [mockOpen, setMockOpen] = useState(false);
   const [selectedDayKey, setSelectedDayKey] = useState(null);
   const [tick, setTick] = useState(0); // 驱动 re-read storage
+  const [matPickerOpen, setMatPickerOpen] = useState(false);
 
   void tick;
   const examPlan = storage.get("exam_plan", null);
@@ -770,6 +771,41 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
             }}>
             🧩 AI 出题检测
           </button>
+          {/* 按课本做题 */}
+          <div style={{ position: "relative" }}>
+            <button onClick={() => setMatPickerOpen(v => !v)}
+              style={{
+                width: "100%", padding: "9px 12px", textAlign: "center", borderRadius: 10, border: "1px solid #E5E7EB", cursor: "pointer",
+                fontWeight: 600, fontSize: 13, fontFamily: "inherit", transition: "background 0.12s",
+                background: matPickerOpen ? "#EEF2FF" : "#F3F4F6", color: "#4F46E5",
+              }}>
+              📚 按课本做题
+            </button>
+            {matPickerOpen && (
+              <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", boxShadow: "0 8px 24px rgba(0,0,0,0.1)", zIndex: 100, overflow: "hidden" }}>
+                {materials.length === 0 ? (
+                  <div style={{ padding: "14px 16px", fontSize: 12.5, color: "#9CA3AF", textAlign: "center" }}>暂无课本，请先上传资料</div>
+                ) : (
+                  <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                    {materials.map(m => (
+                      <button key={m.id} onClick={() => {
+                        setMatPickerOpen(false);
+                        if (onAutoStartQuiz) onAutoStartQuiz({ source: "material_sprint", materialId: m.id, materialTitle: m.title, count: 10 });
+                        setRightPanelMode("quiz");
+                      }}
+                        style={{ width: "100%", padding: "10px 16px", textAlign: "left", border: "none", borderBottom: "1px solid #F3F4F6", background: "transparent", cursor: "pointer", fontFamily: "inherit", display: "flex", flexDirection: "column", gap: 2 }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "#F9FAFB"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>{m.title || "未命名"}</span>
+                        {m.course && <span style={{ fontSize: 11, color: "#9CA3AF" }}>{m.course}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <button onClick={onViewWrong}
             style={{ padding: "9px 12px", textAlign: "center", background: "#F3F4F6", borderRadius: 10, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 13, color: "#111827", fontFamily: "inherit" }}>
             📝 进入错题本

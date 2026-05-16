@@ -1937,6 +1937,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
   let topicsLinked = 0;
   if (!apiQuotaExceeded && topics.length > 0) {
     try {
+      const VALID_CATEGORIES = ["核心概念", "定理性质", "计算方法", "公式推导", "应用技巧"];
       const topicRowsBase = topics
         .filter(t => t && t.name && String(t.name).trim())
         .map(t => ({
@@ -1944,6 +1945,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
           name: String(t.name).trim().slice(0, 120),
           summary: t.summary ? String(t.summary).slice(0, 800) : null,
           chapter: chapter || null,
+          category: (t.category && VALID_CATEGORIES.includes(t.category)) ? t.category : null,
         }));
       // 带上 provider 字段的"完整版" rows；如果列不存在 (42703 / 42P01) 会自动降级回不带这些字段的版本，所以不影响现网
       const topicRowsWithProvider = topicRowsBase.map(r => ({
@@ -5506,8 +5508,46 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   )}
                 </div>
               )}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
-                {(providerFilter ? aiTopicsForMaterial.filter(t => (t.provider || "legacy") === providerFilter) : aiTopicsForMaterial).map(t => {
+              {/* 分类标签过滤器 */}
+              {(() => {
+                const CATEGORY_META = {
+                  "核心概念": { color: "#4F46E5", bg: "#EEF2FF" },
+                  "定理性质": { color: "#0EA5E9", bg: "#F0F9FF" },
+                  "计算方法": { color: "#10B981", bg: "#ECFDF5" },
+                  "公式推导": { color: "#F59E0B", bg: "#FFFBEB" },
+                  "应用技巧": { color: "#8B5CF6", bg: "#F5F3FF" },
+                };
+                const filteredTopics = providerFilter ? aiTopicsForMaterial.filter(t => (t.provider || "legacy") === providerFilter) : aiTopicsForMaterial;
+                const hasCategories = filteredTopics.some(t => t.category);
+                if (!hasCategories) return null;
+                const catCounts = {};
+                filteredTopics.forEach(t => { const c = t.category || "其他"; catCounts[c] = (catCounts[c] || 0) + 1; });
+                return (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                    {Object.entries(catCounts).map(([cat, cnt]) => {
+                      const meta = CATEGORY_META[cat] || { color: "#6B7280", bg: "#F9FAFB" };
+                      return (
+                        <span key={cat} style={{ fontSize: 11, fontWeight: 700, color: meta.color, background: meta.bg, padding: "3px 9px", borderRadius: 20, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          {cat} <span style={{ opacity: 0.6 }}>{cnt}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+              {/* 按分类分组显示知识点 */}
+              {(() => {
+                const CATEGORY_META = {
+                  "核心概念": { color: "#4F46E5", bg: "#EEF2FF", icon: "📌" },
+                  "定理性质": { color: "#0EA5E9", bg: "#F0F9FF", icon: "📐" },
+                  "计算方法": { color: "#10B981", bg: "#ECFDF5", icon: "🔧" },
+                  "公式推导": { color: "#F59E0B", bg: "#FFFBEB", icon: "∑" },
+                  "应用技巧": { color: "#8B5CF6", bg: "#F5F3FF", icon: "💡" },
+                };
+                const CATEGORY_ORDER = ["核心概念", "定理性质", "计算方法", "公式推导", "应用技巧"];
+                const filteredTopics = providerFilter ? aiTopicsForMaterial.filter(t => (t.provider || "legacy") === providerFilter) : aiTopicsForMaterial;
+                const hasCategories = filteredTopics.some(t => t.category);
+                const renderTopicCard = (t, idx) => {
                   const mastery = topicMastery[t.id]?.status || "todo";
                   const provKey = (t.provider && String(t.provider).trim()) || "legacy";
                   const provMeta = PROVIDER_META[provKey] || PROVIDER_META.unknown;
@@ -5517,79 +5557,67 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                       onClick={() => openAITopicDetail(t)}
                       role="button" tabIndex={0}
                       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openAITopicDetail(t); } }}
-                      style={{
-                        border: `1px solid ${mastery === "done" ? G.teal + "55" : "#E5E7EB"}`,
-                        borderRadius: 14, padding: "16px", cursor: "pointer",
-                        background: mastery === "done" ? "#f0fdf4" : "#ffffff",
-                        display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease",
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 8px 24px rgba(15,23,42,0.06)"; e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = "#CBD5E1"; }}
-                      onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = mastery === "done" ? G.teal + "55" : "#E5E7EB"; }}
+                      style={{ border: `1.5px solid ${mastery === "done" ? G.teal + "55" : "#E5E7EB"}`, borderRadius: 14, padding: "14px 16px", cursor: "pointer", background: mastery === "done" ? "#f0fdf4" : "#ffffff", display: "flex", flexDirection: "row", alignItems: "flex-start", gap: 14, transition: "all 0.15s ease" }}
+                      onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 4px 16px rgba(15,23,42,0.07)"; e.currentTarget.style.borderColor = "#CBD5E1"; e.currentTarget.style.background = mastery === "done" ? "#ecfdf5" : "#fafbff"; }}
+                      onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.borderColor = mastery === "done" ? G.teal + "55" : "#E5E7EB"; e.currentTarget.style.background = mastery === "done" ? "#f0fdf4" : "#ffffff"; }}
                     >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
-                          <span style={{ width: 26, height: 26, borderRadius: 7, background: provMeta.color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 900, flexShrink: 0 }} title={provMeta.label}>{provMeta.avatar}</span>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", lineHeight: 1.45, flex: 1, minWidth: 0 }}>{t.name}</div>
+                      <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 10, background: provMeta.color + "18", border: `1.5px solid ${provMeta.color}33`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: provMeta.color, marginTop: 1 }}>{idx + 1}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 4 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", lineHeight: 1.4 }}>{t.name}</div>
+                          {mastery === "done" && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: G.tealDark, background: G.tealLight, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap" }}>已掌握 ✓</span>}
                         </div>
-                        {mastery === "done" && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: G.tealDark, background: G.tealLight, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap", marginTop: 2 }}>已掌握 ✓</span>}
+                        <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.6, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{t.summary || "（AI 未给出摘要）"}</div>
+                        {((provKey !== "legacy" && provKey !== "unknown") || t.chapter) && (
+                          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", fontSize: 10.5, marginTop: 6 }}>
+                            {(provKey !== "legacy" && provKey !== "unknown") && (
+                              <span title={t.provider_model ? `${provMeta.label} · ${t.provider_model}` : provMeta.label} style={{ color: provMeta.color, background: provMeta.bg, padding: "2px 7px", borderRadius: 20, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                <span style={{ width: 5, height: 5, borderRadius: 999, background: provMeta.color }} />
+                                {provMeta.label}
+                              </span>
+                            )}
+                            {t.chapter && <span style={{ color: "#94A3B8", fontWeight: 500 }}>· {t.chapter}</span>}
+                          </div>
+                        )}
                       </div>
-                      <div style={{ fontSize: 12.5, color: "#4b5563", lineHeight: 1.65, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 40 }}>
-                        {t.summary || "（AI 未给出摘要）"}
-                      </div>
-                      {/* 紧凑徽章行：legacy/unknown 不显示来源 chip（无信息量），只在有真实 provider 时才显示。
-                          chapter 改为更小的纯文字小字，不再弄成胶囊降低视觉噪音。 */}
-                      {((provKey !== "legacy" && provKey !== "unknown") || t.chapter) && (
-                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 10.5 }}>
-                          {(provKey !== "legacy" && provKey !== "unknown") && (
-                            <span
-                              title={t.provider_model ? `${provMeta.label} · ${t.provider_model}` : provMeta.label}
-                              style={{ color: provMeta.color, background: provMeta.bg, padding: "2px 7px", borderRadius: 20, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}
-                            >
-                              <span style={{ width: 5, height: 5, borderRadius: 999, background: provMeta.color }} />
-                              {provMeta.label}
-                            </span>
-                          )}
-                          {t.chapter && <span style={{ color: "#94A3B8", fontWeight: 500 }}>· {t.chapter}</span>}
-                        </div>
-                      )}
-                      <div style={{ display: "flex", gap: 7, marginTop: 2 }} onClick={e => e.stopPropagation()}>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            // 按资料 + topic 直达做题
-                            if (typeof setQuizIntent === "function") {
-                              setQuizIntent({
-                                source: "ai_topic",
-                                materialId: selectedMaterialId,
-                                topicId: t.id,
-                                topicName: t.name,
-                                topicSummary: t.summary || "",
-                                chapter: t.chapter || null,
-                                count: 5,
-                              });
-                            }
-                            if (typeof switchStudyTab === "function") {
-                              switchStudyTab("小测");
-                            } else if (selectedMaterial) {
-                              setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
-                            }
-                          }}
-                          style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: "#111827", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
-                        >
-                          ✏️ 按此知识点做题
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); markTopicMastery(t, mastery === "done" ? "todo" : "done"); }}
-                          title={mastery === "done" ? "取消掌握" : "标记已掌握"}
-                          style={{ padding: "7px 10px", fontSize: 15, background: mastery === "done" ? G.tealLight : "#f9fafb", border: `1.5px solid ${mastery === "done" ? G.teal : "#e5e7eb"}`, borderRadius: 8, cursor: "pointer", lineHeight: 1 }}
-                        >
-                          {mastery === "done" ? "✅" : "☆"}
-                        </button>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                        <button onClick={(e) => { e.stopPropagation(); if (typeof setQuizIntent === "function") setQuizIntent({ source: "ai_topic", materialId: selectedMaterialId, topicId: t.id, topicName: t.name, topicSummary: t.summary || "", chapter: t.chapter || null, count: 5 }); if (typeof switchStudyTab === "function") switchStudyTab("小测"); else if (selectedMaterial) setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || "")); }} style={{ padding: "6px 12px", fontSize: 11.5, fontWeight: 700, background: "#111827", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>✏️ 做题</button>
+                        <button onClick={(e) => { e.stopPropagation(); markTopicMastery(t, mastery === "done" ? "todo" : "done"); }} title={mastery === "done" ? "取消掌握" : "标记已掌握"} style={{ padding: "6px 10px", fontSize: 14, background: mastery === "done" ? G.tealLight : "#f9fafb", border: `1.5px solid ${mastery === "done" ? G.teal : "#e5e7eb"}`, borderRadius: 8, cursor: "pointer", lineHeight: 1, textAlign: "center" }}>{mastery === "done" ? "✅" : "☆"}</button>
                       </div>
                     </div>
                   );
-                })}
-              </div>
+                };
+                if (!hasCategories) {
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {filteredTopics.map((t, idx) => renderTopicCard(t, idx))}
+                    </div>
+                  );
+                }
+                // Group by category
+                const groups = {};
+                filteredTopics.forEach(t => { const c = t.category || "未分类"; if (!groups[c]) groups[c] = []; groups[c].push(t); });
+                const orderedCats = [...CATEGORY_ORDER.filter(c => groups[c]), ...Object.keys(groups).filter(c => !CATEGORY_ORDER.includes(c))];
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                    {orderedCats.map(cat => {
+                      const meta = CATEGORY_META[cat] || { color: "#6B7280", bg: "#F9FAFB", icon: "•" };
+                      return (
+                        <div key={cat}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                            <span style={{ fontSize: 14, fontWeight: 800, color: meta.color }}>{meta.icon} {cat}</span>
+                            <span style={{ fontSize: 11, color: "#9CA3AF" }}>{groups[cat].length} 个</span>
+                            <div style={{ flex: 1, height: 1, background: `${meta.color}20` }} />
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {groups[cat].map((t, idx) => renderTopicCard(t, idx))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -5636,8 +5664,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                     <div style={{ flex: 1, height: 1, background: "#f3f4f6" }} />
                   </div>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
-                    {chTopics.map(t => {
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {chTopics.map((t, tIdx) => {
                       const mastery = topicMastery[t.id]?.status || "todo";
                       const chapterStr = (selectedMaterial?.course && selectedMaterial.course !== "数值分析")
                         ? `${selectedMaterial.course} ${t.chapterNum}` : t.chapterNum;
@@ -5646,47 +5674,42 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                         <div
                           key={t.id}
                           onClick={() => openTopic(t, selectedMaterial)}
-                          style={{ border: `1.5px solid ${mastery === "done" ? G.teal + "55" : "#e5e7eb"}`, borderRadius: 14, padding: "16px", background: mastery === "done" ? "#f0fdf4" : "#fff", display: "flex", flexDirection: "column", gap: 10, cursor: "pointer", transition: "all 0.15s ease", position: "relative" }}
-                          onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 6px 20px ${chColor}22`; e.currentTarget.style.borderColor = chColor + "66"; e.currentTarget.style.transform = "translateY(-2px)"; }}
-                          onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.borderColor = mastery === "done" ? G.teal + "55" : "#e5e7eb"; e.currentTarget.style.transform = "none"; }}
+                          style={{ border: `1.5px solid ${mastery === "done" ? G.teal + "55" : "#e5e7eb"}`, borderRadius: 14, padding: "12px 16px", background: mastery === "done" ? "#f0fdf4" : "#fff", display: "flex", flexDirection: "row", alignItems: "flex-start", gap: 14, cursor: "pointer", transition: "all 0.15s ease" }}
+                          onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 4px 14px ${chColor}18`; e.currentTarget.style.borderColor = chColor + "66"; e.currentTarget.style.background = mastery === "done" ? "#ecfdf5" : "#fafbff"; }}
+                          onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.borderColor = mastery === "done" ? G.teal + "55" : "#e5e7eb"; e.currentTarget.style.background = mastery === "done" ? "#f0fdf4" : "#fff"; }}
                         >
-                          {/* Top: title + mastery badge */}
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", lineHeight: 1.45, flex: 1 }}>{t.name}</div>
-                            {mastery === "done" && (
-                              <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: G.tealDark, background: G.tealLight, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap", marginTop: 2 }}>已掌握 ✓</span>
-                            )}
+                          {/* 序号方块 */}
+                          <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 10, background: chColor + "18", border: `1.5px solid ${chColor}33`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: chColor, marginTop: 1 }}>
+                            {tIdx + 1}
                           </div>
-
-                          {/* Intro preview */}
-                          <div style={{ fontSize: 12.5, color: hasContent ? "#4b5563" : "#9ca3af", lineHeight: 1.65, fontStyle: hasContent ? "normal" : "italic", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 40 }}>
-                            {hasContent ? t.intro : "点击查看知识点详细内容 →"}
+                          {/* 内容区 */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, marginBottom: 3 }}>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", lineHeight: 1.4 }}>{t.name}</div>
+                              {mastery === "done" && <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, color: G.tealDark, background: G.tealLight, padding: "2px 7px", borderRadius: 20, whiteSpace: "nowrap" }}>已掌握 ✓</span>}
+                            </div>
+                            <div style={{ fontSize: 12, color: hasContent ? "#6b7280" : "#9ca3af", lineHeight: 1.55, fontStyle: hasContent ? "normal" : "italic", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                              {hasContent ? t.intro : "点击查看知识点详细内容 →"}
+                            </div>
+                            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 5 }}>
+                              {hasContent && <span style={{ fontSize: 10, color: G.tealDark, background: G.tealLight, padding: "1px 7px", borderRadius: 20, fontWeight: 600 }}>📖 含讲解</span>}
+                              {t.intro && KNOWLEDGE_CONTENT[t.name]?.examples?.length > 0 && <span style={{ fontSize: 10, color: "#065f46", background: "#d1fae5", padding: "1px 7px", borderRadius: 20, fontWeight: 600 }}>✏️ {KNOWLEDGE_CONTENT[t.name].examples.length} 道例题</span>}
+                              {t.intro && KNOWLEDGE_CONTENT[t.name]?.viz && <span style={{ fontSize: 10, color: G.amber, background: G.amberLight, padding: "1px 7px", borderRadius: 20, fontWeight: 600 }}>🎨 可视化</span>}
+                            </div>
                           </div>
-
-                          {/* Indicators */}
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            {hasContent && <span style={{ fontSize: 10, color: G.tealDark, background: G.tealLight, padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>📖 含讲解</span>}
-                            {t.intro && KNOWLEDGE_CONTENT[t.name]?.examples?.length > 0 && <span style={{ fontSize: 10, color: "#065f46", background: "#d1fae5", padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>✏️ {KNOWLEDGE_CONTENT[t.name].examples.length} 道例题</span>}
-                            {t.intro && KNOWLEDGE_CONTENT[t.name]?.viz && <span style={{ fontSize: 10, color: G.amber, background: G.amberLight, padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>🎨 可视化</span>}
-                          </div>
-
-                          {/* Action row */}
-                          <div style={{ display: "flex", gap: 7, marginTop: 2 }} onClick={e => e.stopPropagation()}>
-                            <button onClick={() => openTopic(t, selectedMaterial)}
-                              style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: chColor, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>
-                              📖 查看内容
+                          {/* 操作按钮区 */}
+                          <div style={{ display: "flex", flexDirection: "column", gap: 5, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
+                            <button onClick={(e) => { e.stopPropagation(); openTopic(t, selectedMaterial); }}
+                              style={{ padding: "6px 12px", fontSize: 11.5, fontWeight: 700, background: chColor, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>
+                              📖 查看
                             </button>
-                            <button onClick={() => {
-                              setChapterFilter(chapterStr);
-                              if (typeof setQuizIntent === "function") setQuizIntent({ source: "knowledge_point", chapter: chapterStr, topicName: t.name || null, count: 5 });
-                              routeSetPage("题库练习");
-                            }}
-                              style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 600, background: "#f0f9ff", color: G.blue, border: `1.5px solid ${G.blue}33`, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>
-                              ✏️ 练习题目
+                            <button onClick={(e) => { e.stopPropagation(); setChapterFilter(chapterStr); if (typeof setQuizIntent === "function") setQuizIntent({ source: "knowledge_point", chapter: chapterStr, topicName: t.name || null, count: 5 }); routeSetPage("题库练习"); }}
+                              style={{ padding: "6px 10px", fontSize: 11.5, fontWeight: 600, background: "#f0f9ff", color: G.blue, border: `1.5px solid ${G.blue}33`, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}>
+                              ✏️ 练习
                             </button>
-                            <button onClick={() => markTopicMastery(t, mastery === "done" ? "todo" : "done")}
+                            <button onClick={(e) => { e.stopPropagation(); markTopicMastery(t, mastery === "done" ? "todo" : "done"); }}
                               title={mastery === "done" ? "取消掌握" : "标记已掌握"}
-                              style={{ padding: "7px 10px", fontSize: 15, background: mastery === "done" ? G.tealLight : "#f9fafb", border: `1.5px solid ${mastery === "done" ? G.teal : "#e5e7eb"}`, borderRadius: 8, cursor: "pointer", lineHeight: 1 }}>
+                              style={{ padding: "6px 10px", fontSize: 14, background: mastery === "done" ? G.tealLight : "#f9fafb", border: `1.5px solid ${mastery === "done" ? G.teal : "#e5e7eb"}`, borderRadius: 8, cursor: "pointer", lineHeight: 1, textAlign: "center" }}>
                               {mastery === "done" ? "✅" : "☆"}
                             </button>
                           </div>
@@ -5818,6 +5841,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [materialGenerating, setMaterialGenerating] = useState(false);
   const [materialGenerateMsg, setMaterialGenerateMsg] = useState("");
   const autoGenTriedRef = useRef(false);
+  // 语言切换：cn=仅中文 en=仅英文 bilingual=中英双语
+  const [langMode, setLangMode] = useState("cn");
   // 自动补题守卫（pool < 12 时后台触发一次）
   const autoTopUpTriedRef = useRef(false);
   const timerRef = useRef(null);
@@ -7316,14 +7341,16 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   // ── Quiz screen (modular view) ──
   const normalizedOptions = opts || (q.type === "判断题" ? ["正确", "错误"] : []);
-  // 双语辅助文本（中主英辅）：若题目带英文版则并排展示
   const optsEn = q?.options_en
     ? (typeof q.options_en === "string" ? (() => { try { return JSON.parse(q.options_en); } catch { return null; } })() : q.options_en)
     : null;
-  const normalizedOptionsSecondary = Array.isArray(optsEn) && optsEn.length === normalizedOptions.length
-    ? optsEn
-    : [];
-  const questionSecondary = q?.question_en || q?.stem_en || "";
+  const optsEnArr = Array.isArray(optsEn) && optsEn.length === normalizedOptions.length ? optsEn : [];
+  const hasEnVersion = !!(q?.question_en || q?.stem_en);
+  // 根据 langMode 决定显示文本
+  const displayQuestion = langMode === "en" && hasEnVersion ? (q.question_en || q.stem_en || q.question) : q.question;
+  const displayOptions = langMode === "en" && optsEnArr.length > 0 ? optsEnArr : normalizedOptions;
+  const questionSecondary = langMode === "bilingual" ? (q?.question_en || q?.stem_en || "") : "";
+  const normalizedOptionsSecondary = langMode === "bilingual" ? optsEnArr : [];
   const selectedOptionIndex = selected;
   const correctIndex = normalizedOptions.findIndex((item, idx) => {
     if (opts) return letters[idx] === q.answer;
@@ -7331,6 +7358,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   });
   const correctOptionText = correctIndex >= 0 ? normalizedOptions[correctIndex] : q.answer;
   const userChoiceText = selectedOptionIndex != null ? normalizedOptions[selectedOptionIndex] : "";
+  void displayOptions; // used in QuizPageView
   // 针对用户选错的选项，尝试查找后端给出的"误解诊断"
   const misconceptionForChoice = (() => {
     if (!isWrongAnswered) return "";
@@ -7430,13 +7458,26 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             {metaKnowledge && <span style={{ fontSize: 12, color: "#6366F1", background: "#EEF2FF", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>🎯 {metaKnowledge}</span>}
             {metaDifficulty && <span style={{ fontSize: 12, color: "#B45309", background: "#FEF3C7", padding: "2px 8px", borderRadius: 999, fontWeight: 600 }}>⭐ {metaDifficulty}</span>}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
               ✓ {Object.values(answerRecords).filter(r => r.correct).length}
               <span style={{ margin: "0 4px", opacity: 0.4 }}>/</span>
               ✗ {Object.values(answerRecords).filter(r => !r.correct).length}
             </span>
             {timerOn && <span style={{ fontSize: 13, color: "var(--text-secondary)", fontVariantNumeric: "tabular-nums" }}>⏱ {String(Math.floor(timer/60)).padStart(2,"0")}:{String(timer%60).padStart(2,"0")}</span>}
+            {/* 语言切换 */}
+            <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: "1px solid #E5E7EB" }}>
+              {[["cn","中"], ["en","En"], ["bilingual","双语"]].map(([mode, label]) => (
+                <button key={mode} onClick={() => setLangMode(mode)}
+                  style={{ padding: "4px 8px", fontSize: 11.5, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit",
+                    background: langMode === mode ? "#111827" : "#F9FAFB",
+                    color: langMode === mode ? "#fff" : "#6B7280",
+                    borderRight: mode !== "bilingual" ? "1px solid #E5E7EB" : "none",
+                  }}>
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         {/* 可跳转进度点 */}
@@ -7478,9 +7519,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       </div>
 
       <QuizPageView
-        question={q.question}
+        question={displayQuestion}
         questionSecondary={questionSecondary}
-        options={normalizedOptions}
+        options={displayOptions}
         optionsSecondary={normalizedOptionsSecondary}
         selectedIndex={selectedOptionIndex}
         onSelectOption={(idx) => { if (!answered) setSelected(idx); }}
@@ -15016,6 +15057,14 @@ export default function App() {
   // QuizPage 一旦收到且题库加载完成，就自动 startWithPool，不再停在 setup 页让用户重选。
   // 形如 { chapter: "ODE Ch.2", count: 5, source: "knowledge_tree" }
   const [quizIntent, setQuizIntent] = useState(null);
+  // 全局教材列表 —— 供冲刺模式按课本选题使用
+  const [allMaterials, setAllMaterials] = useState([]);
+  const [sprintMaterialId, setSprintMaterialId] = useState(null);
+  const [sprintMaterialTitle, setSprintMaterialTitle] = useState(null);
+  useEffect(() => {
+    supabase.from("materials").select("id,title,course").order("created_at", { ascending: false }).limit(60)
+      .then(({ data }) => { if (data) setAllMaterials(data); });
+  }, []);
   // ══ 教材沙盒 ══════════════════════════════════════════════════════════════
   // 进入教材后所有页面（知识点/知识树/小测/复习/错题本/AI对话）默认绑定到这本教材。
   // 不选教材时显示画廊（HomePage 重构），保留"软隔离"——错题等数据全局存，UI 仅默认按教材过滤。
@@ -15380,14 +15429,19 @@ export default function App() {
                   <motion.div key="sprint" style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.25 }}>
                     <SprintWorkspace
                       chatPage={<MaterialChatPage setPage={handleSetPage} profile={profile} />}
-                      quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} isSprint autoStartIntent={quizIntent} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
+                      quizPage={<QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} materialId={sprintMaterialId} materialTitle={sprintMaterialTitle} sessionAnswers={sessionAnswers} isSprint autoStartIntent={quizIntent} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />}
                       onViewWrong={() => handleSetPage("错题本")}
                       allQuestions={ALL_QUESTIONS}
+                      materials={allMaterials}
                       onAutoStartQuiz={(intent) => {
                         if (intent && intent.chapter && setChapterFilter) setChapterFilter([intent.chapter]);
+                        if (intent && intent.source === "material_sprint") {
+                          setSprintMaterialId(intent.materialId || null);
+                          setSprintMaterialTitle(intent.materialTitle || null);
+                        }
                         setQuizIntent(intent || null);
                       }}
-                      onResetQuizIntent={() => setQuizIntent(null)}
+                      onResetQuizIntent={() => { setQuizIntent(null); setSprintMaterialId(null); setSprintMaterialTitle(null); }}
                     />
                   </motion.div>
                 )}
