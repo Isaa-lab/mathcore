@@ -5801,6 +5801,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [subjectFocus, setSubjectFocus] = useState(null);          // 当前选中学科（用于层级章节选择）
   const [selectedAbilities, setSelectedAbilities] = useState([]);  // 能力维度筛选
   const [selectedStatuses, setSelectedStatuses] = useState([]);    // 掌握状态筛选
+  const [selectedQTypes, setSelectedQTypes] = useState([]);        // 题型筛选：单选/多选/判断/填空/简答
+  const [requireEn, setRequireEn] = useState(false);                // 只要有英文版本的题
+  const [bookmarkedOnly, setBookmarkedOnly] = useState(false);      // 只看收藏题
+  const [sortMode, setSortMode] = useState("random");               // random / newest / oldest / hardestFirst
   // 模拟考试配置：点击意图卡片后打开独立 modal，允许用户选择范围 / 题量 / 时长
   const [mockOpen, setMockOpen] = useState(false);
   const [mockScope, setMockScope] = useState([]);                   // 选中的 "course Ch.N" 章节
@@ -5837,6 +5841,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const autoGenTriedRef = useRef(false);
   // 语言切换：cn=仅中文 en=仅英文 bilingual=中英双语
   const [langMode, setLangMode] = useState("cn");
+  // 学生模式即时翻译缓存：{ [qid]: { question_en, options_en, explanation_en } }
+  const [translationCache, setTranslationCache] = useState({});
+  const [translatingQid, setTranslatingQid] = useState(null);
   // 小测选课本：null = 不限
   const [quizMaterialFilter, setQuizMaterialFilter] = useState(null);
   // 自动补题守卫（pool < 12 时后台触发一次）
@@ -6101,6 +6108,35 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const q = displayQ[current];
   const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
   const letters = ["A", "B", "C", "D"];
+
+  // 即时翻译：当用户切到 En/双语 而当前题没有英文版本时，自动调 /api/translate-questions
+  useEffect(() => {
+    if (langMode === "cn" || !q) return;
+    const qid = q.id || q.question;
+    if (translationCache[qid]) return;
+    if (q.question_en || q.stem_en) return;
+    if (translatingQid === qid) return;
+    setTranslatingQid(qid);
+    const optsArr = q.options ? (typeof q.options === "string" ? (() => { try { return JSON.parse(q.options); } catch { return []; } })() : q.options) : [];
+    const aiCfg = (() => { try { return JSON.parse(localStorage.getItem("mathcore_ai_config") || "{}"); } catch { return {}; } })();
+    fetch("/api/translate-questions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        questions: [{ id: qid, question: q.question, options: optsArr, answer: q.answer, explanation: q.explanation }],
+        userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
+      }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data?.translated) && data.translated[0]) {
+          const t = data.translated[0];
+          setTranslationCache(prev => ({ ...prev, [qid]: { question_en: t.question_en, options_en: t.options_en, explanation_en: t.explanation_en } }));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setTranslatingQid(prev => prev === qid ? null : prev));
+  }, [langMode, q, translationCache, translatingQid]);
 
   // 最近一次 askQuestionAI 的输入，用于失败后"重试"按钮
   const [lastAskInput, setLastAskInput] = useState("");
@@ -6599,6 +6635,21 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     let customPool = buildPool(customChapters, []);
     if (selectedAbilities.length > 0) customPool = customPool.filter(q => selectedAbilities.includes(QUIZ_abilityOf(q)));
     if (selectedStatuses.length > 0) customPool = customPool.filter(q => selectedStatuses.includes(QUIZ_statusOf(q, sessionAnswers, chapterStats)));
+    if (selectedQTypes.length > 0) customPool = customPool.filter(q => selectedQTypes.includes(String(q.type || "单选题")));
+    if (requireEn) customPool = customPool.filter(q => !!(q.question_en || q.stem_en));
+    if (bookmarkedOnly) {
+      const bookmarks = (() => { try { return new Set(JSON.parse(localStorage.getItem("mc_quiz_bookmarks") || "[]")); } catch { return new Set(); } })();
+      customPool = customPool.filter(q => bookmarks.has(q.id) || bookmarks.has(q.question));
+    }
+    // 排序
+    if (sortMode === "newest") customPool = [...customPool].sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+    else if (sortMode === "oldest") customPool = [...customPool].sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
+    else if (sortMode === "hardestFirst") {
+      const abilityRank = { application: 4, proof: 3, calc: 2, concept: 1 };
+      customPool = [...customPool].sort((a, b) => (abilityRank[QUIZ_abilityOf(b)] || 0) - (abilityRank[QUIZ_abilityOf(a)] || 0));
+    } else {
+      customPool = [...customPool].sort(() => Math.random() - 0.5);
+    }
     const customBuckets = QUIZ_buckets(customPool.length);
     // 题量预选：如果当前 quizCount 不在档位里，自动对齐到最接近且不超过可用数的档位
     const effectiveCount = customBuckets.includes(quizCount)
@@ -6930,8 +6981,51 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
               })}
             </div>
 
-            {/* Step 4 · 题量档位 */}
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 4 · 练多少题？</div>
+            {/* Step 3.5 · 题型筛选 */}
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 4 · 限定题型？（可多选；不选 = 全部）</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              {["单选题", "多选题", "判断题", "填空题", "简答题", "证明题"].map(qt => {
+                const active = selectedQTypes.includes(qt);
+                return (
+                  <button key={qt} onClick={() => setSelectedQTypes(p => active ? p.filter(x => x !== qt) : [...p, qt])}
+                    style={{ padding: "7px 14px", borderRadius: 999, border: "1.5px solid " + (active ? "#7C3AED" : "#E2E8F0"),
+                      background: active ? "#F5F3FF" : "#fff", color: active ? "#5B21B6" : "#475569",
+                      cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600 }}>
+                    {qt}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Step 4.5 · 高级条件 */}
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 5 · 高级条件</div>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 8 }}>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#475569", cursor: "pointer" }}>
+                <input type="checkbox" checked={requireEn} onChange={e => setRequireEn(e.target.checked)} style={{ accentColor: "#8B5CF6" }} />
+                只看有英文版本的题
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "#475569", cursor: "pointer" }}>
+                <input type="checkbox" checked={bookmarkedOnly} onChange={e => setBookmarkedOnly(e.target.checked)} style={{ accentColor: "#F59E0B" }} />
+                只看 ★ 收藏题
+              </label>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 18, alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: "#94A3B8", marginRight: 4 }}>排序：</span>
+              {[["random","🎲 随机"], ["newest","🆕 最新优先"], ["oldest","🕰️ 最旧优先"], ["hardestFirst","🔥 由难到易"]].map(([id, label]) => {
+                const active = sortMode === id;
+                return (
+                  <button key={id} onClick={() => setSortMode(id)}
+                    style={{ padding: "5px 11px", borderRadius: 8, border: "1px solid " + (active ? "#0F172A" : "#E2E8F0"),
+                      background: active ? "#0F172A" : "#fff", color: active ? "#fff" : "#475569",
+                      cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600 }}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Step 6 · 题量档位 */}
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 6 · 练多少题？</div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
               {customBuckets.length === 0 && <span style={{ fontSize: 12, color: "#94A3B8", padding: "8px 4px" }}>当前筛选下没有题 —— 请放宽条件</span>}
               {customBuckets.map(n => {
@@ -7368,15 +7462,23 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   // ── Quiz screen (modular view) ──
   const normalizedOptions = opts || (q.type === "判断题" ? ["正确", "错误"] : []);
-  const optsEn = q?.options_en
+  // 即时翻译缓存优先；如果数据库没有英文版本，回退到缓存里的翻译
+  const qid = q.id || q.question;
+  const cached = translationCache[qid];
+  const effectiveQuestionEn = q?.question_en || q?.stem_en || cached?.question_en || "";
+  const rawOptsEn = q?.options_en
     ? (typeof q.options_en === "string" ? (() => { try { return JSON.parse(q.options_en); } catch { return null; } })() : q.options_en)
     : null;
-  const optsEnArr = Array.isArray(optsEn) && optsEn.length === normalizedOptions.length ? optsEn : [];
-  const hasEnVersion = !!(q?.question_en || q?.stem_en);
+  const cachedOptsEn = cached?.options_en || null;
+  const optsEn = (Array.isArray(rawOptsEn) && rawOptsEn.length === normalizedOptions.length)
+    ? rawOptsEn
+    : ((Array.isArray(cachedOptsEn) && cachedOptsEn.length === normalizedOptions.length) ? cachedOptsEn : null);
+  const optsEnArr = Array.isArray(optsEn) ? optsEn : [];
+  const hasEnVersion = !!effectiveQuestionEn;
   // 根据 langMode 决定显示文本
-  const displayQuestion = langMode === "en" && hasEnVersion ? (q.question_en || q.stem_en || q.question) : q.question;
+  const displayQuestion = langMode === "en" && hasEnVersion ? effectiveQuestionEn : q.question;
   const displayOptions = langMode === "en" && optsEnArr.length > 0 ? optsEnArr : normalizedOptions;
-  const questionSecondary = langMode === "bilingual" ? (q?.question_en || q?.stem_en || "") : "";
+  const questionSecondary = langMode === "bilingual" ? effectiveQuestionEn : "";
   const normalizedOptionsSecondary = langMode === "bilingual" ? optsEnArr : [];
   const selectedOptionIndex = selected;
   const correctIndex = normalizedOptions.findIndex((item, idx) => {
@@ -7493,17 +7595,25 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             </span>
             {timerOn && <span style={{ fontSize: 13, color: "var(--text-secondary)", fontVariantNumeric: "tabular-nums" }}>⏱ {String(Math.floor(timer/60)).padStart(2,"0")}:{String(timer%60).padStart(2,"0")}</span>}
             {/* 语言切换 */}
-            <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: "1px solid #E5E7EB" }}>
-              {[["cn","中"], ["en","En"], ["bilingual","双语"]].map(([mode, label]) => (
-                <button key={mode} onClick={() => setLangMode(mode)}
-                  style={{ padding: "4px 8px", fontSize: 11.5, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit",
-                    background: langMode === mode ? "#111827" : "#F9FAFB",
-                    color: langMode === mode ? "#fff" : "#6B7280",
-                    borderRight: mode !== "bilingual" ? "1px solid #E5E7EB" : "none",
-                  }}>
-                  {label}
-                </button>
-              ))}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {translatingQid && langMode !== "cn" && (
+                <span style={{ fontSize: 10.5, color: "#8B5CF6", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#8B5CF6", animation: "pulse 1.2s infinite" }} />
+                  翻译中
+                </span>
+              )}
+              <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", border: "1px solid #E5E7EB" }}>
+                {[["cn","中"], ["en","En"], ["bilingual","双语"]].map(([mode, label]) => (
+                  <button key={mode} onClick={() => setLangMode(mode)}
+                    style={{ padding: "4px 8px", fontSize: 11.5, fontWeight: 600, border: "none", cursor: "pointer", fontFamily: "inherit",
+                      background: langMode === mode ? "#111827" : "#F9FAFB",
+                      color: langMode === mode ? "#fff" : "#6B7280",
+                      borderRight: mode !== "bilingual" ? "1px solid #E5E7EB" : "none",
+                    }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>

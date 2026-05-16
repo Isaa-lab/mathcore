@@ -762,27 +762,31 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
             }}>
             🤖 AI 复习对讲
           </button>
-          <button onClick={() => setRightPanelMode("quiz")}
-            style={{
-              padding: "9px 12px", textAlign: "center", borderRadius: 10, border: "none", cursor: "pointer",
-              fontWeight: 600, fontSize: 13, fontFamily: "inherit", transition: "background 0.12s",
-              background: rightPanelMode === "quiz" ? "#10B981" : "#F3F4F6",
-              color: rightPanelMode === "quiz" ? "#FFFFFF" : "#111827",
-            }}>
-            🧩 AI 出题检测
-          </button>
-          {/* 按课本做题 */}
+          {/* AI 出题检测 + 按课本做题（合并） */}
           <div style={{ position: "relative" }}>
-            <button onClick={() => setMatPickerOpen(v => !v)}
-              style={{
-                width: "100%", padding: "9px 12px", textAlign: "center", borderRadius: 10, border: "1px solid #E5E7EB", cursor: "pointer",
-                fontWeight: 600, fontSize: 13, fontFamily: "inherit", transition: "background 0.12s",
-                background: matPickerOpen ? "#EEF2FF" : "#F3F4F6", color: "#4F46E5",
-              }}>
-              📚 按课本做题
-            </button>
+            <div style={{ display: "flex", borderRadius: 10, overflow: "hidden" }}>
+              <button onClick={() => { setMatPickerOpen(false); setRightPanelMode("quiz"); if (onResetQuizIntent) onResetQuizIntent(); }}
+                style={{
+                  flex: 1, padding: "9px 12px", textAlign: "center", border: "none", cursor: "pointer",
+                  fontWeight: 600, fontSize: 13, fontFamily: "inherit", transition: "background 0.12s",
+                  background: rightPanelMode === "quiz" && !matPickerOpen ? "#10B981" : "#F3F4F6",
+                  color: rightPanelMode === "quiz" && !matPickerOpen ? "#FFFFFF" : "#111827",
+                }}>
+                🧩 AI 出题检测
+              </button>
+              <button onClick={() => setMatPickerOpen(v => !v)}
+                title="按课本做题"
+                style={{
+                  width: 38, padding: "9px 0", border: "none", cursor: "pointer", fontSize: 14,
+                  background: matPickerOpen ? "#EEF2FF" : "#F3F4F6", color: "#4F46E5",
+                  borderLeft: "1px solid rgba(0,0,0,0.06)",
+                }}>
+                📚
+              </button>
+            </div>
             {matPickerOpen && (
               <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, background: "#fff", borderRadius: 12, border: "1px solid #E5E7EB", boxShadow: "0 8px 24px rgba(0,0,0,0.1)", zIndex: 100, overflow: "hidden" }}>
+                <div style={{ padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "#94A3B8", letterSpacing: "0.06em", borderBottom: "1px solid #F3F4F6", background: "#FAFBFD" }}>📚 按课本做题</div>
                 {materials.length === 0 ? (
                   <div style={{ padding: "14px 16px", fontSize: 12.5, color: "#9CA3AF", textAlign: "center" }}>暂无课本，请先上传资料</div>
                 ) : (
