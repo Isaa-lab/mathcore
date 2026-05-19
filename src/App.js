@@ -577,6 +577,33 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched, onLogout }) {
   const [inputUrl, setInputUrl] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [savedPing, setSavedPing] = useState(null);
+  // Key 自检：{ ok, status, errorBody, hint, latencyMs, model }
+  const [keyCheck, setKeyCheck] = useState(null);
+  const [checking, setChecking] = useState(false);
+
+  // 用 /api/check-key 真实 ping 一次 provider，把结果原样回显给用户
+  const testKey = async () => {
+    if (!expanded) return;
+    const k = (inputKey || "").trim();
+    if (!k && expanded !== "server") {
+      setKeyCheck({ ok: false, status: 0, errorBody: "请先在上面输入框里填 Key", hint: "" });
+      return;
+    }
+    setChecking(true);
+    setKeyCheck(null);
+    try {
+      const resp = await fetch("/api/check-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: expanded, key: k, customUrl: expanded === "custom" ? (inputUrl || "").trim() : null }),
+      });
+      const data = await resp.json();
+      setKeyCheck(data);
+    } catch (e) {
+      setKeyCheck({ ok: false, status: 0, errorBody: e?.message || "请求 /api/check-key 失败", hint: "前端 fetch 都崩了，估计是网络问题 / Vercel 部署还没好。" });
+    }
+    setChecking(false);
+  };
   // 平台已配置的 providers；首次渲染取缓存，同时异步刷新一次确保最新
   const [platformProviders, setPlatformProviders] = useState(() => getPlatformProviders());
   useEffect(() => {
@@ -614,6 +641,7 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched, onLogout }) {
     setInputKey(all[providerId] || "");
     setInputUrl(providerId === "custom" ? (localStorage.getItem("mc_ai_custom_url") || "") : "");
     setShowKey(false);
+    setKeyCheck(null);
   };
 
   const saveInput = () => {
@@ -770,12 +798,42 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched, onLogout }) {
                   <button onClick={() => setShowKey(v => !v)} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 13, padding: 0 }}>{showKey ? "🙈" : "👁"}</button>
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
+                  <button onClick={testKey} disabled={checking || !inputKey.trim()} title="向该 provider 发一个最小请求，告诉你 Key 是否真的通了"
+                    style={{ fontSize: 11, padding: "5px 10px", background: checking ? "#E5E7EB" : "#EEF2FF", border: "1px solid #C7D2FE", borderRadius: 6, color: "#4338CA", cursor: (checking || !inputKey.trim()) ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                    {checking ? "测试中…" : "🔍 测试"}
+                  </button>
                   {hasUserKey && (
                     <button onClick={() => { clearKey(pid); setExpanded(null); }} style={{ fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, color: "#6B7280", cursor: "pointer", fontFamily: "inherit" }}>清除</button>
                   )}
                   <button onClick={() => setExpanded(null)} style={{ fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, color: "#6B7280", cursor: "pointer", fontFamily: "inherit" }}>取消</button>
                   <button onClick={saveInput} disabled={!inputKey.trim()} style={{ fontSize: 11, padding: "5px 12px", background: inputKey.trim() ? "#10B981" : "#D1D5DB", border: "none", borderRadius: 6, color: "#fff", cursor: inputKey.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontWeight: 600 }}>保存并切换</button>
                 </div>
+                {/* 测试结果：通了 → 绿色✅ + 延迟；没通 → 红色 HTTP 码 + 错误体 + 建议 */}
+                {keyCheck && (
+                  <div style={{
+                    marginTop: 8, padding: "8px 10px", borderRadius: 7, fontSize: 11,
+                    background: keyCheck.ok ? "#ECFDF5" : "#FEF2F2",
+                    border: `1px solid ${keyCheck.ok ? "#A7F3D0" : "#FECACA"}`,
+                    color: keyCheck.ok ? "#047857" : "#991B1B",
+                  }}>
+                    {keyCheck.ok ? (
+                      <div><b>✅ Key 通了</b> · {keyCheck.model} · {keyCheck.latencyMs}ms</div>
+                    ) : (
+                      <>
+                        <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                          ❌ {keyCheck.status > 0 ? `HTTP ${keyCheck.status}` : "请求未送达"} {keyCheck.latencyMs ? `· ${keyCheck.latencyMs}ms` : ""}
+                        </div>
+                        {keyCheck.hint && <div style={{ marginBottom: 4 }}>{keyCheck.hint}</div>}
+                        {keyCheck.errorBody && (
+                          <details style={{ marginTop: 4 }}>
+                            <summary style={{ cursor: "pointer", color: "#7F1D1D", fontSize: 10.5 }}>查看原始错误体</summary>
+                            <pre style={{ fontSize: 10, margin: "4px 0 0", padding: 6, background: "#FFFBFB", border: "1px solid #FECACA", borderRadius: 4, whiteSpace: "pre-wrap", wordBreak: "break-all", maxHeight: 120, overflow: "auto" }}>{keyCheck.errorBody}</pre>
+                          </details>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
                 <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 6 }}>Key 仅保存在你本地浏览器，不上传服务器。</div>
               </div>
             )}
@@ -5368,7 +5426,21 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         await reloadKnowledge();
         setProviderFilter(provider);
       } else {
-        setReExtractStatus({ provider, status: "error", msg: `${provider} 抽取完成，但没有新增知识点（可能 PDF 文字提取不充分，或 ${provider} 没拿到 Key）。` });
+        // 精确诊断：把后端真实错误抬到 UI，而不是吞掉用万能兜底
+        let reason = "";
+        if (result?.apiErrorMsg) {
+          // 后端返回了具体错误，直接显示
+          reason = result.apiErrorMsg;
+        } else if (!result?.usedApi) {
+          reason = `没有任何一家 AI 被调用成功 —— 通常是 ${provider} 没有 Key（既没填用户 Key 也没配 server 端 ${provider.toUpperCase()}_KEY）。请去 AI 设置点 🔍 测试。`;
+        } else if (!result?.hasText) {
+          reason = `PDF 文字提取失败（可能是扫描版或加密 PDF）。请改用文字可选中的电子版。`;
+        } else if ((result?.topics?.length || 0) === 0) {
+          reason = `${provider} 返回了响应但 0 个有效知识点 —— 可能是 JSON 格式坏了，或文字内容不足以抽题。试试别家 AI。`;
+        } else {
+          reason = `${provider} 抽到了 ${result?.topics?.length || 0} 个知识点但都和已有知识点重复 —— 这本资料可能已经抽过类似的了。`;
+        }
+        setReExtractStatus({ provider, status: "error", msg: `${provider} 没抽到新知识点：${reason}` });
       }
     } catch (e) {
       setReExtractStatus({ provider, status: "error", msg: `用 ${provider} 重抽失败：${e?.message || "未知错误"}` });
@@ -6213,7 +6285,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     if (translatingQid === qid) return;
     setTranslatingQid(qid);
     const optsArr = q.options ? (typeof q.options === "string" ? (() => { try { return JSON.parse(q.options); } catch { return []; } })() : q.options) : [];
-    const aiCfg = (() => { try { return JSON.parse(localStorage.getItem("mathcore_ai_config") || "{}"); } catch { return {}; } })();
+    const aiCfg = getAIConfig(); // 修复：之前误写成了不存在的 localStorage key 导致 user key 丢失
     fetch("/api/translate-questions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -13286,7 +13358,7 @@ function TeacherPage({ setPage, profile }) {
       const { data: allQs } = await supabase.from("questions").select("id,question,options,answer,explanation").is("question_en", null);
       const todo = (allQs || []).filter(q => q.question && !q.question_en);
       if (todo.length === 0) { setTranslateMsg("所有题目已有英文版本，无需翻译。"); setTranslating(false); return; }
-      const aiCfg = (() => { try { return JSON.parse(localStorage.getItem("mathcore_ai_config") || "{}"); } catch { return {}; } })();
+      const aiCfg = getAIConfig(); // 修复：之前误写成了不存在的 localStorage key 导致 user key 丢失
       const BATCH = 8;
       let done = 0;
       let failed = 0;
