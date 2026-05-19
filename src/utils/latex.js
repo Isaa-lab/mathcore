@@ -163,6 +163,50 @@ export function mergeFragmentedLatex(s) {
   return out;
 }
 
+// ── 3.6) 包裹 $..$ 外的"裸下标变量"：var_{...} / var^{...} / x_n / y^2 ──
+// 典型 bug：
+//   a_{ij} = a_{ij} - $\frac{a_{ik}}{a_{kk}}a_{kj}$
+//   └─ 左边 a_{ij} 留在数学模式外，_{ij} 当 literal 文本显示成 raw "a_{ij}"
+// 修复：把这些"明显是数学"的 token 单独包成 $..$。配合下面 mergeAdjacentMathBlocks
+// 再把被运算符隔开的相邻 $..$ 合并成一段，最终用户看到的就是正常的整行公式。
+export function wrapBareSubscriptVars(s) {
+  if (!s || typeof s !== "string") return s;
+  // 先按 $..$ 切片，只处理"$..$ 之外"的部分
+  const parts = s.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g);
+  // 匹配：以字母开头的标识符 + 至少一组下标/上标（带或不带花括号）
+  //   ✅ a_{ij}, x_n, y^{n+1}, A^2, f_n
+  //   ❌ 不匹配纯字母 `f`、纯数字 `5`、纯运算符 `+`
+  // 同样不匹配中文（开头要求 [A-Za-z]）
+  const BARE_RE = /[A-Za-z][A-Za-z0-9']*(?:_\{[^{}\n]+\}|\^\{[^{}\n]+\}|_[A-Za-z0-9]|\^[A-Za-z0-9])+/g;
+  return parts.map((p) => {
+    if (!p || p.startsWith("$")) return p;
+    // 仅当片段里出现 _{} 或 ^{} 或 _x ^x 时才处理（避免遍历纯文本浪费）
+    if (!/_\{|\^\{|_[A-Za-z0-9]|\^[A-Za-z0-9]/.test(p)) return p;
+    return p.replace(BARE_RE, (m) => "$" + m + "$");
+  }).join("");
+}
+
+// ── 3.7) 合并被运算符隔开的相邻 $..$ 块 ──
+// 上一步把 a_{ij}、x_n 这些独立包成了 $a_{ij}$。但如果原文是
+//   "a_{ij} = a_{ij} - $\frac{...}$"
+// 会变成 "$a_{ij}$ = $a_{ij}$ - $\frac{...}$" —— 等号、减号还在数学模式外。
+// 这里把 $A$ <op> $B$ 这种模式合并成 $A <op> B$，让运算符也用数学排版。
+export function mergeAdjacentMathBlocks(s) {
+  if (!s || typeof s !== "string") return s;
+  let out = s;
+  for (let i = 0; i < 4; i++) {
+    const before = out;
+    // $A$ <空格?> <运算符> <空格?> $B$  →  $A <op> B$
+    // 运算符限定 = + - * / < > ≤ ≥ ≠ ≈ → ←；不吞中文标点
+    out = out.replace(
+      /\$([^$\n]+?)\$\s*([=+\-*/<>≤≥≠≈→←])\s*\$([^$\n]+?)\$/g,
+      (m, a, op, b) => `$${a} ${op} ${b}$`
+    );
+    if (out === before) break;
+  }
+  return out;
+}
+
 // ── 4) 一站式入口：给渲染器前调用 ───────────────────────────────────────
 // 顺序很重要：先 revive（把控制字符变回 \x），再 normalize（替换分隔符），
 // 最后 autoWrap（补 $）。

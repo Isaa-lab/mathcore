@@ -16,7 +16,7 @@ import { recordWrongAnswer, recordCorrectAnswer, getWrongItems as getWrongItemsF
 import { storage } from "./utils/storage";
 import { getUserChapters } from "./utils/chapters";
 import { generateDailyPlans, dayKey as planDayKey, markTaskCompleted, rolloverIncompleteTasks, importBacklogToToday, dismissBacklog, getTodayBacklog, priorityWeight } from "./utils/planGenerator";
-import { sanitizeLatexText, reviveLatexControlChars, normalizeLatexDelimiters, autoWrapBareLatex, mergeFragmentedLatex } from "./utils/latex";
+import { sanitizeLatexText, reviveLatexControlChars, normalizeLatexDelimiters, autoWrapBareLatex, mergeFragmentedLatex, wrapBareSubscriptVars, mergeAdjacentMathBlocks } from "./utils/latex";
 import "katex/dist/katex.min.css";
 
 // Inject global CSS animations
@@ -12775,8 +12775,18 @@ function rescueQuizMath(input) {
   // 0a) 先把 JSON 反斜杠被吃变成的控制字符（form-feed / backspace / …）还原回 \frac \b \v …
   //     典型症状：页面里出现 "♦rac{1}{s-a}" —— \f 被吃了。
   // 0b) 再把 \( \) / \[ \] 归一成 $…$ / $$…$$
-  // 0c) 然后合并被 AI 拆碎的 \frac / \binom 等命令（典型："$\frac{X}${$Y$}" → "$\frac{X}{Y}$"）
-  input = mergeFragmentedLatex(normalizeLatexDelimiters(reviveLatexControlChars(String(input))));
+  // 0c) 合并被 AI 拆碎的 \frac / \binom 等命令（典型："$\frac{X}${$Y$}" → "$\frac{X}{Y}$"）
+  // 0d) 包裹 $..$ 之外的"裸下标变量" a_{ij} / x_n / y^{n+1} 等
+  //     （AI 经常只把表达式的"右边"放 $..$ 里，左边 a_{ij} 留外面）
+  // 0e) 把被运算符隔开的相邻 $..$ 合并成一段：$a_{ij}$ = $a_{ij}$ - $\frac{X}$
+  //     → $a_{ij} = a_{ij} - \frac{X}$
+  input = mergeAdjacentMathBlocks(
+    wrapBareSubscriptVars(
+      mergeFragmentedLatex(
+        normalizeLatexDelimiters(reviveLatexControlChars(String(input)))
+      )
+    )
+  );
   // 0c) 自动包裹 \begin{...}...\end{...} 环境（cases / pmatrix / aligned 等），AI 经常忘了套 $$
   // 只对未被 $ / $$ 包围的环境补包裹；已经在 $...$ 里就不动
   input = input.replace(
