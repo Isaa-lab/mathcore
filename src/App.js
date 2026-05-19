@@ -2097,11 +2097,22 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
         topic_group_id: topicGroupId,
       }));
       if (topicRowsWithProvider.length > 0) {
+        // 三层 INSERT 降级：满 schema → 去掉 category → 再去掉 provider 字段。
+        // 之前只有两层，且 base 也带 category，导致表里没 category 列时彻底失败。
+        const stripCategory = (rows) => rows.map(({ category, ...rest }) => rest);
+        const stripProvider = (rows) => rows.map(({ provider, provider_model, topic_group_id, ...rest }) => rest);
         let { error: et } = await supabase.from("material_topics").insert(topicRowsWithProvider);
-        // 列还没建出来（42703 = undefined column）时，降级用旧 schema 写一遍
+        // 第 1 次失败：很可能是 category 列没有
+        if (et && /column .* does not exist|category|provider/i.test(et.message || "")) {
+          console.warn("[material_topics] insert failed once, retrying without category:", et.message);
+          const r2 = await supabase.from("material_topics").insert(stripCategory(topicRowsWithProvider));
+          et = r2.error;
+        }
+        // 第 2 次失败：再去掉 provider 系列字段
         if (et && /column .* does not exist|provider/i.test(et.message || "")) {
-          const fallback = await supabase.from("material_topics").insert(topicRowsBase);
-          et = fallback.error;
+          console.warn("[material_topics] insert failed twice, retrying minimal schema:", et.message);
+          const r3 = await supabase.from("material_topics").insert(stripProvider(stripCategory(topicRowsBase)));
+          et = r3.error;
         }
         if (!et) {
           topicsLinked = topicRowsWithProvider.length;
@@ -5580,8 +5591,10 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
             </div>
           </div>
 
-          {/* ── AI 抽取 知识点区块 —— 头部"AI 抽取"徽章本身就是入口：点击展开切换/重抽面板 ── */}
-          {aiTopicsForMaterial.length > 0 && (
+          {/* ── AI 抽取 知识点区块 —— 头部"AI 抽取"徽章本身就是入口：点击展开切换/重抽面板
+              ⚠️ 即使当前还 0 个 AI 知识点也要显示这个面板，否则用户没有触发抽取的入口！
+              ── */}
+          {selectedMaterial && (
             <div style={{ marginBottom: 28 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
                 {/* 主徽章：可点击展开 dropdown */}
@@ -5682,8 +5695,25 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   )}
                 </div>
               )}
+              {/* 空态：0 个 AI 知识点时显式引导用户去触发抽取 */}
+              {aiTopicsForMaterial.length === 0 && (
+                <div style={{ padding: "24px 20px", textAlign: "center", border: "2px dashed #DDD6FE", borderRadius: 14, background: "#FAFAFF", marginTop: 10 }}>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>🤖</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#4338CA", marginBottom: 6 }}>本资料还没有 AI 抽取的知识点</div>
+                  <div style={{ fontSize: 12.5, color: "#6B7280", marginBottom: 12, lineHeight: 1.6 }}>
+                    点上面紫色的 <b>🤖 AI 抽取 ▾</b> 展开面板，选一家 AI（推荐先试 Cerebras 或 Gemini，免费档限额宽松）开始抽取。
+                  </div>
+                  <button
+                    onClick={() => setReExtractExpanded(true)}
+                    style={{ padding: "8px 18px", background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", border: "none", borderRadius: 8, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                  >
+                    🤖 展开 AI 抽取面板
+                  </button>
+                </div>
+              )}
+
               {/* 分类标签过滤器 */}
-              {(() => {
+              {aiTopicsForMaterial.length > 0 && (() => {
                 const CATEGORY_META = {
                   "核心概念": { color: "#4F46E5", bg: "#EEF2FF" },
                   "定理性质": { color: "#0EA5E9", bg: "#F0F9FF" },
@@ -5709,8 +5739,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   </div>
                 );
               })()}
-              {/* 按分类分组显示知识点 */}
-              {(() => {
+              {/* 按分类分组显示知识点 —— 0 个时跳过，避免空 IIFE 占空间 */}
+              {aiTopicsForMaterial.length > 0 && (() => {
                 const CATEGORY_META = {
                   "核心概念": { color: "#4F46E5", bg: "#EEF2FF", icon: "📌" },
                   "定理性质": { color: "#0EA5E9", bg: "#F0F9FF", icon: "📐" },
