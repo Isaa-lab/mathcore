@@ -150,6 +150,9 @@ D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条�
   ]
 }`;
 
+  // 跟踪上一次失败的具体原因，最终若全军覆没就抬给前端（替代万能"AI 调用失败"）
+  let lastFailure = null; // { provider, model, status, body }
+
   // ── OpenAI-compatible helper (DeepSeek / Kimi / Custom) ────────────────────
   const callOpenAICompat = async (baseUrl, key, model) => {
     try {
@@ -172,9 +175,33 @@ D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条�
       }
       const err = await r.text();
       console.error(`OpenAI-compat(${model}) HTTP ${r.status}:`, err.slice(0, 200));
+      lastFailure = { provider: baseUrl, model, status: r.status, body: err.slice(0, 400) };
+      // ── 429 自动退避 1 次：Groq / SiliconFlow 等免费档很容易并发把 TPM 打爆，
+      // 等 4-8 秒再试一次往往就过去了。retry-after 头里有 hint 就用它。
+      if (r.status === 429) {
+        const retryAfter = parseInt(r.headers.get("retry-after") || "0", 10);
+        const waitMs = Math.min(8000, Math.max(2000, (retryAfter || 4) * 1000));
+        await new Promise(rsv => setTimeout(rsv, waitMs));
+        try {
+          const r2 = await fetch(`${baseUrl}/chat/completions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+            body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], temperature: 0.3, max_tokens: 4096 }),
+          });
+          if (r2.ok) {
+            const d2 = await r2.json();
+            return d2?.choices?.[0]?.message?.content || "";
+          }
+          const err2 = await r2.text();
+          lastFailure = { provider: baseUrl, model, status: r2.status, body: `(after 429 retry) ${err2.slice(0, 300)}` };
+        } catch (e2) {
+          lastFailure = { provider: baseUrl, model, status: 0, body: `(after 429 retry) ${e2?.message || "exception"}` };
+        }
+      }
       return null;
     } catch (e) {
       console.error(`OpenAI-compat(${model}) exception:`, e.message);
+      lastFailure = { provider: baseUrl, model, status: 0, body: e?.message || "fetch exception" };
       return null;
     }
   };
@@ -200,12 +227,18 @@ D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条�
         if (t.length > 20) return t;
         return null;
       }
-      if (r.status === 429) { quotaExceeded = true; return null; }
+      if (r.status === 429) {
+        quotaExceeded = true;
+        lastFailure = { provider: "gemini", model, status: 429, body: "Gemini quota exceeded" };
+        return null;
+      }
       const err = await r.text();
       console.error(`Gemini(${model}) HTTP ${r.status}:`, err.slice(0, 200));
+      lastFailure = { provider: "gemini", model, status: r.status, body: err.slice(0, 400) };
       return null;
     } catch (e) {
       console.error(`Gemini(${model}) exception:`, e.message);
+      lastFailure = { provider: "gemini", model, status: 0, body: e?.message || "fetch exception" };
       return null;
     }
   };
@@ -341,10 +374,34 @@ D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条�
       return res.status(429).json({
         error: "QUOTA_EXCEEDED",
         message: "Gemini API 每分钟配额已用完，请等待 1 分钟后重新上传/补题。或在首页「AI 设置」换用 DeepSeek / Kimi 等其他 API。",
+        lastFailure,
+      });
+    }
+    // 把真实失败原因抬给前端，替代万能"AI 调用失败"误导文案
+    if (lastFailure) {
+      const pName = (lastFailure.provider || "").includes("groq") ? "Groq"
+        : (lastFailure.provider || "").includes("siliconflow") ? "SiliconFlow"
+        : (lastFailure.provider || "").includes("deepseek") ? "DeepSeek"
+        : (lastFailure.provider || "").includes("moonshot") ? "Kimi"
+        : (lastFailure.provider || "").includes("zhipu") || (lastFailure.provider || "").includes("bigmodel") ? "智谱"
+        : (lastFailure.provider || "").includes("openrouter") ? "OpenRouter"
+        : (lastFailure.provider || "").includes("cerebras") ? "Cerebras"
+        : (lastFailure.provider === "gemini" ? "Gemini" : (lastFailure.provider || "AI"));
+      let hint = "";
+      if (lastFailure.status === 429) hint = `${pName} 触发限流（TPM/RPM 配额满）。免费档很容易并发把限额打爆——等 30-60 秒再试，或在「AI 设置」换一家 provider。`;
+      else if (lastFailure.status === 401 || lastFailure.status === 403) hint = `${pName} Key 无效或权限不够。去「AI 设置」点 🔍 测试 验证。`;
+      else if (lastFailure.status === 400) hint = `${pName} 拒绝了请求（HTTP 400）。可能是模型名变了或文档超长。`;
+      else if (lastFailure.status >= 500) hint = `${pName} 服务器自己挂了（HTTP ${lastFailure.status}），稍后再试。`;
+      else if (lastFailure.status === 0) hint = `请求没送达 ${pName}（网络问题）。`;
+      else hint = `${pName} 返回 HTTP ${lastFailure.status}。`;
+      return res.status(500).json({
+        error: hint,
+        lastFailure,
+        diag: `model=${lastFailure.model} status=${lastFailure.status}`,
       });
     }
     return res.status(500).json({
-      error: "AI 调用失败。请在首页「AI 设置」配置你的 API Key（支持 DeepSeek / Kimi / Gemini）。",
+      error: "没有任何一家 AI 被尝试调用。可能是 forceProvider 指定的 provider 没配 Key（既没填用户 Key，server 端也没设环境变量）。",
     });
   }
 

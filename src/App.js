@@ -1868,7 +1868,12 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
     // 单 chunk 时一样工作；4 个 chunk 时收益最大。
     report(35, `AI 抽取知识点（共 ${chunks.length} 段并行）…`);
     let completedChunks = 0;
+    // 错峰启动：每个 chunk 比上一个晚 800ms 出发，避免 4 个请求一秒内全打到同一 provider
+    // 触发 TPM 限流（Groq 免费档 ~6000 TPM，单个请求就 ~5000 token，4 个并发必爆 429）。
+    // 错峰后总时长 ≈ 单 chunk 时长 + (chunks-1) * 0.8s，比纯并行慢一点点，但显著提高成功率。
+    const STAGGER_MS = 800;
     const chunkResults = await Promise.all(chunks.map(async (chunk, idx) => {
+      if (idx > 0) await new Promise(r => setTimeout(r, idx * STAGGER_MS));
       const refs = findChunkRefContext(chunk, refDefs);
       // 并行模式下每块都按 perChunk；最后总量裁切到 genCount，不再依赖动态 remaining
       const askCount = perChunk;
@@ -5384,18 +5389,13 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   // 设计意图：让用户对比同一份资料在不同 AI 眼里的"知识点骨架"——这是免费多 AI 抽取的核心价值
   const triggerReExtract = async (provider) => {
     if (!selectedMaterial?.id) return;
-    // 语义："各 AI 独立保留"——只删除本资料下"同一 provider"的旧批次，避免同一 AI 越点越多
-    // 但不动其他 AI 抽的（智谱抽的不会因为你点 Groq 就消失）。
     setReExtractStatus({ provider, status: "running", msg: `正在用 ${provider} 重抽（约 10-25 秒）…` });
+    // ⚠️ 关键：不再 "先删后抽"——之前的实现是抽 AI 之前就把旧知识点删了，
+    // 一旦 AI 抽取失败（429 / Key 撤销 / 服务挂了），旧知识点也被一并清空。
+    // 改成 "先抽新的、用 cutoff 时间戳标记"，全部成功后再删除 cutoff 之前的同 provider 旧条目。
+    // 这样失败时旧的还在；成功时新旧切换是原子的。
+    const cutoffISO = new Date().toISOString();
     try {
-      // 只清同一 provider 的历史，让 tab 切换能保留多 AI 对照
-      try {
-        await supabase.from("material_topics")
-          .delete()
-          .eq("material_id", selectedMaterial.id)
-          .eq("provider", provider);
-      } catch { /* provider 列未建出来 / RLS 时静默；旧数据可能会重复，但不影响功能 */ }
-
       const { data: matRow, error: matErr } = await supabase
         .from("materials")
         .select("id,title,course,chapter,description,file_name,file_data")
@@ -5420,8 +5420,16 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         },
       });
       if (result?.apiQuotaExceeded) {
-        setReExtractStatus({ provider, status: "error", msg: `⚠️ ${provider} 配额用尽。过 1 分钟再试，或换一个 provider。` });
+        setReExtractStatus({ provider, status: "error", msg: `⚠️ ${provider} 配额用尽。过 1 分钟再试，或换一个 provider。旧知识点没动。` });
       } else if ((result?.topicsLinked || 0) > 0) {
+        // ✅ 新批次落库成功 —— 现在才安全地删除 cutoffISO 之前的同 provider 旧条目
+        try {
+          await supabase.from("material_topics")
+            .delete()
+            .eq("material_id", selectedMaterial.id)
+            .eq("provider", provider)
+            .lt("created_at", cutoffISO);
+        } catch { /* provider 列没建出来时静默 */ }
         setReExtractStatus({ provider, status: "done", msg: `✅ ${provider} 抽到 ${result.topicsLinked} 个知识点。在上方 tab 点 "${provider}" 查看。` });
         await reloadKnowledge();
         setProviderFilter(provider);
