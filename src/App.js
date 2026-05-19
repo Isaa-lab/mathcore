@@ -6403,39 +6403,34 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     try {
       // ⚠️ 后端以 { question: chatQuestion } 解构 —— 必须用 question 作为 key，
       // 否则 isChatMode 为 false，整个请求会被误当成"出题"任务处理
-      const res = await fetch("/api/generate", {
+      const requestBody = JSON.stringify({
+        mode: "socratic",
+        question: text,
+        conversationHistory: history,
+        vizIntent: { wantsViz: !!intent.wantsViz, reason: intent.reason },
+        dialogueMode: dialogue.mode,
+        dialogueModeReason: dialogue.reason,
+        quizState,
+        questionContext: {
+          stem: q.question,
+          options: q.options || null,
+          correctAnswer: q.answer,
+          userSelection: selected !== null ? (q.options ? letters[selected] : (selected === 0 ? "正确" : "错误")) : null,
+          isCorrect: !isWrongAnswered && answered,
+          misconception: misconceptionForChoice || null,
+          knowledgePoints: Array.isArray(q.knowledgePoints) ? q.knowledgePoints : null,
+        },
+        materialTitle: "数学题目复盘",
+        ...buildAIBody(),
+      });
+
+      // FUNCTION_INVOCATION_FAILED 是 Vercel 函数进程崩溃（OOM / cold-start 抖动 / 上游瞬时异常），
+      // 绝大多数情况下重试一次就好。沉默重试 1 次，第二次还挂才弹错误给用户。
+      let res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "socratic",
-          question: text,
-          conversationHistory: history,
-          // 可视化意图信号：后端据此切换 prompt 分流（默认禁止 [VIZ:...]）+ 做兜底剥离
-          vizIntent: {
-            wantsViz: !!intent.wantsViz,
-            reason: intent.reason,
-          },
-          // 对话模式：socratic(引导式) vs exposition(讲解式)
-          // 后端据此切换 system prompt，避免答对场景被连环反问
-          dialogueMode: dialogue.mode,
-          dialogueModeReason: dialogue.reason,
-          quizState,
-          questionContext: {
-            stem: q.question,
-            options: q.options || null,
-            correctAnswer: q.answer,
-            userSelection: selected !== null ? (q.options ? letters[selected] : (selected === 0 ? "正确" : "错误")) : null,
-            isCorrect: !isWrongAnswered && answered,
-            misconception: misconceptionForChoice || null,
-            knowledgePoints: Array.isArray(q.knowledgePoints) ? q.knowledgePoints : null,
-          },
-          materialTitle: "数学题目复盘",
-          // ⚠️ 以前这里漏了 user credentials —— 导致 Vercel 上没配服务器 Key 时
-          // 请求必然 500。现在统一走 buildAIBody()。
-          ...buildAIBody(),
-        })
+        body: requestBody,
       });
-      // 关键：如果后端超时返回 HTML，res.json() 会抛；我们要把 HTTP 状态 + 响应片段都抓住
       let data = {};
       let rawBodySnippet = "";
       try {
@@ -6443,6 +6438,30 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         rawBodySnippet = txt.slice(0, 400);
         try { data = JSON.parse(txt); } catch { data = {}; }
       } catch (e) { /* 读不到 body */ }
+      const isFunctionCrash = !res.ok
+        && /FUNCTION_INVOCATION_FAILED|A server error has occurred/i.test(rawBodySnippet)
+        && res.status >= 500;
+      if (isFunctionCrash) {
+        // 在 placeholder 上挂一个 "🔁 自动重试中..." 提示，让用户感知到不是卡死
+        updateMsg({ content: "⏳ Vercel 函数瞬时崩溃，自动重试中…", isStreaming: true });
+        await new Promise(rsv => setTimeout(rsv, 1200));
+        try {
+          res = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: requestBody,
+          });
+          data = {};
+          rawBodySnippet = "";
+          try {
+            const txt = await res.text();
+            rawBodySnippet = txt.slice(0, 400);
+            try { data = JSON.parse(txt); } catch { data = {}; }
+          } catch (e) { /* 读不到 body */ }
+        } catch (e) {
+          // 重试 fetch 本身炸了：保留第一次的 res/data，往下走错误路径
+        }
+      }
       if (!res.ok || data.error) {
         // 后端给的 error 文本本身就是用户可读的（"暂无可用 AI 服务..." 这类），
         // 直接透出来，别再被"抱歉卡住了"一层吞掉。根据关键词推断具体错因 + 给出口。
@@ -12670,11 +12689,26 @@ function splitQuizChatBlocks(text) {
 function classifyChatError(rawErr, httpStatus) {
   const err = String(rawErr || "").toLowerCase();
   const status = Number(httpStatus) || 0;
-  // 0) Vercel lambda 崩溃（handler 抛了未捕获异常，或函数超时返回 HTML）
-  if (/function_invocation_failed|a server error has occurred|handler_crash/i.test(rawErr)) {
+  // 0) Vercel lambda 崩溃（函数进程被强杀 / 上游基础设施抖动 / OOM）
+  //    注意：客户端已经做了一次沉默重试，到这里说明两次都挂了——通常是 Vercel 实例本身有问题。
+  if (/function_invocation_failed|a server error has occurred/i.test(rawErr)) {
     return {
       category: "backend_crash",
-      message: "后端崩溃了（不是 AI 的锅，是我们的代码出问题）。已经抓到现场，请把下面「诊断详情」里的内容发给我。",
+      message: "Vercel 函数连续两次崩溃。这通常是托管层瞬时故障（冷启动失败 / OOM / 区域抖动），不是代码 bug。建议：① 等 30 秒再点重试；② 换个浏览器或网络；③ 如果一直这样，把诊断详情发我。",
+    };
+  }
+  // 0b) 我们自己的 handler 抓到的崩溃（catch 兜底返回的 JSON，有 stack）
+  if (/handler_crash/i.test(rawErr)) {
+    return {
+      category: "backend_crash",
+      message: "后端代码捕获到一个异常（已被兜底接住，但说明哪里需要修）。请把下面「诊断详情」里的 stack 发给我。",
+    };
+  }
+  // 0c) Watchdog 触发（57s 接近 Vercel maxDuration 60s 才会触发）
+  if (/watchdog_timeout/i.test(rawErr)) {
+    return {
+      category: "timeout",
+      message: "请求处理超过 57 秒被强制结束。这次可能 AI 响应特别慢，换个 provider（Gemini / Cerebras 通常较快）再试。",
     };
   }
   // 1) 无 Key / Key 失效

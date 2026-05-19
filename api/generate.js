@@ -46,29 +46,79 @@ function stripVizMarkers(text) {
 // ── 顶层 try/catch 守卫 ────────────────────────────────────────────────────
 // 关键：任何同步/异步异常都必须返回合法 JSON，绝不能让 Vercel 返回 HTML
 // ("FUNCTION_INVOCATION_FAILED") —— 那会让前端完全丢失定位信息。
+//
+// 全局兜底：捕获事件循环里逃逸出 await 之外的 unhandledRejection / uncaughtException，
+// 它们正是 FUNCTION_INVOCATION_FAILED 的最常见来源（fire-and-forget 的 .then / setTimeout 里抛错）。
+// process 只注册一次（多次注册会报 MaxListenersExceededWarning）。
+if (typeof process !== "undefined" && !process.__mc_generate_guards_installed) {
+  process.__mc_generate_guards_installed = true;
+  process.on("unhandledRejection", (reason) => {
+    console.error("[api/generate] unhandledRejection:", reason && reason.message ? reason.message : reason);
+  });
+  process.on("uncaughtException", (err) => {
+    console.error("[api/generate] uncaughtException:", err && err.message ? err.message : err);
+  });
+}
+
 export default async function handler(req, res) {
+  // 安全网：如果运行到一半 Vercel 即将超时，至少先把 headers 写一个 ack，
+  // 避免 abort 时连个 JSON 都没。一旦正式返回会覆盖这个。
+  const watchdog = setTimeout(() => {
+    if (!res.headersSent) {
+      try {
+        res.status(504).json({
+          error: "请求处理超过预算（57s），通常是某家 AI 响应特别慢。请重试或换一家 provider。",
+          diag: "watchdog_timeout",
+        });
+      } catch { /* headers already sent */ }
+    }
+  }, 57000); // Vercel maxDuration 60s，提前 3s 触发兜底
   try {
     return await runHandler(req, res);
   } catch (err) {
     const msg = err && err.message ? String(err.message) : "unknown";
     const stack = err && err.stack ? String(err.stack).slice(0, 400) : "";
     console.error("[api/generate] FATAL:", msg, stack);
-    try {
-      return res.status(500).json({
-        error: `后端崩溃: ${msg}`,
-        diag: `handler_crash`,
-        stack: stack,
-      });
-    } catch {
-      return; // headers already sent
+    if (!res.headersSent) {
+      try {
+        return res.status(500).json({
+          error: `后端崩溃: ${msg}`,
+          diag: `handler_crash`,
+          stack: stack,
+        });
+      } catch {
+        return; // headers already sent
+      }
     }
+  } finally {
+    clearTimeout(watchdog);
   }
 }
 
 async function runHandler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
+  // ── 防御性输入校验 ──
+  // 这些早期 return 是为了避免畸形输入往下传，让深处的字符串模板 / regex / JSON.parse 出乎意料地 crash。
+  // 这些 crash 不会被外层 try/catch 兜（事件循环里的 promise rejection / 同步 throw 在 await 之外的等），
+  // 直接造成 Vercel FUNCTION_INVOCATION_FAILED。
   const body = req.body || {};
+  if (typeof body !== "object" || Array.isArray(body)) {
+    return res.status(400).json({ error: "请求体必须是 JSON 对象" });
+  }
+  // chat 模式下空 question 会让下游 messages 数组没有 user 消息，部分 provider 直接 500
+  if ((body.mode === "socratic" || body.mode === "chat" || body.mode === "tutor") && !String(body.question || "").trim()) {
+    return res.status(400).json({ error: "chat 模式下 question 字段不能为空" });
+  }
+  // conversationHistory 必须是数组（如果给了），否则下游 .slice(-12).map(...) 会 crash
+  if (body.conversationHistory != null && !Array.isArray(body.conversationHistory)) {
+    return res.status(400).json({ error: "conversationHistory 必须是数组" });
+  }
+  // 超长 conversationHistory 会让 prompt 爆到 100KB+，触发 OOM
+  if (Array.isArray(body.conversationHistory) && body.conversationHistory.length > 40) {
+    body.conversationHistory = body.conversationHistory.slice(-40);
+  }
+
   const {
     chapter, type, count,
     mode, question: chatQuestion, materialTitle, materialContext,
