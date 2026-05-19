@@ -149,11 +149,23 @@ function parseChapterLabel(label = "") {
 
 function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete }) {
   const [examDate, setExamDate] = useState(initial?.exam_date || "");
-  const [subject, setSubject] = useState(initial?.subject || "");
   const [selectedChapters, setSelectedChapters] = useState(new Set(initial?.chapters_in_scope || []));
   const [dailyMinutes, setDailyMinutes] = useState(initial?.daily_minutes_target || 60);
   const [errors, setErrors] = useState({});
   const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+
+  // 科目名称从已选章节自动推导：单学科 → 学科名；多学科 → "数值分析+线性代数"；空 → 空
+  const derivedSubject = useMemo(() => {
+    if (selectedChapters.size === 0) return "";
+    const subjectsSet = new Set();
+    availableChapters.forEach((ch) => {
+      if (selectedChapters.has(ch.slug)) {
+        const parsed = parseChapterLabel(ch.label);
+        if (parsed.subject && parsed.subject !== "其他") subjectsSet.add(parsed.subject);
+      }
+    });
+    return Array.from(subjectsSet).join("+");
+  }, [selectedChapters, availableChapters]);
 
   const todayKey = planDayKey(new Date());
 
@@ -213,7 +225,6 @@ function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete 
     const e = {};
     if (!examDate) e.examDate = "请选择考试日期";
     else if (examDate < todayKey) e.examDate = "考试日期不能早于今天";
-    if (!subject.trim()) e.subject = "请填写科目";
     if (selectedChapters.size === 0) e.chapters = "至少选一个章节";
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -222,7 +233,8 @@ function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete 
     if (!validate()) return;
     onSave({
       exam_date: examDate,
-      subject: subject.trim(),
+      // 科目从范围自动推导：不需要用户手动写
+      subject: derivedSubject || "考试",
       chapters_in_scope: Array.from(selectedChapters),
       daily_minutes_target: dailyMinutes,
     });
@@ -251,7 +263,7 @@ function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete 
         </header>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px" }}>
-          {/* 日期 + 科目 */}
+          {/* 日期 + 科目（自动） */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
             <label style={{ display: "block" }}>
               <span style={fieldLabel}>📅 考试日期</span>
@@ -259,12 +271,12 @@ function ExamSetupModal({ availableChapters, initial, onSave, onClose, onDelete 
                 style={{ ...fieldInput, borderColor: errors.examDate ? "#EF4444" : "#E5E7EB" }} />
               {errors.examDate && <div style={errMsg}>{errors.examDate}</div>}
             </label>
-            <label style={{ display: "block" }}>
-              <span style={fieldLabel}>📚 科目名称</span>
-              <input type="text" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="如：数值分析期末"
-                style={{ ...fieldInput, borderColor: errors.subject ? "#EF4444" : "#E5E7EB" }} />
-              {errors.subject && <div style={errMsg}>{errors.subject}</div>}
-            </label>
+            <div>
+              <span style={fieldLabel}>📚 科目名称 <span style={{ color: "#9CA3AF", fontWeight: 500, marginLeft: 4 }}>（自动）</span></span>
+              <div style={{ ...fieldInput, background: "#F9FAFB", color: derivedSubject ? "#111827" : "#9CA3AF", fontWeight: 600, display: "flex", alignItems: "center", minHeight: 38, padding: "8px 12px" }}>
+                {derivedSubject || "请先在下方选择章节，科目会从范围自动得出"}
+              </div>
+            </div>
           </div>
 
           {/* 章节 —— 按学科分组，列表式 disclosure row */}
@@ -650,12 +662,21 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
       };
     });
 
+    // 保留旧 diagnostic：考试范围变更后，旧的诊断报告仍然有参考价值；
+    // 但如果用户大幅改了 chapters_in_scope，提示一下需要重测
+    const prevScopeSet = new Set((oldPlan?.chapters_in_scope) || []);
+    const newScopeSet = new Set(values.chapters_in_scope);
+    const scopeChanged = prevScopeSet.size !== newScopeSet.size
+      || [...prevScopeSet].some((s) => !newScopeSet.has(s));
+    const preservedDiagnostic = oldPlan?.diagnostic && !scopeChanged ? oldPlan.diagnostic : null;
+
     storage.set("exam_plan", {
       exam_date: values.exam_date,
       subject: values.subject,
       chapters_in_scope: values.chapters_in_scope,
       daily_minutes_target: values.daily_minutes_target,
       daily_plans: merged,
+      diagnostic: preservedDiagnostic, // 范围未变则保留，变了清空让用户重测
       plan_generated_at: Date.now(),
       plan_version: 1,
     });
@@ -670,6 +691,35 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
     setSetupOpen(false);
     refresh();
   }
+
+  // ── 诊断测验：在正式复习开始前，让 AI 出 8 道题摸清学生水平 ──
+  // 触发后做完会写到 examPlan.diagnostic，再渲染报告卡片 + 复习建议
+  function startDiagnostic() {
+    if (!examPlan) return;
+    const scope = Array.isArray(examPlan.chapters_in_scope) ? examPlan.chapters_in_scope : [];
+    if (scope.length === 0) return;
+    // 标记进行中（不动 done 字段，做完才覆盖）
+    const next = { ...examPlan, diagnostic: { ...(examPlan.diagnostic || {}), status: "in_progress", started_at: Date.now() } };
+    storage.set("exam_plan", next);
+    if (onAutoStartQuiz) {
+      onAutoStartQuiz({
+        source: "diagnostic",
+        chapters: scope,
+        count: 8,
+        nodeLabel: "🎯 水平诊断测验",
+      });
+    }
+    setRightPanelMode("quiz");
+    refresh();
+  }
+
+  // 监听诊断完成事件 → 刷新 UI 渲染报告
+  useEffect(() => {
+    const onDone = () => refresh();
+    window.addEventListener("mc:diagnostic-done", onDone);
+    return () => window.removeEventListener("mc:diagnostic-done", onDone);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function handleStartTaskInternal(task) {
     if (!task) return;
@@ -859,6 +909,122 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
       </div>
 
       <div className="premium-card" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRadius: 24 }}>
+        {/* ── 诊断测验 横幅 / 报告卡 —— 始终钉在右栏顶部 ─────────────────────── */}
+        {(() => {
+          if (!examPlan) return null;
+          const diag = examPlan.diagnostic;
+          // Case A: 还没做 / 正在做 → 引导用户开始
+          if (!diag || diag.status !== "done") {
+            return (
+              <div style={{ padding: "14px 24px 0" }}>
+                <div style={{
+                  background: "linear-gradient(135deg,#FEF3C7,#FFFBEB)", border: "1.5px solid #FCD34D",
+                  borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12,
+                }}>
+                  <div style={{ fontSize: 28, lineHeight: 1 }}>🎯</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 800, color: "#92400E", lineHeight: 1.35 }}>
+                      建议先做一次水平诊断
+                    </div>
+                    <div style={{ fontSize: 11.5, color: "#78350F", lineHeight: 1.5, marginTop: 2 }}>
+                      8 道题覆盖你的考试范围，做完会给出薄弱章节报告 + 量身定制的复习方案。
+                    </div>
+                  </div>
+                  <button
+                    onClick={startDiagnostic}
+                    disabled={!Array.isArray(examPlan.chapters_in_scope) || examPlan.chapters_in_scope.length === 0}
+                    style={{
+                      padding: "8px 14px", background: "#D97706", color: "#fff", border: "none",
+                      borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit",
+                      whiteSpace: "nowrap", boxShadow: "0 2px 6px rgba(217,119,6,0.35)",
+                    }}>
+                    {diag?.status === "in_progress" ? "继续诊断 →" : "🎯 开始诊断"}
+                  </button>
+                </div>
+              </div>
+            );
+          }
+          // Case B: 已完成 → 渲染报告 + 复习方案
+          const acc = diag.accuracy ?? 0;
+          const chapterEntries = Object.entries(diag.byChapter || {})
+            .map(([ch, s]) => ({ ch, ...s, rate: s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0 }))
+            .sort((a, b) => a.rate - b.rate); // 弱的排前面
+          const weakChs = chapterEntries.filter(c => c.rate < 60);
+          const okChs = chapterEntries.filter(c => c.rate >= 60 && c.rate < 80);
+          const strongChs = chapterEntries.filter(c => c.rate >= 80);
+          const abilityEntries = Object.entries(diag.byAbility || {})
+            .map(([ab, s]) => ({ ab, ...s, rate: s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0 }));
+          const abilityLabel = { concept: "概念", calc: "计算", proof: "证明", application: "应用" };
+          // 复习方案：依据诊断结果给出建议
+          let planText;
+          if (acc >= 80) planText = "整体掌握良好。建议每日 30% 时间巩固薄弱章节，70% 时间做错题精炼 + 模拟考。";
+          else if (acc >= 60) planText = "基础尚可但不稳。建议每日 50% 时间猛攻薄弱章节，30% 时间错题重做，20% 时间小范围模考。";
+          else planText = "基础需要加强。建议每日 70% 时间从薄弱章节的概念 + 例题入手，30% 时间针对性练题——前两周先不做模考，避免打击信心。";
+          return (
+            <div style={{ padding: "14px 24px 0" }}>
+              <div style={{
+                background: "linear-gradient(135deg,#ECFDF5,#F0FDF4)", border: "1.5px solid #86EFAC",
+                borderRadius: 12, padding: "14px 18px",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ fontSize: 26, lineHeight: 1 }}>📊</div>
+                    <div>
+                      <div style={{ fontSize: 13.5, fontWeight: 800, color: "#065F46" }}>水平诊断报告</div>
+                      <div style={{ fontSize: 11, color: "#047857", marginTop: 1 }}>{new Date(diag.completedAt).toLocaleString("zh-CN")}</div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 22, fontWeight: 900, color: acc >= 80 ? "#047857" : acc >= 60 ? "#D97706" : "#DC2626", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>{acc}%</div>
+                    <div style={{ fontSize: 10.5, color: "#6B7280", marginTop: 2 }}>{diag.score} / {diag.total} 题</div>
+                  </div>
+                  <button
+                    onClick={startDiagnostic}
+                    title="再做一次诊断（会覆盖现有报告）"
+                    style={{ padding: "5px 10px", background: "#fff", color: "#047857", border: "1px solid #86EFAC", borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                    🔁 重测
+                  </button>
+                </div>
+                {/* 章节分组：弱 / 中 / 强 */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                  {weakChs.length > 0 && (
+                    <div style={{ fontSize: 11.5, color: "#991B1B", lineHeight: 1.5 }}>
+                      <b>🔴 薄弱（建议重点复习）：</b>
+                      {weakChs.map(c => <span key={c.ch} style={{ marginLeft: 6 }}>{c.ch} <span style={{ opacity: 0.6 }}>{c.rate}%</span></span>)}
+                    </div>
+                  )}
+                  {okChs.length > 0 && (
+                    <div style={{ fontSize: 11.5, color: "#92400E", lineHeight: 1.5 }}>
+                      <b>🟡 待巩固：</b>
+                      {okChs.map(c => <span key={c.ch} style={{ marginLeft: 6 }}>{c.ch} <span style={{ opacity: 0.6 }}>{c.rate}%</span></span>)}
+                    </div>
+                  )}
+                  {strongChs.length > 0 && (
+                    <div style={{ fontSize: 11.5, color: "#065F46", lineHeight: 1.5 }}>
+                      <b>🟢 已掌握：</b>
+                      {strongChs.map(c => <span key={c.ch} style={{ marginLeft: 6 }}>{c.ch} <span style={{ opacity: 0.6 }}>{c.rate}%</span></span>)}
+                    </div>
+                  )}
+                </div>
+                {/* 能力维度 */}
+                {abilityEntries.length > 0 && (
+                  <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                    {abilityEntries.map(a => (
+                      <span key={a.ab} style={{ fontSize: 10.5, padding: "3px 8px", borderRadius: 999, background: a.rate >= 80 ? "#D1FAE5" : a.rate >= 60 ? "#FEF3C7" : "#FEE2E2", color: a.rate >= 80 ? "#065F46" : a.rate >= 60 ? "#92400E" : "#991B1B", fontWeight: 700 }}>
+                        {abilityLabel[a.ab] || a.ab} {a.rate}%
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {/* 复习方案 */}
+                <div style={{ fontSize: 11.5, color: "#065F46", padding: "8px 10px", background: "#fff", border: "1px dashed #86EFAC", borderRadius: 8, lineHeight: 1.55 }}>
+                  <b>📋 建议复习方案：</b>{planText}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         <AnimatePresence mode="wait">
           <motion.div key={rightPanelMode}
             initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}

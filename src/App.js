@@ -6703,6 +6703,39 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         localStorage.setItem("mc_sessions", JSON.stringify(sessions.slice(-20)));
         if (score === displayQ.length) localStorage.setItem("mc_had_perfect", "true");
       } catch {}
+      // ── 诊断测验：完成时按章节/能力维度汇总，写到 exam_plan.diagnostic 让冲刺页生成报告 ──
+      if (autoStartIntent?.source === "diagnostic") {
+        try {
+          const byChapter = {};   // { chapter: { total, correct } }
+          const byAbility = {};   // { ability: { total, correct } }
+          displayQ.forEach((qq, idx) => {
+            const rec = answerRecords[idx];
+            if (!rec) return;
+            const ch = qq.chapter || "未分类";
+            byChapter[ch] = byChapter[ch] || { total: 0, correct: 0 };
+            byChapter[ch].total += 1;
+            if (rec.correct) byChapter[ch].correct += 1;
+            const ab = QUIZ_abilityOf(qq);
+            byAbility[ab] = byAbility[ab] || { total: 0, correct: 0 };
+            byAbility[ab].total += 1;
+            if (rec.correct) byAbility[ab].correct += 1;
+          });
+          const plan = JSON.parse(localStorage.getItem("exam_plan") || "null");
+          if (plan) {
+            plan.diagnostic = {
+              status: "done",
+              score,
+              total: displayQ.length,
+              accuracy: displayQ.length ? Math.round((score / displayQ.length) * 100) : 0,
+              byChapter, byAbility,
+              completedAt: Date.now(),
+            };
+            localStorage.setItem("exam_plan", JSON.stringify(plan));
+            // 通知 SprintWorkspace 刷新展示报告
+            window.dispatchEvent(new CustomEvent("mc:diagnostic-done", { detail: plan.diagnostic }));
+          }
+        } catch (e) { /* SSR-safe */ }
+      }
       return;
     }
     jumpTo(current + 1);
