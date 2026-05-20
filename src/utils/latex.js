@@ -193,18 +193,31 @@ export function wrapBareSubscriptVars(s) {
 // 这里把 $A$ <op> $B$ 这种模式合并成 $A <op> B$，让运算符也用数学排版。
 export function mergeAdjacentMathBlocks(s) {
   if (!s || typeof s !== "string") return s;
-  let out = s;
-  for (let i = 0; i < 4; i++) {
-    const before = out;
-    // $A$ <空格?> <运算符> <空格?> $B$  →  $A <op> B$
-    // 运算符限定 = + - * / < > ≤ ≥ ≠ ≈ → ←；不吞中文标点
-    out = out.replace(
-      /\$([^$\n]+?)\$\s*([=+\-*/<>≤≥≠≈→←])\s*\$([^$\n]+?)\$/g,
-      (m, a, op, b) => `$${a} ${op} ${b}$`
-    );
-    if (out === before) break;
+  // 先把 $$..$$ 块隔离出去（不能被合并进 $..$），用 segments 数组分段处理。
+  // segments 偶数下标 = 普通文本（可合并区），奇数下标 = $$..$$ 块（不动）
+  const segments = s.split(/(\$\$[\s\S]+?\$\$)/g);
+  for (let si = 0; si < segments.length; si += 2) {
+    let seg = segments[si];
+    if (!seg || seg.indexOf("$") === -1) continue;
+    for (let pass = 0; pass < 6; pass++) {
+      const before = seg;
+      // $A$ <math-friendly mid> $B$  →  $A <mid> B$
+      // mid 允许：字母、数字、空格、运算符、括号、逗号、单引号、tab
+      // mid 禁止：换行、中文（一-鿿）、中文标点（。，；：！？「」『』 等）、英文句号 .
+      //   —— 句号/换行/中文都是句子边界，跨越就会误把不相关的两段公式合并掉
+      // 这样能覆盖：
+      //   $x_0$ + $\frac{...}$                    →  $x_0 + \frac{...}$           (旧规则)
+      //   $k_2$ = f($x_0 + \frac{h}{2}, ...)$    →  $k_2 = f(x_0 + \frac{h}{2}, ...)$  (新增)
+      //   $a_{ij}$ = $a_{ij}$ - $\frac{...}$    →  $a_{ij} = a_{ij} - \frac{...}$
+      seg = seg.replace(
+        /\$([^$\n]+?)\$([^$\n.一-鿿。，；：！？「」『』《》、·]*?)\$([^$\n]+?)\$/g,
+        (m, a, mid, b) => `$${a}${mid}${b}$`
+      );
+      if (seg === before) break;
+    }
+    segments[si] = seg;
   }
-  return out;
+  return segments.join("");
 }
 
 // ── 4) 一站式入口：给渲染器前调用 ───────────────────────────────────────
