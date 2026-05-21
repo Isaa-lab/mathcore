@@ -698,9 +698,12 @@ function autoMarkTopics(text, context) {
 
 function renderMarkdown(text, context) {
   if (!text) return null;
-  // 2A：先把已知 topic 名字自动包成 [[X]]（兜底 AI 没包的情况）
-  const marked = autoMarkTopics(text, context);
-  const cleaned = preprocessLaTeX(marked);
+  // ⚠️ 顺序：先跑 LaTeX 修复链（preprocessLaTeX），再 autoMarkTopics 加 [[X]]。
+  // 反过来会被 mergeAdjacentMathBlocks 等 rescuer 把 [[X]] 标记吸进 $..$ 里。
+  // 后续逻辑（extractMacros、$$ 行合并等）继续用 cleaned 名字（兼容旧代码），
+  // 但实际值是 已加 chip 标记的 marked。
+  const cleanedRaw = preprocessLaTeX(text);
+  const cleaned = autoMarkTopics(cleanedRaw, context);
   const { out: prepared0, varBlocks, vizBlocks, graphRefs } = extractMacros(cleaned);
   const prepared = prepared0
     .replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, "")
