@@ -6,6 +6,7 @@ import { useMathStore } from "./store/useMathStore";
 import QuizPageView from "./pages/QuizPage";
 import MaterialChatPageView, { DynamicVizCard, normalizeVizIntent, repairVizJson } from "./pages/MaterialChatPage";
 import ConceptGraphCard from "./components/ConceptGraphCard";
+import AIProgressBar, { useSyntheticProgress } from "./components/AIProgressBar";
 import InteractiveMathChart from "./components/InteractiveMathChart";
 import StudyWorkspace from "./layouts/StudyWorkspace";
 import SprintWorkspace from "./layouts/SprintWorkspace";
@@ -5215,6 +5216,8 @@ function HomePage({ setPage, profile, onEnterMaterial }) {
 // 顶部条带颜色 = 出此 topic 的 AI 主色（GPT/Groq/Gemini 等）
 function AITopicDetailModal({ state, providerMeta, onClose, onPractice }) {
   const { topic, loading, data, error } = state || {};
+  // 单次详情生成预期 ~12s（4 段内容 + LaTeX 公式）；合成进度让用户知道在跑
+  const detailProgress = useSyntheticProgress(!!loading, 12000);
   if (!topic) return null;
   const color = providerMeta?.color || "#7C3AED";
   const renderLatex = (latex) => {
@@ -5243,9 +5246,12 @@ function AITopicDetailModal({ state, providerMeta, onClose, onPractice }) {
 
         <div style={{ padding: "1.4rem 1.6rem 2rem" }}>
           {loading && (
-            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "20px 0", color: "#6B7280", fontSize: 13.5 }}>
-              <span style={{ width: 18, height: 18, borderRadius: "50%", border: `3px solid ${color}`, borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} />
-              {providerMeta?.label || "AI"} 正在为你生成详细讲解（约 5-15 秒）…
+            <div style={{ padding: "16px 4px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, color: "#6B7280", fontSize: 13 }}>
+                <span style={{ width: 16, height: 16, borderRadius: "50%", border: `2.5px solid ${color}`, borderRightColor: "transparent", animation: "spin 0.8s linear infinite" }} />
+                {providerMeta?.label || "AI"} 正在生成核心概念 / 公式 / 例题 / 思路…
+              </div>
+              <AIProgressBar label="拼装四件套（约 5-15 秒）" pct={detailProgress} color={color} />
             </div>
           )}
           {error && !loading && (
@@ -5856,6 +5862,25 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                     })}
                   </div>
 
+                  {/* 重抽进度条：从 reExtractStatus.msg 解析尾巴 "X%"，做一个明显的横条让用户看到推进 */}
+                  {reExtractStatus?.status === "running" && (() => {
+                    const pctMatch = String(reExtractStatus.msg || "").match(/(\d+)\s*%\s*$/);
+                    const pct = pctMatch ? parseInt(pctMatch[1], 10) : 0;
+                    const labelStripped = pctMatch
+                      ? String(reExtractStatus.msg || "").replace(/\s*\d+\s*%\s*$/, "").trim()
+                      : "抽取中…";
+                    const meta = PROVIDER_META[reExtractStatus.provider] || PROVIDER_META.unknown;
+                    return (
+                      <div style={{ marginTop: 12, padding: "10px 12px", background: "#FAFAFF", border: `1px solid ${meta.color}33`, borderRadius: 10 }}>
+                        <AIProgressBar
+                          label={`${meta.label} · ${labelStripped}`}
+                          pct={pct}
+                          color={meta.color}
+                        />
+                      </div>
+                    );
+                  })()}
+
                   {/* 内嵌 Key 输入：点 provider 时如果没 Key 就地弹出，无需跳到 avatar 菜单 */}
                   {inlineKeyProvider && (() => {
                     const meta = PROVIDER_META[inlineKeyProvider.provider] || PROVIDER_META.unknown;
@@ -6304,6 +6329,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   // bookExtractState: { status, problems[], error?, materialId? }
   const [bookExtractState, setBookExtractState] = useState({ status: "idle", problems: [] });
   const [bookExtractMaterial, setBookExtractMaterial] = useState(null);
+  // 单次 AI 调用合成进度条（视觉反馈，不代表真实完成度）
+  const ocrProgress = useSyntheticProgress(ocrState.status === "uploading", 10000);          // OCR 单页平均 ~10s
+  const bookExtractProgress = useSyntheticProgress(bookExtractState.status === "loading", 18000); // 教材题目提取 ~18s
   // 自动补题守卫（pool < 12 时后台触发一次）
   const autoTopUpTriedRef = useRef(false);
   const timerRef = useRef(null);
@@ -7504,6 +7532,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
               }}>
               {ocrState.status === "uploading" ? "识别中…" : "📷 选择文件"}
             </button>
+            {ocrState.status === "uploading" && (
+              <div style={{ marginTop: 8 }}>
+                <AIProgressBar label="AI 视觉识别中（公式+文字）" pct={ocrProgress} color="#6366F1" compact />
+              </div>
+            )}
             {ocrState.status === "error" && (
               <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, fontSize: 11.5, background: "#FEF2F2", color: "#991B1B", border: "1px solid #FECACA" }}>
                 ❌ {ocrState.error}
@@ -7564,6 +7597,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                 {bookExtractState.status === "loading" ? "提取中…" : "🔍 提取"}
               </button>
             </div>
+            {bookExtractState.status === "loading" && (
+              <div style={{ marginTop: 8 }}>
+                <AIProgressBar label="读 PDF + AI 摘录题目 + 生成解析" pct={bookExtractProgress} color="#8B5CF6" compact />
+              </div>
+            )}
             {bookExtractState.status === "error" && (
               <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, fontSize: 11.5, background: "#FEF2F2", color: "#991B1B", border: "1px solid #FECACA" }}>
                 ❌ {bookExtractState.error}
