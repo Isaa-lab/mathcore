@@ -2,9 +2,12 @@
 -- 设计 3B：单独建表，通过 topic_id 外键关联，避免 material_topics 表越来越胖。
 -- 在 Supabase SQL Editor 跑一次即可。
 
+-- ⚠️ material_topics.id 是 UUID（见 sql/learning_mvp_schema.sql 第 34 行），
+--    所以这里的 topic_id 也必须是 UUID 才能建外键。
+--    如果你之前误跑了 BIGINT 版本，先 DROP TABLE IF EXISTS topic_details; 再跑这个。
 CREATE TABLE IF NOT EXISTS topic_details (
-  id BIGSERIAL PRIMARY KEY,
-  topic_id BIGINT NOT NULL REFERENCES material_topics(id) ON DELETE CASCADE,
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  topic_id UUID NOT NULL REFERENCES public.material_topics(id) ON DELETE CASCADE,
   -- /api/topic-detail 输出的 5 个字段（schema 与 API 对齐）
   intro TEXT,              -- 150-220 字的解释（"是什么 + 为什么用 + 关键直觉"）
   formulas JSONB,          -- [{label, latex}, ...]  公式集合
