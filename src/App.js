@@ -5480,6 +5480,17 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const [providerFilter, setProviderFilter] = useState(null);
   // "用 XX 重抽"运行状态：{ provider, status: "running"|"done"|"error", msg }
   const [reExtractStatus, setReExtractStatus] = useState(null);
+  // 知识点页内嵌 Key 输入：用户点某个 provider 但没填 Key 且服务端也没配时，
+  // 在原地弹一个输入框让 ta 填，保存后立刻继续抽取——不用跳到顶部 avatar 设置。
+  // 形状：{ provider, input, keyVisible }  null = 关闭
+  const [inlineKeyProvider, setInlineKeyProvider] = useState(null);
+  // 平台 Key 状态（哪些 provider 服务端已配了），用于决定要不要弹用户 Key 输入
+  const [platformProviders, setPlatformProviders] = useState(() => getPlatformProviders());
+  useEffect(() => {
+    let alive = true;
+    fetchPlatformProviders().then((pp) => { if (alive && pp) setPlatformProviders(pp); });
+    return () => { alive = false; };
+  }, []);
   // "用 XX 重抽"按钮组是否展开（默认收起，避免占太多版面）
   const [reExtractExpanded, setReExtractExpanded] = useState(false);
 
@@ -5552,6 +5563,19 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   // 设计意图：让用户对比同一份资料在不同 AI 眼里的"知识点骨架"——这是免费多 AI 抽取的核心价值
   const triggerReExtract = async (provider) => {
     if (!selectedMaterial?.id) return;
+    // ── ⚡ 新：点 provider 时就地确认 Key 配置，不需要绕到 avatar 菜单 ──
+    // 三种情况：
+    //   1. 用户在 AI 设置里填了该 provider 的 Key → allKeys[provider] 非空 → 直接用
+    //   2. 用户没填，但平台已配 server Key → platformProviders[provider] = true → 直接用
+    //   3. 都没有 → 弹出内嵌 Key 输入框让用户当场填，填完自动重试
+    const currentAllKeys = _readAIKeys();
+    const userHasKey = currentAllKeys && currentAllKeys[provider] && String(currentAllKeys[provider]).trim().length > 8;
+    const serverHasKey = !!(platformProviders && platformProviders[provider]);
+    if (!userHasKey && !serverHasKey) {
+      setInlineKeyProvider({ provider, input: "", keyVisible: false });
+      return;
+    }
+    setInlineKeyProvider(null); // 关闭可能的内嵌输入
     setReExtractStatus({ provider, status: "running", msg: `正在用 ${provider} 重抽（约 10-25 秒）…` });
     // ⚠️ 关键：不再 "先删后抽"——之前的实现是抽 AI 之前就把旧知识点删了，
     // 一旦 AI 抽取失败（429 / Key 撤销 / 服务挂了），旧知识点也被一并清空。
@@ -5830,6 +5854,84 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                       );
                     })}
                   </div>
+
+                  {/* 内嵌 Key 输入：点 provider 时如果没 Key 就地弹出，无需跳到 avatar 菜单 */}
+                  {inlineKeyProvider && (() => {
+                    const meta = PROVIDER_META[inlineKeyProvider.provider] || PROVIDER_META.unknown;
+                    const linkMap = {
+                      groq: "https://console.groq.com/keys",
+                      gemini: "https://aistudio.google.com/apikey",
+                      deepseek: "https://platform.deepseek.com/api_keys",
+                      kimi: "https://platform.moonshot.cn/console/api-keys",
+                      anthropic: "https://console.anthropic.com/",
+                      openrouter: "https://openrouter.ai/keys",
+                      siliconflow: "https://cloud.siliconflow.cn/account/ak",
+                      zhipu: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
+                      cerebras: "https://cloud.cerebras.ai/platform",
+                    };
+                    const link = linkMap[inlineKeyProvider.provider];
+                    const placeholder = inlineKeyProvider.provider === "gemini" ? "AIzaSy..."
+                      : inlineKeyProvider.provider === "groq" ? "gsk_..." : "sk-...";
+                    return (
+                      <div style={{
+                        marginTop: 12, padding: "12px 14px",
+                        background: "#FAFAFF", border: `1.5px solid ${meta.color}55`, borderRadius: 10,
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                          <span style={{ width: 22, height: 22, borderRadius: 6, background: meta.color, color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800 }}>{meta.avatar}</span>
+                          <span style={{ fontSize: 12.5, fontWeight: 700, color: "#0F172A" }}>{meta.label} 还没有 Key</span>
+                          {link && (
+                            <a href={link} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: meta.color, textDecoration: "none", marginLeft: "auto" }}>免费获取 →</a>
+                          )}
+                        </div>
+                        <div style={{ position: "relative", marginBottom: 8 }}>
+                          <input
+                            type={inlineKeyProvider.keyVisible ? "text" : "password"}
+                            value={inlineKeyProvider.input}
+                            onChange={(e) => setInlineKeyProvider({ ...inlineKeyProvider, input: e.target.value })}
+                            placeholder={placeholder}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && inlineKeyProvider.input.trim().length > 8) {
+                                setAIKeyFor(inlineKeyProvider.provider, inlineKeyProvider.input.trim());
+                                const p = inlineKeyProvider.provider;
+                                setInlineKeyProvider(null);
+                                setTimeout(() => triggerReExtract(p), 50);
+                              } else if (e.key === "Escape") {
+                                setInlineKeyProvider(null);
+                              }
+                            }}
+                            autoFocus
+                            style={{ width: "100%", padding: "7px 32px 7px 10px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, fontFamily: "inherit", boxSizing: "border-box" }}
+                          />
+                          <button onClick={() => setInlineKeyProvider({ ...inlineKeyProvider, keyVisible: !inlineKeyProvider.keyVisible })}
+                            style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 0 }}>
+                            {inlineKeyProvider.keyVisible ? "🙈" : "👁"}
+                          </button>
+                        </div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button
+                            onClick={() => {
+                              const k = inlineKeyProvider.input.trim();
+                              if (k.length < 8) return;
+                              setAIKeyFor(inlineKeyProvider.provider, k);
+                              const p = inlineKeyProvider.provider;
+                              setInlineKeyProvider(null);
+                              // 微延时让 localStorage 写入先生效
+                              setTimeout(() => triggerReExtract(p), 50);
+                            }}
+                            disabled={inlineKeyProvider.input.trim().length < 8}
+                            style={{ padding: "6px 14px", background: inlineKeyProvider.input.trim().length < 8 ? "#D1D5DB" : meta.color, color: "#fff", border: "none", borderRadius: 7, cursor: inlineKeyProvider.input.trim().length < 8 ? "not-allowed" : "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>
+                            保存并抽取
+                          </button>
+                          <button onClick={() => setInlineKeyProvider(null)}
+                            style={{ padding: "6px 12px", background: "transparent", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 7, cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>
+                            取消
+                          </button>
+                        </div>
+                        <div style={{ marginTop: 6, fontSize: 10.5, color: "#9CA3AF" }}>Key 只保存在你本地浏览器，不上传服务器。Enter 保存，Esc 取消。</div>
+                      </div>
+                    );
+                  })()}
 
                   {/* 状态栏 */}
                   {reExtractStatus && reExtractStatus.status !== "running" && (
