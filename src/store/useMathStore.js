@@ -8,6 +8,10 @@ export const useMathStore = create((set) => ({
   labConfig: null,
   // AI 设置弹窗 —— 允许从任意子组件（例如 Quiz 页的错误气泡）直接唤出
   aiSettingsOpen: false,
+  // 知识点详情卡片：全局状态，让任何页面（KnowledgePage / MaterialChatPage 等）
+  // 都能调 openTopicCard 唤出同一个详情弹窗。形状：
+  //   { topic, loading, data, error }  —— 同 KnowledgePage 原 aiTopicDetail
+  topicCard: null,
   setWorkspaceMode: (mode) => set({ workspaceMode: mode }),
   setInteractiveParam: (key, value) =>
     set((state) => ({
@@ -20,5 +24,7 @@ export const useMathStore = create((set) => ({
   closeLab: () => set({ labOpen: false }),
   openAISettings: () => set({ aiSettingsOpen: true }),
   closeAISettings: () => set({ aiSettingsOpen: false }),
+  setTopicCard: (state) => set({ topicCard: state }),
+  closeTopicCard: () => set({ topicCard: null }),
 }));
 

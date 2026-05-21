@@ -1726,6 +1726,91 @@ const findChunkRefContext = (chunk, refDefs) => {
   return hits;
 };
 
+// ── 1A：彻底知识库构建 ──
+// 对刚抽到的每个 topic 调 /api/topic-detail，把公式/解释/例题/解题思路四件套塞进
+// topic_details 表。设计要点：
+//   1) 并发限制为 4：免费档 AI 普遍 6000 TPM，并发太多会 429
+//   2) 失败的 topic 不阻塞其他人，只在最后 log
+//   3) 表不存在时（用户没跑 sql/topic_details.sql）也不报错，只跳过持久化
+//   4) report() 把进度告诉外层 onProgress，让 UI 显示"构建知识库 5/22..."
+async function buildTopicDetailsBulk({ rows, materialContext, detectedProvider, report }) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  const total = rows.length;
+  const CONCURRENCY = 4;
+  let done = 0;
+  let dbDisabled = false; // 一旦发现 topic_details 表不存在就停止后续 DB 写入
+
+  const aiCfg = getAIConfig();
+  // 详情用同一 provider（保持一致性）；如果是 forced provider 也用那个
+  const preferProvider = detectedProvider && detectedProvider !== "legacy" && detectedProvider !== "unknown"
+    ? detectedProvider : aiCfg.provider;
+  const preferKey = aiCfg.allKeys?.[preferProvider] || aiCfg.key || "";
+
+  report && report(82, `构建知识库（0/${total}）…`);
+
+  const buildOne = async (row) => {
+    try {
+      const resp = await fetch("/api/topic-detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topicName: row.name,
+          summary: row.summary || "",
+          course: materialContext || "",
+          chapter: row.chapter || "",
+          materialContext: row.name,
+          preferProvider,
+          userProvider: preferProvider,
+          userKey: preferKey,
+          userCustomUrl: aiCfg.customUrl,
+        }),
+      });
+      const d = await resp.json();
+      if (d?.error && !d?.intro) {
+        console.warn(`[topic-detail] ${row.name}: ${d.error}`);
+        return;
+      }
+      if (dbDisabled) return; // 表挂了就只生成不入库
+      // upsert 到 topic_details
+      const payload = {
+        topic_id: row.id,
+        intro: d.intro || null,
+        formulas: Array.isArray(d.formulas) ? d.formulas : null,
+        steps: Array.isArray(d.steps) ? d.steps : null,
+        examples: Array.isArray(d.examples) ? d.examples : null,
+        viz_hint: d.viz_hint || null,
+        provider: (d.apiUsed || "").split("(")[0] || detectedProvider || null,
+        provider_model: null,
+      };
+      const { error: ue } = await supabase.from("topic_details").upsert(payload, { onConflict: "topic_id" });
+      if (ue) {
+        // 表不存在（42P01）— 用户还没跑 SQL 迁移；不再尝试后续，只跳过持久化
+        if (/relation .* does not exist|42P01/i.test(ue.message || "")) {
+          dbDisabled = true;
+          console.warn("[topic_details] table missing — run sql/topic_details.sql in Supabase. Knowledge base will fall back to live fetch.");
+        } else {
+          console.warn(`[topic_details] upsert failed for ${row.name}:`, ue.message);
+        }
+      }
+    } catch (e) {
+      console.warn(`[topic-detail] ${row.name} fetch error:`, e?.message);
+    } finally {
+      done += 1;
+      // 进度区间 82% → 98%（中间留 2% 给最后的 textDiag/return）
+      const pct = 82 + Math.round((done / total) * 16);
+      report && report(pct, `构建知识库（${done}/${total}）…`);
+    }
+  };
+
+  // 分批并发：每批 CONCURRENCY 个
+  for (let i = 0; i < rows.length; i += CONCURRENCY) {
+    const batch = rows.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(buildOne));
+    // 给免费 AI 喘口气，避免 TPM 持续打满
+    if (i + CONCURRENCY < rows.length) await new Promise((r) => setTimeout(r, 400));
+  }
+}
+
 const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvider = null, forceUserKey = null, onProgress = null }) => {
   // onProgress(percent: 0-100, label: string) —— 让 UI 实时显示阶段 + 数字进度
   const report = (pct, label) => { try { onProgress && onProgress(Math.max(0, Math.min(100, Math.round(pct))), label); } catch {} };
@@ -2099,20 +2184,25 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
       if (topicRowsWithProvider.length > 0) {
         // 三层 INSERT 降级：满 schema → 去掉 category → 再去掉 provider 字段。
         // 之前只有两层，且 base 也带 category，导致表里没 category 列时彻底失败。
+        // ✨ 用 .select() 拿回插入后的 id 数组，给详情构建用
         const stripCategory = (rows) => rows.map(({ category, ...rest }) => rest);
         const stripProvider = (rows) => rows.map(({ provider, provider_model, topic_group_id, ...rest }) => rest);
-        let { error: et } = await supabase.from("material_topics").insert(topicRowsWithProvider);
+        let insertResult = await supabase.from("material_topics").insert(topicRowsWithProvider).select("id,name,summary,chapter,provider");
+        let et = insertResult.error;
+        let insertedRows = insertResult.data || [];
         // 第 1 次失败：很可能是 category 列没有
         if (et && /column .* does not exist|category|provider/i.test(et.message || "")) {
           console.warn("[material_topics] insert failed once, retrying without category:", et.message);
-          const r2 = await supabase.from("material_topics").insert(stripCategory(topicRowsWithProvider));
-          et = r2.error;
+          insertResult = await supabase.from("material_topics").insert(stripCategory(topicRowsWithProvider)).select("id,name,summary,chapter,provider");
+          et = insertResult.error;
+          insertedRows = insertResult.data || [];
         }
         // 第 2 次失败：再去掉 provider 系列字段
         if (et && /column .* does not exist|provider/i.test(et.message || "")) {
           console.warn("[material_topics] insert failed twice, retrying minimal schema:", et.message);
-          const r3 = await supabase.from("material_topics").insert(stripProvider(stripCategory(topicRowsBase)));
-          et = r3.error;
+          insertResult = await supabase.from("material_topics").insert(stripProvider(stripCategory(topicRowsBase))).select("id,name,summary,chapter");
+          et = insertResult.error;
+          insertedRows = insertResult.data || [];
         }
         if (!et) {
           topicsLinked = topicRowsWithProvider.length;
@@ -2122,6 +2212,18 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
               detail: { materialId, count: topicRowsWithProvider.length, provider: detectedProvider },
             }));
           } catch { /* SSR-safe no-op */ }
+
+          // ── 1A：彻底知识库构建 —— 为每个新抽到的 topic 调 /api/topic-detail 填详情入库 ──
+          // 设计目标：每个知识点都有 公式 / 解释 / 例题 / 解题思路 四件套，存到 topic_details 表。
+          // 进度回调把"知识库构建 N/M"实时报给 UI，让用户知道还在跑。
+          if (insertedRows.length > 0) {
+            await buildTopicDetailsBulk({
+              rows: insertedRows,
+              materialContext: chapter,
+              detectedProvider,
+              report,
+            });
+          }
         } else {
           // Common causes: relation does not exist (42P01), column missing, RLS blocked.
           console.warn("[material_topics] insert failed:", et.message || et.code);
@@ -5255,6 +5357,23 @@ function AITopicDetailModal({ state, providerMeta, onClose, onPractice }) {
   );
 }
 
+// 每个 AI provider 的视觉元数据 —— 头像、主色、浅底色。提升到模块顶层让
+// KnowledgePage、MaterialChatPage、GlobalTopicCardPortal 等共用同一套配色。
+const KP_PROVIDER_META = {
+  gemini:      { label: "Gemini",     avatar: "✦", color: "#4285F4", bg: "#EFF6FF" },
+  groq:        { label: "Groq",       avatar: "G", color: "#F97316", bg: "#FFF7ED" },
+  deepseek:    { label: "DeepSeek",   avatar: "🐋", color: "#0EA5E9", bg: "#F0F9FF" },
+  kimi:        { label: "Kimi",       avatar: "K", color: "#8B5CF6", bg: "#F5F3FF" },
+  anthropic:   { label: "Claude",     avatar: "A", color: "#D97706", bg: "#FFFBEB" },
+  openrouter:  { label: "OpenRouter", avatar: "OR", color: "#7C3AED", bg: "#F5F3FF" },
+  siliconflow: { label: "硅基流动",   avatar: "硅", color: "#0EA5E9", bg: "#F0F9FF" },
+  zhipu:       { label: "智谱 GLM",   avatar: "智", color: "#1F75FE", bg: "#EFF6FF" },
+  cerebras:    { label: "Cerebras",   avatar: "C", color: "#FF6F61", bg: "#FFF1F0" },
+  custom:      { label: "自定义",     avatar: "⚙", color: "#6B7280", bg: "#F9FAFB" },
+  legacy:      { label: "AI 抽取",    avatar: "🤖", color: "#7C3AED", bg: "#F5F3FF" },
+  unknown:     { label: "AI 抽取",    avatar: "🤖", color: "#7C3AED", bg: "#F5F3FF" },
+};
+
 function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTab, currentMaterial }) {
   // 在学习工作台中，"题库练习"页并不会被渲染；此时应切 StudyWorkspace 的"小测"tab
   const routeSetPage = (p) => {
@@ -5368,6 +5487,20 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const openAITopicDetail = async (t) => {
     setAiTopicDetail({ topic: t, loading: true, data: null, error: null });
     try {
+      // ✨ 1A 缓存优先：先看 topic_details 里有没有现成的详情（上传时已经构建好）
+      if (t?.id) {
+        try {
+          const { data: cached, error: ce } = await supabase
+            .from("topic_details")
+            .select("intro,formulas,steps,examples,viz_hint")
+            .eq("topic_id", t.id)
+            .maybeSingle();
+          if (!ce && cached && cached.intro) {
+            setAiTopicDetail({ topic: t, loading: false, data: cached, error: null });
+            return;
+          }
+        } catch { /* 表不存在或网络挂了 → 走 live fetch */ }
+      }
       const aiCfg = getAIConfig();
       const topicProvider = (t.provider && String(t.provider).trim()) || null;
       // 优先使用与 topic 同源 provider；如果没有 provider（legacy 数据）回退到全局 AI 设置
@@ -5389,8 +5522,25 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         }),
       });
       const d = await resp.json();
-      if (d.error && !d.intro) setAiTopicDetail({ topic: t, loading: false, data: null, error: d.error });
-      else setAiTopicDetail({ topic: t, loading: false, data: d, error: null });
+      if (d.error && !d.intro) {
+        setAiTopicDetail({ topic: t, loading: false, data: null, error: d.error });
+      } else {
+        setAiTopicDetail({ topic: t, loading: false, data: d, error: null });
+        // 回写 topic_details 让下次秒开（如果当时上传时构建漏了或失败了）
+        if (t?.id && d.intro) {
+          try {
+            await supabase.from("topic_details").upsert({
+              topic_id: t.id,
+              intro: d.intro || null,
+              formulas: Array.isArray(d.formulas) ? d.formulas : null,
+              steps: Array.isArray(d.steps) ? d.steps : null,
+              examples: Array.isArray(d.examples) ? d.examples : null,
+              viz_hint: d.viz_hint || null,
+              provider: (d.apiUsed || "").split("(")[0] || null,
+            }, { onConflict: "topic_id" });
+          } catch { /* 表不存在时静默 */ }
+        }
+      }
     } catch (e) {
       setAiTopicDetail({ topic: t, loading: false, data: null, error: e?.message || "请求失败" });
     }
@@ -5518,21 +5668,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
       defaultProviderRef.current = top;
     }
   }, [providerStats]); // eslint-disable-line react-hooks/exhaustive-deps
-  // PROVIDER_META —— 每个 AI 自带头像字符 + 主色 + 浅底色，让用户一眼分清不同 AI 出的知识点
-  const PROVIDER_META = {
-    gemini:      { label: "Gemini",     avatar: "✦", color: "#4285F4", bg: "#EFF6FF" },
-    groq:        { label: "Groq",       avatar: "G", color: "#F97316", bg: "#FFF7ED" },
-    deepseek:    { label: "DeepSeek",   avatar: "🐋", color: "#0EA5E9", bg: "#F0F9FF" },
-    kimi:        { label: "Kimi",       avatar: "K", color: "#8B5CF6", bg: "#F5F3FF" },
-    anthropic:   { label: "Claude",     avatar: "A", color: "#D97706", bg: "#FFFBEB" },
-    openrouter:  { label: "OpenRouter", avatar: "OR", color: "#7C3AED", bg: "#F5F3FF" },
-    siliconflow: { label: "硅基流动",   avatar: "硅", color: "#0EA5E9", bg: "#F0F9FF" },
-    zhipu:       { label: "智谱 GLM",   avatar: "智", color: "#1F75FE", bg: "#EFF6FF" },
-    cerebras:    { label: "Cerebras",   avatar: "C", color: "#FF6F61", bg: "#FFF1F0" },
-    custom:      { label: "自定义",     avatar: "⚙", color: "#6B7280", bg: "#F9FAFB" },
-    legacy:      { label: "AI 抽取",    avatar: "🤖", color: "#7C3AED", bg: "#F5F3FF" },
-    unknown:     { label: "AI 抽取",    avatar: "🤖", color: "#7C3AED", bg: "#F5F3FF" },
-  };
+  // PROVIDER_META 已提升到模块顶层（KP_PROVIDER_META），便于其它组件（如 GlobalTopicCardPortal）共用。
+  const PROVIDER_META = KP_PROVIDER_META;
   // 全部可重抽的免费档 provider，按推荐顺序展开
   const RE_EXTRACT_PROVIDERS = ["groq", "gemini", "zhipu", "openrouter", "siliconflow", "cerebras", "deepseek", "kimi"];
   const totalTopicCount = courseTopics.length + aiTopicsForMaterial.length;
@@ -13003,6 +13140,11 @@ function MaterialChatPage({ setPage, profile, currentMaterial = null }) {
   const [chatting, setChatting] = useState(false);
   const [history, setHistory] = useState([]);
   const [chatMode, setChatMode] = useState("chat");
+  // 2A：当前资料下的所有 topic（id + name），用来：
+  //   1) 发请求时把 name 列表丢给 /api/generate 让 AI 用 [[X]] 包裹
+  //   2) 解析 AI 回复时把 [[X]] 渲染成可点击 chip，点击查 topic_details 弹卡片
+  const [materialTopics, setMaterialTopics] = useState([]);
+  const setTopicCard = useMathStore((s) => s.setTopicCard);
   // Session management: auto-new on material switch, history drawer to resume
   const [sessions, setSessions] = useState(() => mcLoadSessions());
   const [activeSessionId, setActiveSessionId] = useState(null);
@@ -13023,6 +13165,25 @@ function MaterialChatPage({ setPage, profile, currentMaterial = null }) {
     setActiveSessionId(mcMakeSessionId());
     setHistory([]);
   }, [materialId, chatMode]);
+
+  // 2A：每次切资料就刷新 topics 列表（id + name + 可选 chapter，发请求 + 点击解析都要用）
+  useEffect(() => {
+    if (!materialId) { setMaterialTopics([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        let { data } = await supabase
+          .from("material_topics")
+          .select("id,name,summary,chapter,provider")
+          .eq("material_id", materialId)
+          .limit(120);
+        if (!cancelled) setMaterialTopics(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setMaterialTopics([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [materialId]);
 
   // ── Persist live session: writes to localStorage whenever messages grow.
   // Empty sessions are never recorded to keep the history drawer clean.
@@ -13126,6 +13287,10 @@ function MaterialChatPage({ setPage, profile, currentMaterial = null }) {
       } catch (e) {}
 
       const aiCfg = getAIConfig();
+      // 2A：把当前资料的所有 topic name 传给后端，让 AI 用 [[X]] 包裹命中的概念
+      const topicNames = materialTopics
+        .map((t) => t?.name)
+        .filter((n) => typeof n === "string" && n.trim().length > 0);
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -13135,6 +13300,7 @@ function MaterialChatPage({ setPage, profile, currentMaterial = null }) {
           materialTitle: selected?.title || "本资料",
           materialContext: contextChunks || "",
           conversationHistory: history.slice(-12).map(h => ({ role: h.role, content: h.text })),
+          availableTopics: topicNames,
           userProvider: aiCfg.provider,
           userKey: aiCfg.key,
           userCustomUrl: aiCfg.customUrl,
@@ -13149,26 +13315,78 @@ function MaterialChatPage({ setPage, profile, currentMaterial = null }) {
     setChatting(false);
   };
 
+  // 2A：解析一段文本里的 [[名字]] 标记 → 命中 materialTopics 的就渲染成可点击 chip；
+  // 没命中的就还原成 "名字"（去掉方括号）；其余非 chip 片段交回 <MathText> 渲染数学。
+  const renderWithTopicChips = (text) => {
+    const s = String(text || "");
+    if (!s.includes("[[")) return <MathText text={s} />;
+    const topicByName = new Map();
+    materialTopics.forEach((t) => { if (t?.name) topicByName.set(String(t.name).trim(), t); });
+    // 把 [[X]] 切出来；其余非 chip 片段还要走 MathText 渲染数学
+    const parts = s.split(/(\[\[[^\[\]\n]{1,40}\]\])/g);
+    return (
+      <span>
+        {parts.map((p, i) => {
+          const m = p.match(/^\[\[([^\[\]\n]{1,40})\]\]$/);
+          if (!m) {
+            // 普通片段
+            if (!p) return null;
+            return <MathText key={i} text={p} />;
+          }
+          const name = m[1].trim();
+          const topic = topicByName.get(name);
+          if (!topic) {
+            // 没命中已知 topic，去掉双方括号显示成普通文字
+            return <span key={i}>{name}</span>;
+          }
+          // 命中 → 渲染成可点击 chip
+          return (
+            <button
+              key={i}
+              onClick={() => {
+                setTopicCard({ topic, loading: true, data: null, error: null });
+              }}
+              title={`查看 ${name} 的公式 / 解释 / 例题 / 思路`}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "1px 8px", margin: "0 2px",
+                background: "#EEF2FF", color: "#4338CA",
+                border: "1px solid #C7D2FE",
+                borderRadius: 6, cursor: "pointer", fontWeight: 600,
+                fontFamily: "inherit", fontSize: "0.95em",
+                verticalAlign: "baseline",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#E0E7FF"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#EEF2FF"; }}
+            >
+              📚 {name}
+            </button>
+          );
+        })}
+      </span>
+    );
+  };
+
   const renderStructuredText = (content) => {
     const lines = String(content || "").split("\n");
     return lines.map((line, idx) => {
       const t = line.trim();
       if (!t) return <div key={idx} style={{ height: 10 }} />;
       if (t.startsWith("### ")) {
-        return <h3 key={idx} style={{ margin: "14px 0 10px", fontSize: 19, fontWeight: 800, color: "#111827" }}><MathText text={t.slice(4)} /></h3>;
+        return <h3 key={idx} style={{ margin: "14px 0 10px", fontSize: 19, fontWeight: 800, color: "#111827" }}>{renderWithTopicChips(t.slice(4))}</h3>;
       }
       if (t.startsWith("## ")) {
-        return <h2 key={idx} style={{ margin: "20px 0 12px", fontSize: 24, fontWeight: 800, color: "#0f172a" }}><MathText text={t.slice(3)} /></h2>;
+        return <h2 key={idx} style={{ margin: "20px 0 12px", fontSize: 24, fontWeight: 800, color: "#0f172a" }}>{renderWithTopicChips(t.slice(3))}</h2>;
       }
       if (/^[-*]\s+/.test(t)) {
         return (
           <div key={idx} style={{ display: "flex", gap: 8, margin: "6px 0", lineHeight: 1.9 }}>
             <span style={{ color: "#6B7280", fontWeight: 700 }}>-</span>
-            <div><MathText text={t.replace(/^[-*]\s+/, "")} /></div>
+            <div>{renderWithTopicChips(t.replace(/^[-*]\s+/, ""))}</div>
           </div>
         );
       }
-      return <div key={idx} style={{ lineHeight: 1.95, color: "#1f2937" }}><MathText text={line} /></div>;
+      return <div key={idx} style={{ lineHeight: 1.95, color: "#1f2937" }}>{renderWithTopicChips(line)}</div>;
     });
   };
 
@@ -15919,6 +16137,7 @@ export default function App() {
       </AnimatePresence>
       {/* 全局 AI 设置弹窗 —— 由 zustand store 控制，任意子组件都可唤出 */}
       <GlobalAISettingsPortal />
+      <GlobalTopicCardPortal />
     </div>
   );
 }
@@ -15928,6 +16147,93 @@ function GlobalAISettingsPortal() {
   const close = useMathStore((s) => s.closeAISettings);
   if (!open) return null;
   return <AISettingsModal onClose={close} />;
+}
+
+// 全局知识点详情弹窗 —— 任何页面（KnowledgePage、MaterialChatPage 等）只要 setTopicCard({ topic, ... })
+// 就会触发这里：先查 topic_details 表缓存，没命中再调 /api/topic-detail，最后用 AITopicDetailModal 渲染。
+function GlobalTopicCardPortal() {
+  const card = useMathStore((s) => s.topicCard);
+  const setCard = useMathStore((s) => s.setTopicCard);
+  const closeCard = useMathStore((s) => s.closeTopicCard);
+  const fetchedRef = useRef(null);
+
+  useEffect(() => {
+    if (!card || !card.topic) { fetchedRef.current = null; return; }
+    if (card.data || card.error) return; // 已经有结果
+    const key = card.topic.id || card.topic.name;
+    if (fetchedRef.current === key) return; // 同一 topic 只 fetch 一次
+    fetchedRef.current = key;
+    (async () => {
+      const t = card.topic;
+      // 1) 缓存优先
+      if (t?.id) {
+        try {
+          const { data: cached } = await supabase
+            .from("topic_details")
+            .select("intro,formulas,steps,examples,viz_hint")
+            .eq("topic_id", t.id)
+            .maybeSingle();
+          if (cached && cached.intro) {
+            setCard({ topic: t, loading: false, data: cached, error: null });
+            return;
+          }
+        } catch { /* 表不存在或网络挂 → 继续走 live fetch */ }
+      }
+      // 2) Live fetch
+      try {
+        const aiCfg = getAIConfig();
+        const topicProvider = (t.provider && String(t.provider).trim()) || null;
+        const preferProvider = topicProvider && topicProvider !== "legacy" && topicProvider !== "unknown"
+          ? topicProvider : aiCfg.provider;
+        const preferKey = topicProvider && aiCfg.allKeys?.[topicProvider]
+          ? aiCfg.allKeys[topicProvider] : aiCfg.key;
+        const resp = await fetch("/api/topic-detail", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topicName: t.name,
+            summary: t.summary || "",
+            course: "",
+            chapter: t.chapter || "",
+            materialContext: t.name,
+            preferProvider,
+            userProvider: preferProvider, userKey: preferKey, userCustomUrl: aiCfg.customUrl,
+          }),
+        });
+        const d = await resp.json();
+        if (d.error && !d.intro) {
+          setCard({ topic: t, loading: false, data: null, error: d.error });
+        } else {
+          setCard({ topic: t, loading: false, data: d, error: null });
+          // 顺便回写 topic_details 缓存
+          if (t?.id && d.intro) {
+            try {
+              await supabase.from("topic_details").upsert({
+                topic_id: t.id,
+                intro: d.intro || null,
+                formulas: Array.isArray(d.formulas) ? d.formulas : null,
+                steps: Array.isArray(d.steps) ? d.steps : null,
+                examples: Array.isArray(d.examples) ? d.examples : null,
+                viz_hint: d.viz_hint || null,
+                provider: (d.apiUsed || "").split("(")[0] || null,
+              }, { onConflict: "topic_id" });
+            } catch { /* 表不存在静默 */ }
+          }
+        }
+      } catch (e) {
+        setCard({ topic: t, loading: false, data: null, error: e?.message || "请求失败" });
+      }
+    })();
+  }, [card, setCard]);
+
+  if (!card || !card.topic) return null;
+  return (
+    <AITopicDetailModal
+      state={card}
+      providerMeta={PROVIDER_META[(card.topic?.provider || "legacy")] || PROVIDER_META.unknown}
+      onClose={closeCard}
+    />
+  );
 }
 
 // 顶栏右上头像 —— 点击弹出 ProviderSwitcherPopover

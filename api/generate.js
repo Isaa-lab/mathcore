@@ -105,6 +105,9 @@ async function runHandler(req, res) {
     // dialogueModeReason, quizState —— 仅日志用，不参与 prompt 构造
     // 错题靶向变式专用：把用户的错题、错因诊断、错因 tag 一起传过来，让出题更"针对"
     errorContext,    // [{ question, correctAnswer, userAnswer, errorTags:[], reasoning, remedyFocus }]
+    // 2A：聊天里能点击的"前置知识点"列表。后端会把它注入 system prompt，
+    // 让 AI 提到列表里任何条目时用 [[名字]] 包裹，前端解析后渲染成可点击的 chip。
+    availableTopics, // string[] —— 当前资料下所有 material_topics 的 name
     userProvider, userKey, userCustomUrl,
   } = body;
 
@@ -659,6 +662,33 @@ ${materialContext ? `\n【资料知识点参考】\n${materialContext}\n` : ""}
 7. 需要展示图形时，用简单文字坐标描述，如"当x增大，y呈指数增长"，或用简单ASCII示意，不要tikz代码
 ${VIZ_FRAMEWORK}
 ${vizProfile.extraConstraint ? "\n━━━ 本轮模型专属约束（必须遵守）━━━\n" + vizProfile.extraConstraint + `\n· 本轮允许的 structure：${vizProfile.preferredStructures.join(" / ")}\n· 本轮最多 ${vizProfile.maxVizPerReply} 个 [VIZ:...]\n` : ""}`;
+  }
+
+  // ── 2A：注入"前置知识点"列表 + [[名字]] 标注规则 ──
+  // 让 AI 在回复里把命中已知知识库的概念用 [[X]] 包起来。前端把它们渲染成可点击 chip，
+  // 用户点一下就能弹出该知识点的公式/解释/例题/思路四件套。
+  if (isChatMode && Array.isArray(availableTopics) && availableTopics.length > 0) {
+    // 列表太长会爆 prompt；超过 60 条就截断
+    const list = availableTopics
+      .filter((n) => typeof n === "string" && n.trim().length > 0)
+      .slice(0, 60)
+      .map((n) => `"${n.trim()}"`)
+      .join("、");
+    systemPrompt += `
+
+━━━ 【可点击知识点标注规则】━━━
+本资料的知识库里已经有以下知识点条目：${list}
+当你在回答里提到上面列表中任何一个名字时，**必须用双方括号包裹**，例如：
+  ✅ "这里要用到 [[拉格朗日插值]] 来构造基函数..."
+  ✅ "你可以先回顾 [[特征值]] 的定义，再来看这道题..."
+  ❌ "这里要用到拉格朗日插值..."  ← 没包裹，前端无法识别为可点击
+
+规则细节：
+· 只在列表里的名字才包 [[..]]，列表外的概念不要乱包
+· 同一个名字一段话出现多次时，只在**首次提到时**包一次，后续重复不再包（避免视觉杂乱）
+· 包裹内不要带额外空格或标点，严格用 [[名字]]
+· 数学公式 $...$ 内部不要包 [[..]]，只在普通文本里包
+`;
   }
 
   // ── 构建 messages 数组（含历史） ────────────────────────────────────────────
