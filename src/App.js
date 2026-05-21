@@ -16249,6 +16249,21 @@ export default function App() {
     try {
       const updated = { ...sessionAnswers, [qid]: { correct, chapter } };
       setSessionAnswers(updated);
+      // 持久化到 localStorage 让 ReportPage 在 supabase 未启用 / 未登录时也能读到真实数据
+      // 之前只更新内存 state，导致学习报告永远只看到 demoStats 模板。
+      try {
+        const prior = JSON.parse(localStorage.getItem("mc_answers") || "{}");
+        prior[qid] = { correct: !!correct, chapter: chapter || "Unknown", ts: Date.now() };
+        // 防止无限增长：保留最近 800 条（按 ts 倒排截断）
+        const entries = Object.entries(prior);
+        if (entries.length > 800) {
+          entries.sort((a, b) => (b[1]?.ts || 0) - (a[1]?.ts || 0));
+          const trimmed = Object.fromEntries(entries.slice(0, 800));
+          localStorage.setItem("mc_answers", JSON.stringify(trimmed));
+        } else {
+          localStorage.setItem("mc_answers", JSON.stringify(prior));
+        }
+      } catch {}
     } catch (e) {}
     // L3b 闭环：答题结果进入错题本持久化表
     //   · 错 → 入库 / 重置 SM2

@@ -15,26 +15,29 @@ function fetchWithTimeout(url, opts) {
   return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(id));
 }
 
+// 题目提取是高质量 task —— 需要忠实摘录 + 准确生成解析，所以优先用大模型，
+// 避免 7B/8B 小模型瞎编。Anthropic Claude / DeepSeek / Gemini 优先。
 const FALLBACK_ENV_ORDER = [
-  ["groq",        "GROQ_KEY"],
-  ["deepseek",    "DEEPSEEK_KEY"],
-  ["gemini",      "GEMINI_KEY"],
+  ["anthropic",   "ANTHROPIC_KEY"],  // 摘录任务里 Claude 最稳，公式准确
+  ["deepseek",    "DEEPSEEK_KEY"],   // 中文理解力强，能区分例题/练习题
+  ["gemini",      "GEMINI_KEY"],     // 大窗口 + 免费
+  ["groq",        "GROQ_KEY"],       // 70b versatile 兜底
   ["zhipu",       "ZHIPU_KEY"],
   ["openrouter",  "OPENROUTER_KEY"],
+  ["kimi",        "KIMI_KEY"],
   ["siliconflow", "SILICONFLOW_KEY"],
   ["siliconflow", "GUIJI_KEY"],
   ["cerebras",    "CEREBRAS_KEY"],
-  ["kimi",        "KIMI_KEY"],
-  ["anthropic",   "ANTHROPIC_KEY"],
 ];
 
 const PROVIDER_CFG = {
   groq:        { url: "https://api.groq.com/openai/v1",            model: "llama-3.3-70b-versatile" },
   deepseek:    { url: "https://api.deepseek.com",                  model: "deepseek-chat" },
   zhipu:       { url: "https://open.bigmodel.cn/api/paas/v4",      model: "glm-4-flash" },
-  openrouter:  { url: "https://openrouter.ai/api/v1",              model: "mistralai/mistral-7b-instruct:free" },
+  // OpenRouter 默认 mistral-7b 太弱，本任务换成中文+数学更稳的 deepseek-r1-distill 免费档
+  openrouter:  { url: "https://openrouter.ai/api/v1",              model: "deepseek/deepseek-r1-distill-llama-70b:free" },
   siliconflow: { url: "https://api.siliconflow.cn/v1",             model: "Qwen/Qwen2.5-7B-Instruct" },
-  cerebras:    { url: "https://api.cerebras.ai/v1",                model: "llama3.1-8b" },
+  cerebras:    { url: "https://api.cerebras.ai/v1",                model: "llama3.3-70b" }, // 升到 70b
   kimi:        { url: "https://api.moonshot.cn/v1",                model: "moonshot-v1-8k" },
 };
 
@@ -125,39 +128,46 @@ export default async function handler(req, res) {
     if (!text || String(text).trim().length < 50) {
       return res.status(400).json({ error: "text 太短，无法提取题目" });
     }
-    const cleanText = String(text).slice(0, 12000); // 单次最多看 ~12KB 文字
+    const cleanText = String(text).slice(0, 24000); // 上限提到 24KB（大模型够吃）
     const ch = chapter && chapter !== "全部" ? chapter : (course || "本章");
 
-    const prompt = `你是一位严谨的数学教师。请从下面的教材原文里**逐字摘录**所有"已有的"习题（例题、练习题、课后题、思考题等都算），不要凭空生成新题。
+    const prompt = `你是一位严谨的数学教师。请从下面的教材原文里**只摘录原文里实际存在的**习题（例题 Example / 练习题 Exercise / 课后题 Problem / 思考题 等），**严禁凭空生成不在原文里的新题**。
 
-教材原文（${course || "数学"} · ${ch}）：
+教材原文（${course || "数学"} · ${ch}，前 24KB）：
 ===
 ${cleanText}
 ===
 
-要求：
-1. **摘录而非重写**：题干必须忠实保留原文（包括序号、字母、符号），可以补 LaTeX 但不能改意思
-2. 选择题保留 A/B/C/D 选项；非选择题 options 为 null
-3. 如果原文里有答案，把答案抄出来（不要自己算）；没有 → answer 为 null
-4. 数学公式一律 LaTeX：行内 $..$，块级 $$..$$
-5. **关键：为每道题加 AI 解析**，包含三块：
-   - approach：解题思路（50-100 字，说"为什么这么做 + 关键一步"）
-   - concepts：考查的知识点（数组，每条 3-8 字）
-   - pitfalls：常见易错点（30-80 字）
-6. 题型必须从 [单选题, 多选题, 判断题, 填空题, 解答题, 证明题] 中选
+【任务】
+1. **识别**：扫描原文找带有题号 / "例 N" / "Exercise N" / "习题 N.M" / "1.", "(a)", "Q1" 之类的题目段落
+2. **摘录**：题干 verbatim 复制（必要时把混乱排版整理顺，但**不改语义、不补题**）
+3. **答案**：原文给出答案就抄上（A/B/C/D 或具体值），原文没明确答案 → **不要自己算**，answer 字段为 null
+4. **解析**：每道题加 AI 自己写的 analysis 三件套（approach / concepts / pitfalls）
 
-如果原文里**完全没有**题目（只是理论说明），返回空数组。
+【严格输出规则】
+- 数学公式一律 LaTeX：行内 $..$，块级 $$..$$（不要写 \\(..\\) 或裸公式）
+- 选择题 options 是 4 元素数组 ["A. ...", "B. ...", "C. ...", "D. ..."]；非选择题 → null
+- type 必须从这 6 类选一个：单选题 / 多选题 / 判断题 / 填空题 / 解答题 / 证明题
+- analysis.concepts 是数组，每条 3-8 字（如"高斯消元"、"特征值计算"）
+- 整段输出**严格 JSON**，不要 markdown 围栏、不要解释
 
-严格输出 JSON，不要 markdown 围栏：
+【判别原则】
+✅ 原文有 "例 3.2" "Exercise 5" "习题 1" "(1) 求..." → 摘录
+❌ 原文只有定理 / 推论 / 概念说明 → 不算题，不要硬编出题来填充
+❌ 原文是目录 / 前言 / 参考文献 → 跳过
+
+如果原文里完全没有任何习题，返回 { "problems": [] }，**绝对不要**为了交差凭空造题。
+
+输出：
 {
   "problems": [
     {
-      "question": "题干（保留原序号，LaTeX 公式）",
+      "question": "题干 verbatim（含原序号），LaTeX 公式",
       "options": ["A. ...", "B. ...", "C. ...", "D. ..."] 或 null,
       "answer": "原文给出的答案" 或 null,
       "type": "单选题",
       "analysis": {
-        "approach": "解题思路（50-100 字）",
+        "approach": "解题思路（50-100 字，说为什么+关键一步）",
         "concepts": ["知识点1", "知识点2"],
         "pitfalls": "常见易错点（30-80 字）"
       }

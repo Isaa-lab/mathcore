@@ -655,16 +655,39 @@ function extractMacros(src) {
 }
 
 // ── Block renderer ─────────────────────────────────────────────────────────
+// 通用数学概念兜底字典 —— 当 materialTopics 抽不到这些（PDF 没明确写出）但 AI
+// 在回答里频繁提到时，也自动包成 chip，让点击后能 live-fetch 详情。
+// 这些名字按学科分类，每条 ≥ 2 字符，确保不会误命中常见词。
+const COMMON_MATH_GLOSSARY = [
+  // 线性代数
+  "矩阵", "行列式", "向量", "特征值", "特征向量", "特征方程", "单位矩阵", "逆矩阵", "转置矩阵", "对称矩阵",
+  "正交矩阵", "正定矩阵", "秩", "迹", "行最简形", "行阶梯形", "线性方程组", "线性变换", "线性组合", "线性相关",
+  "线性无关", "基", "维数", "子空间", "零空间", "列空间", "高斯消元法", "克莱姆法则", "拉格朗日乘法", "施密特正交化",
+  // 微积分
+  "极限", "连续", "可导", "可微", "导数", "偏导数", "微分", "积分", "定积分", "不定积分",
+  "中值定理", "罗尔定理", "拉格朗日中值定理", "柯西中值定理", "洛必达法则", "泰勒展开", "麦克劳林展开", "傅里叶级数",
+  // 数值分析
+  "牛顿法", "二分法", "迭代法", "Jacobi 迭代", "Gauss-Seidel", "拉格朗日插值", "牛顿插值", "样条插值", "数值积分",
+  "辛普森法则", "梯形法则", "Runge 现象", "Chebyshev 节点",
+  // 微分方程
+  "常微分方程", "偏微分方程", "齐次方程", "非齐次方程", "积分因子法", "分离变量法", "通解", "特解",
+  // 概率统计
+  "概率", "条件概率", "贝叶斯", "期望", "方差", "协方差", "标准差", "正态分布", "泊松分布", "二项分布",
+  "中心极限定理", "大数定律", "假设检验", "置信区间", "回归分析",
+];
+
 // 2A 兜底：AI 不听话没用 [[X]] 包概念时，客户端扫描文本里出现的已知 topic 名字
 // 自动包成 [[X]]，让 renderInline 的 chip 解析能命中。
 // - 跳过 $..$ 数学块（不污染公式）
 // - 跳过已被 AI 包好的 [[X]] 区域（避免双包）
 // - 每个 name 只在首次出现处包一次（避免视觉杂乱）
 // - 长名优先匹配（"矩阵特征值" 比 "矩阵" 先匹配，避免拆碎）
+// - 即使 materialTopics 为空也能工作（用 COMMON_MATH_GLOSSARY 兜底）
 function autoMarkTopics(text, context) {
   if (!text) return text;
   const topics = context && Array.isArray(context.materialTopics) ? context.materialTopics : [];
-  if (topics.length === 0) return text;
+  // 即使 materialTopics 是空（chat 还没载入 / 没选 material），也用通用字典做兜底
+  if (topics.length === 0 && COMMON_MATH_GLOSSARY.length === 0) return text;
 
   // 1) 把已有的 [[X]] 隔离成占位符，最后还原
   const existingMarks = [];
@@ -675,10 +698,15 @@ function autoMarkTopics(text, context) {
   });
 
   // 2) 收集所有去重后的 name，按长度倒排（保证子串安全）
+  // union = 当前 material 的 topics + 通用数学字典兜底（让 拉格朗日乘法 / 高斯消元法 / 行列式
+  // 这些 PDF 没专门抽到但 AI 常提到的概念也能渲染成 chip，点击时 GlobalTopicCardPortal
+  // 走 live-fetch 生成详情）
+  const allNames = [
+    ...topics.map((t) => String(t?.name || "").trim()),
+    ...COMMON_MATH_GLOSSARY,
+  ];
   const names = [...new Set(
-    topics
-      .map((t) => String(t?.name || "").trim())
-      .filter((n) => n.length >= 2 && n.length <= 30)
+    allNames.filter((n) => n.length >= 2 && n.length <= 30)
   )].sort((a, b) => b.length - a.length);
   if (names.length === 0) {
     return work.replace(/M(\d+)/g, (_m, i) => existingMarks[Number(i)]);
