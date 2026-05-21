@@ -5563,18 +5563,12 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   // 设计意图：让用户对比同一份资料在不同 AI 眼里的"知识点骨架"——这是免费多 AI 抽取的核心价值
   const triggerReExtract = async (provider) => {
     if (!selectedMaterial?.id) return;
-    // ── ⚡ 新：点 provider 时就地确认 Key 配置，不需要绕到 avatar 菜单 ──
-    // 三种情况：
-    //   1. 用户在 AI 设置里填了该 provider 的 Key → allKeys[provider] 非空 → 直接用
-    //   2. 用户没填，但平台已配 server Key → platformProviders[provider] = true → 直接用
-    //   3. 都没有 → 弹出内嵌 Key 输入框让用户当场填，填完自动重试
-    const currentAllKeys = _readAIKeys();
-    const userHasKey = currentAllKeys && currentAllKeys[provider] && String(currentAllKeys[provider]).trim().length > 8;
-    const serverHasKey = !!(platformProviders && platformProviders[provider]);
-    if (!userHasKey && !serverHasKey) {
-      setInlineKeyProvider({ provider, input: "", keyVisible: false });
-      return;
-    }
+    // ── ⚡ 信任服务端：直接尝试调用 AI，不预检 ──
+    // 之前的预检（用户 Key 和 platformProviders 都没有就弹输入框）有 race condition：
+    // platformProviders 是异步从 /api/providers fetch 的，知识点页打开瞬间 state 仍是
+    // 默认全 false，于是即使服务端有 Key 也会被错误地拦下弹输入框。
+    // 改成：直接调，让 backend 决定。如果 backend 返回"all providers failed"类错误，
+    // 再在错误处理路径里弹内嵌 Key 输入框。这样有 server Key 的情况完全不打扰用户。
     setInlineKeyProvider(null); // 关闭可能的内嵌输入
     setReExtractStatus({ provider, status: "running", msg: `正在用 ${provider} 重抽（约 10-25 秒）…` });
     // ⚠️ 关键：不再 "先删后抽"——之前的实现是抽 AI 之前就把旧知识点删了，
@@ -5628,11 +5622,14 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
       } else {
         // 精确诊断：把后端真实错误抬到 UI，而不是吞掉用万能兜底
         let reason = "";
+        let isNoKey = false;
         if (result?.apiErrorMsg) {
-          // 后端返回了具体错误，直接显示
           reason = result.apiErrorMsg;
+          // backend 报"all providers failed" 类信息 → 说明 user + server 都没有 Key
+          isNoKey = /api[_\s-]?key|no.*key|配置.*key|no_provider_attempted|all.*failed|未配置/i.test(reason);
         } else if (!result?.usedApi) {
-          reason = `没有任何一家 AI 被调用成功 —— 通常是 ${provider} 没有 Key（既没填用户 Key 也没配 server 端 ${provider.toUpperCase()}_KEY）。请去 AI 设置点 🔍 测试。`;
+          reason = `${provider} 没有可用 Key（用户 Key 和服务端 ${provider.toUpperCase()}_KEY 都没找到）。可以在下方填一下 Key 立即抽取。`;
+          isNoKey = true;
         } else if (!result?.hasText) {
           reason = `PDF 文字提取失败（可能是扫描版或加密 PDF）。请改用文字可选中的电子版。`;
         } else if ((result?.topics?.length || 0) === 0) {
@@ -5641,6 +5638,10 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           reason = `${provider} 抽到了 ${result?.topics?.length || 0} 个知识点但都和已有知识点重复 —— 这本资料可能已经抽过类似的了。`;
         }
         setReExtractStatus({ provider, status: "error", msg: `${provider} 没抽到新知识点：${reason}` });
+        // ✨ 真的是没 Key → 弹内嵌输入框；其它错误就只显示 status，不打扰用户
+        if (isNoKey) {
+          setInlineKeyProvider({ provider, input: "", keyVisible: false });
+        }
       }
     } catch (e) {
       setReExtractStatus({ provider, status: "error", msg: `用 ${provider} 重抽失败：${e?.message || "未知错误"}` });
