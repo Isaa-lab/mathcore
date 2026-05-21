@@ -6194,6 +6194,13 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [translatingQid, setTranslatingQid] = useState(null);
   // 小测选课本：null = 不限
   const [quizMaterialFilter, setQuizMaterialFilter] = useState(null);
+  // ── 上传题目 OCR + 教材题目提取 状态 ───────────────────────────────────────
+  // ocrState: { status: "idle" | "uploading" | "done" | "error", result?, error? }
+  const [ocrState, setOcrState] = useState({ status: "idle" });
+  const ocrFileRef = useRef(null);
+  // bookExtractState: { status, problems[], error?, materialId? }
+  const [bookExtractState, setBookExtractState] = useState({ status: "idle", problems: [] });
+  const [bookExtractMaterial, setBookExtractMaterial] = useState(null);
   // 自动补题守卫（pool < 12 时后台触发一次）
   const autoTopUpTriedRef = useRef(false);
   const timerRef = useRef(null);
@@ -6452,6 +6459,178 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     setScore(0); setWrongList([]); setFinished(false); setTimer(0);
     setAnswerRecords({}); setRevealedAnswer(false); setAIContextPrompt("");
     sessionStartRef.current = Date.now();
+  };
+
+  // ── 上传题目（图片 / PDF）OCR 识别 ─────────────────────────────────────────
+  // 设计：客户端把文件读成 base64 → 调 /api/ocr-problem → 后端用 Gemini Vision
+  // 等模型识别 → 返回结构化题目（question / options / answer / type）。
+  // 用户可在预览里选 "直接做这道" 或 "加到题库"。
+  const handleOcrUpload = async (file) => {
+    if (!file) return;
+    // Vercel Hobby 请求体 4.5MB 上限：原始文件超 3MB 就要前端压缩
+    const MAX_RAW_BYTES = 3 * 1024 * 1024;
+    let blob = file;
+    let mime = file.type || "image/jpeg";
+    if (file.type && file.type.startsWith("image/") && file.size > MAX_RAW_BYTES) {
+      // 用 canvas 缩到长边 1600px、JPEG 0.85 quality
+      try {
+        const dataUrl = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = (e) => res(e.target.result);
+          r.onerror = () => rej(new Error("读取文件失败"));
+          r.readAsDataURL(file);
+        });
+        const img = await new Promise((res, rej) => {
+          const im = new Image();
+          im.onload = () => res(im);
+          im.onerror = () => rej(new Error("图片解码失败"));
+          im.src = dataUrl;
+        });
+        const longSide = Math.max(img.width, img.height);
+        const scale = longSide > 1600 ? 1600 / longSide : 1;
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        const compressed = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.85));
+        blob = compressed;
+        mime = "image/jpeg";
+      } catch (e) {
+        // 压缩失败就硬传原图，让后端拦下
+      }
+    }
+    // 读 base64
+    const base64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = (e) => {
+        const s = String(e.target.result || "");
+        const idx = s.indexOf(",");
+        res(idx >= 0 ? s.slice(idx + 1) : s);
+      };
+      r.onerror = () => rej(new Error("Base64 编码失败"));
+      r.readAsDataURL(blob);
+    });
+    setOcrState({ status: "uploading" });
+    try {
+      const aiCfg = getAIConfig();
+      const resp = await fetch("/api/ocr-problem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: base64,
+          mimeType: mime,
+          userProvider: aiCfg.provider,
+          userKey: aiCfg.key,
+        }),
+      });
+      const data = await resp.json();
+      if (data?.error) {
+        setOcrState({ status: "error", error: data.error });
+      } else {
+        setOcrState({ status: "done", result: data });
+      }
+    } catch (e) {
+      setOcrState({ status: "error", error: e?.message || "请求失败" });
+    }
+  };
+
+  // 把 OCR 识别出来的题加到当前题池，立刻开始做这一道
+  const startOcrQuestionNow = (result) => {
+    if (!result?.question) return;
+    const synthetic = {
+      id: "ocr_" + Date.now(),
+      question: result.question,
+      options: Array.isArray(result.options) && result.options.length >= 2 ? result.options : null,
+      answer: result.answer || "",
+      type: result.type || "单选题",
+      explanation: result.explanation || "",
+      chapter: "上传识别",
+    };
+    startWithPool([synthetic], 1);
+    setOcrState({ status: "idle" });
+  };
+
+  // ── 从已上传教材里 AI 解析提取所有原书已有题目 ───────────────────────────
+  const triggerBookExtract = async (mat) => {
+    if (!mat?.id) return;
+    setBookExtractState({ status: "loading", problems: [] });
+    setBookExtractMaterial(mat);
+    try {
+      // 先把 materials 里的文字拉出来（之前 processMaterialWithAI 已经处理过 PDF，
+      // 但这里我们简化处理：让后端基于 material 已有的描述 + 学科 + 章节 兜底，
+      // 真实场景下教材文字会从 materials.file_data 重新解析。
+      // MVP: 优先用 description / title + course 给 AI 一个上下文，让它"凭印象"
+      // 提取——不太精确但比啥都没有强；后续可以接 PDF 重解析。
+      const { data: matRow } = await supabase
+        .from("materials")
+        .select("id,title,course,chapter,description,file_data,file_name")
+        .eq("id", mat.id)
+        .single();
+      let text = "";
+      if (matRow?.file_data && typeof matRow.file_data === "string" && matRow.file_data.startsWith("http")) {
+        // PDF 直链：浏览器先下载再用 pdf.js 抽文字
+        try {
+          await ensurePdfJs();
+          const r = await fetch(matRow.file_data);
+          const buf = await r.arrayBuffer();
+          const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
+          const totalPages = pdf.numPages;
+          const sampleEnd = Math.min(totalPages, 30);
+          const parts = [];
+          for (let i = 1; i <= sampleEnd; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            parts.push((content.items || []).map(it => it.str || "").join(" "));
+          }
+          text = parts.join("\n").slice(0, 12000);
+        } catch (e) {
+          text = (matRow?.description || "") + " " + (matRow?.title || "");
+        }
+      } else {
+        text = (matRow?.description || "") + " " + (matRow?.title || "");
+      }
+      if (!text || text.trim().length < 60) {
+        setBookExtractState({ status: "error", problems: [], error: "教材文字提取失败（可能是扫描版 / 加密 PDF）。" });
+        return;
+      }
+      const aiCfg = getAIConfig();
+      const resp = await fetch("/api/extract-textbook-problems", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          course: matRow?.course || "",
+          chapter: matRow?.chapter || "",
+          userProvider: aiCfg.provider,
+          userKey: aiCfg.key,
+          userCustomUrl: aiCfg.customUrl,
+        }),
+      });
+      const data = await resp.json();
+      if (data?.error) {
+        setBookExtractState({ status: "error", problems: [], error: data.error });
+      } else {
+        setBookExtractState({ status: "done", problems: data.problems || [] });
+      }
+    } catch (e) {
+      setBookExtractState({ status: "error", problems: [], error: e?.message || "请求失败" });
+    }
+  };
+
+  // 直接做某一道从教材里提取出的题
+  const startBookProblemNow = (p) => {
+    if (!p?.question) return;
+    const synthetic = {
+      id: "book_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+      question: p.question,
+      options: Array.isArray(p.options) && p.options.length >= 2 ? p.options : null,
+      answer: p.answer || "",
+      type: p.type || "解答题",
+      explanation: p.analysis?.approach || "",
+      chapter: "教材提取",
+    };
+    startWithPool([synthetic], 1);
+    setBookExtractState({ status: "idle", problems: [] });
   };
 
   const q = displayQ[current];
@@ -7192,6 +7371,130 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     return (
       <div style={{ padding: "0 0 16px", maxWidth: 960, margin: "0 auto" }}>
         <PageHeader title="题库练习" subtitle={effectiveMaterialTitle ? `${effectiveMaterialTitle} · 基于资料` : "你今天想练什么？"} onBack={() => setPage("首页")} />
+
+        {/* ══ 上传题目 OCR 识别 + 从教材提取题目 ══ */}
+        <div style={{ marginBottom: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          {/* 左：上传图片 / PDF 拍题 */}
+          <div style={{ padding: "14px 18px", background: "#FFFFFF", border: "1px solid #EEF2F7", borderRadius: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#94A3B8", letterSpacing: "0.08em", marginBottom: 8 }}>📷 上传题目（OCR）</div>
+            <div style={{ fontSize: 11.5, color: "#64748B", lineHeight: 1.5, marginBottom: 10 }}>
+              JPG / PNG / PDF 拍照或截图，AI 自动识别题干 + 公式（中英文 / LaTeX）
+            </div>
+            <input
+              ref={ocrFileRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif,application/pdf"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleOcrUpload(f);
+                e.target.value = ""; // 同一文件再次选能 reload
+              }}
+            />
+            <button
+              onClick={() => ocrFileRef.current?.click()}
+              disabled={ocrState.status === "uploading"}
+              style={{
+                padding: "8px 16px", background: ocrState.status === "uploading" ? "#E5E7EB" : "#6366F1",
+                color: "#fff", border: "none", borderRadius: 10, cursor: ocrState.status === "uploading" ? "wait" : "pointer",
+                fontSize: 12.5, fontWeight: 700, fontFamily: "inherit",
+              }}>
+              {ocrState.status === "uploading" ? "识别中…" : "📷 选择文件"}
+            </button>
+            {ocrState.status === "error" && (
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, fontSize: 11.5, background: "#FEF2F2", color: "#991B1B", border: "1px solid #FECACA" }}>
+                ❌ {ocrState.error}
+              </div>
+            )}
+            {ocrState.status === "done" && ocrState.result && (
+              <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, fontSize: 12, background: "#ECFDF5", border: "1px solid #86EFAC", lineHeight: 1.5 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#047857", marginBottom: 4 }}>✅ 识别完成 · {ocrState.result.type}</div>
+                <div style={{ color: "#0F172A", marginBottom: 6, maxHeight: 80, overflow: "auto" }}>
+                  <MathText text={ocrState.result.question} />
+                </div>
+                {Array.isArray(ocrState.result.options) && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 8, fontSize: 11.5, color: "#374151" }}>
+                    {ocrState.result.options.map((o, i) => <div key={i}><MathText text={o} /></div>)}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => startOcrQuestionNow(ocrState.result)}
+                    style={{ flex: 1, padding: "6px 10px", background: "#10B981", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>
+                    ▶ 直接做这道
+                  </button>
+                  <button onClick={() => setOcrState({ status: "idle" })}
+                    style={{ padding: "6px 10px", background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 7, cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 右：从教材提取题目 */}
+          <div style={{ padding: "14px 18px", background: "#FFFFFF", border: "1px solid #EEF2F7", borderRadius: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#94A3B8", letterSpacing: "0.08em", marginBottom: 8 }}>📚 从教材提取题目</div>
+            <div style={{ fontSize: 11.5, color: "#64748B", lineHeight: 1.5, marginBottom: 10 }}>
+              选一本已上传的教材，AI 摘录原书所有习题并给出思路 / 知识点 / 易错点
+            </div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+              <select
+                value={bookExtractMaterial?.id || ""}
+                onChange={(e) => {
+                  const m = allMaterials.find(x => x.id === e.target.value);
+                  setBookExtractMaterial(m || null);
+                }}
+                style={{ flex: 1, minWidth: 120, padding: "7px 8px", fontSize: 12, border: "1px solid #E5E7EB", borderRadius: 8, fontFamily: "inherit", background: "#fff" }}>
+                <option value="">{allMaterials.length === 0 ? "暂无已上传教材" : "选择教材…"}</option>
+                {allMaterials.map(m => (
+                  <option key={m.id} value={m.id}>{m.title}{m.course ? " · " + m.course : ""}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => bookExtractMaterial && triggerBookExtract(bookExtractMaterial)}
+                disabled={!bookExtractMaterial || bookExtractState.status === "loading"}
+                style={{
+                  padding: "7px 14px", background: !bookExtractMaterial ? "#E5E7EB" : "#8B5CF6",
+                  color: "#fff", border: "none", borderRadius: 8, cursor: !bookExtractMaterial ? "not-allowed" : "pointer",
+                  fontSize: 12, fontWeight: 700, fontFamily: "inherit",
+                }}>
+                {bookExtractState.status === "loading" ? "提取中…" : "🔍 提取"}
+              </button>
+            </div>
+            {bookExtractState.status === "error" && (
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, fontSize: 11.5, background: "#FEF2F2", color: "#991B1B", border: "1px solid #FECACA" }}>
+                ❌ {bookExtractState.error}
+              </div>
+            )}
+            {bookExtractState.status === "done" && bookExtractState.problems.length > 0 && (
+              <div style={{ marginTop: 8, maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#5B21B6" }}>✅ 提取到 {bookExtractState.problems.length} 道题</div>
+                {bookExtractState.problems.slice(0, 12).map((p, i) => (
+                  <div key={i} style={{ padding: "8px 10px", border: "1px solid #E9D5FF", borderRadius: 8, background: "#FAF5FF", fontSize: 11.5, lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#7C3AED", marginBottom: 3 }}>第 {i + 1} 题 · {p.type}</div>
+                    <div style={{ color: "#0F172A", marginBottom: 4, maxHeight: 50, overflow: "hidden" }}>
+                      <MathText text={p.question.slice(0, 200) + (p.question.length > 200 ? "…" : "")} />
+                    </div>
+                    {p.analysis?.concepts?.length > 0 && (
+                      <div style={{ fontSize: 10.5, color: "#6D28D9", marginBottom: 3 }}>
+                        🎯 {p.analysis.concepts.join(" · ")}
+                      </div>
+                    )}
+                    <button onClick={() => startBookProblemNow(p)}
+                      style={{ padding: "3px 10px", background: "#7C3AED", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                      ▶ 做这道
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {bookExtractState.status === "done" && bookExtractState.problems.length === 0 && (
+              <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, fontSize: 11.5, background: "#F9FAFB", color: "#6B7280" }}>
+                教材里没找到现成题目（可能只有理论说明）。
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* ══ 按课本做题 ══ */}
         {allMaterials.length > 0 && !effectiveMaterialId && (
