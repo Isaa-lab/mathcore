@@ -468,13 +468,72 @@ export function DynamicVizCard({ intent, onOpen }) {
 }
 
 // ── Inline renderer ────────────────────────────────────────────────────────
-function renderInline(text, keyPrefix = "") {
+// 2A：[[X]] chip 命中辅助函数
+// AI 在回复里用 [[名字]] 标注的知识点，先精确匹配 materialTopics 里的 name，
+// 没命中再做"子串包含"模糊匹配（例如 [[特征值]] 命中 DB 里的"矩阵的特征值"）。
+function resolveTopicForChip(name, ctx) {
+  if (!name || !ctx) return null;
+  const cleaned = String(name).trim();
+  if (!cleaned) return null;
+  // 1) 精确 match
+  if (ctx.topicByName && ctx.topicByName.has(cleaned)) return ctx.topicByName.get(cleaned);
+  // 2) 大小写归一
+  if (ctx.topicByName && ctx.topicByName.has(cleaned.toLowerCase())) return ctx.topicByName.get(cleaned.toLowerCase());
+  // 3) 子串匹配（DB 名字包含 chip 名 或 chip 名包含 DB 名）
+  if (Array.isArray(ctx.materialTopics)) {
+    const found = ctx.materialTopics.find((t) => {
+      const n = String(t?.name || "").trim();
+      if (!n) return false;
+      if (n === cleaned) return true;
+      // 至少 2 字以上才做子串匹配，避免 [[a]] 命中所有含 a 的 topic
+      if (cleaned.length >= 2 && (n.includes(cleaned) || cleaned.includes(n))) return true;
+      return false;
+    });
+    if (found) return found;
+  }
+  return null;
+}
+
+function renderInline(text, keyPrefix = "", context = {}) {
   if (text == null) return null;
   const str = String(text);
-  const parts = str.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|__VAR_\d+__|==[^=\n]+?==|\*\*[^*\n]+?\*\*|\*[^*\n]+?\*|`[^`\n]+?`|<mark>[\s\S]+?<\/mark>)/g);
+  // 把 [[X]] 也加入 split 分隔符（限制内容 1-40 字符，不含换行 / 嵌套方括号）
+  const parts = str.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|__VAR_\d+__|==[^=\n]+?==|\*\*[^*\n]+?\*\*|\*[^*\n]+?\*|`[^`\n]+?`|<mark>[\s\S]+?<\/mark>|\[\[[^\[\]\n]{1,40}\]\])/g);
   return parts.map((part, i) => {
     const key = `${keyPrefix}-${i}`;
     if (!part) return null;
+    // 2A：[[X]] 知识点 chip
+    const chipMatch = part.match(/^\[\[([^\[\]\n]{1,40})\]\]$/);
+    if (chipMatch) {
+      const name = chipMatch[1].trim();
+      const topic = resolveTopicForChip(name, context);
+      if (!topic) {
+        // 没命中已知 topic，直接显示文字（去掉双方括号）—— 避免页面出现 raw [[X]]
+        return <span key={key}>{name}</span>;
+      }
+      return (
+        <button
+          key={key}
+          type="button"
+          onClick={() => context.openTopicCard && context.openTopicCard(topic)}
+          title={`查看「${topic.name || name}」的公式 / 解释 / 例题 / 思路`}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 4,
+            padding: "1px 8px", margin: "0 2px",
+            background: "#EEF2FF", color: "#4338CA",
+            border: "1px solid #C7D2FE",
+            borderRadius: 6, cursor: "pointer", fontWeight: 600,
+            fontFamily: "inherit", fontSize: "0.95em",
+            verticalAlign: "baseline",
+            transition: "background 0.15s, border-color 0.15s",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "#E0E7FF"; e.currentTarget.style.borderColor = "#A5B4FC"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "#EEF2FF"; e.currentTarget.style.borderColor = "#C7D2FE"; }}
+        >
+          📚 {name}
+        </button>
+      );
+    }
     if (part.startsWith("$$") && part.endsWith("$$") && part.length > 4) {
       try {
         const html = katex.renderToString(part.slice(2, -2).trim(), { throwOnError: false, displayMode: true });
@@ -625,7 +684,7 @@ function renderMarkdown(text, context) {
         {listBuffer.map((item, idx) => (
           <li key={idx} style={{ display: "flex", alignItems: "flex-start", gap: 9, lineHeight: 1.6, color: "#1F2937", fontSize: 13.5 }}>
             <span style={{ flexShrink: 0, marginTop: 8, width: 4, height: 4, borderRadius: 999, background: "#8B5CF6" }} />
-            <div style={{ flex: 1, minWidth: 0 }}>{replaceVars(renderInline(item, `li-${idx}`))}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>{replaceVars(renderInline(item, `li-${idx}`, context))}</div>
           </li>
         ))}
       </ul>
@@ -684,17 +743,17 @@ function renderMarkdown(text, context) {
     if (!t) { flushList(); blocks.push(<div key={`sp-${idx}`} style={{ height: 4 }} />); return; }
     if (t.startsWith("### ")) {
       flushList();
-      blocks.push(<h3 key={`h3-${idx}`} style={{ margin: "12px 0 6px", fontSize: 13.5, fontWeight: 800, color: "#111827", letterSpacing: "-0.01em" }}>{replaceVars(renderInline(t.slice(4), `h3-${idx}`))}</h3>);
+      blocks.push(<h3 key={`h3-${idx}`} style={{ margin: "12px 0 6px", fontSize: 13.5, fontWeight: 800, color: "#111827", letterSpacing: "-0.01em" }}>{replaceVars(renderInline(t.slice(4), `h3-${idx}`, context))}</h3>);
       return;
     }
     if (t.startsWith("## ")) {
       flushList();
-      blocks.push(<h2 key={`h2-${idx}`} style={{ margin: "16px 0 8px", fontSize: 14.5, fontWeight: 800, color: "#111827", paddingBottom: 6, borderBottom: "1px solid #F3F4F6", letterSpacing: "-0.015em" }}>{replaceVars(renderInline(t.slice(3), `h2-${idx}`))}</h2>);
+      blocks.push(<h2 key={`h2-${idx}`} style={{ margin: "16px 0 8px", fontSize: 14.5, fontWeight: 800, color: "#111827", paddingBottom: 6, borderBottom: "1px solid #F3F4F6", letterSpacing: "-0.015em" }}>{replaceVars(renderInline(t.slice(3), `h2-${idx}`, context))}</h2>);
       return;
     }
     if (t.startsWith("# ")) {
       flushList();
-      blocks.push(<h1 key={`h1-${idx}`} style={{ margin: "16px 0 8px", fontSize: 15, fontWeight: 800, color: "#111827", letterSpacing: "-0.02em" }}>{replaceVars(renderInline(t.slice(2), `h1-${idx}`))}</h1>);
+      blocks.push(<h1 key={`h1-${idx}`} style={{ margin: "16px 0 8px", fontSize: 15, fontWeight: 800, color: "#111827", letterSpacing: "-0.02em" }}>{replaceVars(renderInline(t.slice(2), `h1-${idx}`, context))}</h1>);
       return;
     }
     const ulM = t.match(/^[-*]\s+(.+)/);
@@ -707,7 +766,7 @@ function renderMarkdown(text, context) {
     flushList();
     blocks.push(
       <p key={`p-${idx}`} style={{ margin: "0 0 10px", lineHeight: 1.6, color: "#1F2937", fontSize: 13.5, letterSpacing: "0.005em" }}>
-        {replaceVars(renderInline(t, `p-${idx}`))}
+        {replaceVars(renderInline(t, `p-${idx}`, context))}
       </p>
     );
   });
@@ -766,13 +825,28 @@ export default function MaterialChatPage({
   renderChart,
   onOpenChart,
   aiBody,
+  materialTopics,   // 2A：当前资料的 topics 列表（外层 MaterialChatPage in App.js 拉出来传入）
 }) {
   const stream = messages || conversationHistory || [];
   const openLab = useMathStore((s) => s.openLab);
+  const setTopicCard = useMathStore((s) => s.setTopicCard);
+  // 2A：为 [[X]] chip 准备 ctx —— name 索引表 + 全量列表（模糊匹配用）+ 点击回调
+  const topicByName = new Map();
+  if (Array.isArray(materialTopics)) {
+    materialTopics.forEach((t) => {
+      if (t && t.name) topicByName.set(String(t.name).trim(), t);
+    });
+  }
   const context = {
     renderChart,
     currentMaterial,
     aiBody,
+    materialTopics: Array.isArray(materialTopics) ? materialTopics : [],
+    topicByName,
+    openTopicCard: (topic) => {
+      // 触发全局 portal：先用 loading 状态打开，portal 自己会缓存优先 → AI 兜底
+      setTopicCard({ topic, loading: true, data: null, error: null });
+    },
     onOpenViz: (intent) => {
       openLab(intent);
       if (onOpenChart) onOpenChart(intent);

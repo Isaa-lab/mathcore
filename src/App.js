@@ -13479,6 +13479,7 @@ function MaterialChatPage({ setPage, profile, currentMaterial = null }) {
             currentMaterial={selectedMaterial}
             renderChart={() => <InteractiveMathChart />}
             aiBody={buildAIBody()}
+            materialTopics={materialTopics}
           />
         </motion.div>
         {chatting && (
