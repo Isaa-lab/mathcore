@@ -487,8 +487,8 @@ export function DynamicVizCard({ intent, onOpen }) {
 
 // ── Inline renderer ────────────────────────────────────────────────────────
 // 2A：[[X]] chip 命中辅助函数
-// AI 在回复里用 [[名字]] 标注的知识点，先精确匹配 materialTopics 里的 name，
-// 没命中再做"子串包含"模糊匹配（例如 [[特征值]] 命中 DB 里的"矩阵的特征值"）。
+// 三级 fallback：精确 → 大小写归一 → 子串包含；都不命中时仍返回 stub topic，
+// 让 AI 显式 [[X]] 标注的概念即使数据库里没有也照样渲染成 chip（点击时按需 live-fetch）。
 function resolveTopicForChip(name, ctx) {
   if (!name || !ctx) return null;
   const cleaned = String(name).trim();
@@ -508,6 +508,12 @@ function resolveTopicForChip(name, ctx) {
       return false;
     });
     if (found) return found;
+  }
+  // 4) 兜底：返回一个没有 id 的 stub topic —— GlobalTopicCardPortal 会跳过缓存直接
+  //    live-fetch /api/topic-detail，让用户也能看 AI 临场生成的知识点详情。
+  //    这里只在名字 ≥ 2 字符时才返回 stub，避免 [[a]] 这种意外短字也渲染成 chip。
+  if (cleaned.length >= 2) {
+    return { id: null, name: cleaned, summary: "", chapter: null, provider: null };
   }
   return null;
 }

@@ -10,6 +10,36 @@ import {
   rolloverIncompleteTasks,
 } from "../utils/planGenerator";
 
+// 打印样式：window.print() 时只显示诊断报告，其他都隐藏 —— 让用户在浏览器的
+// "保存为 PDF" 对话框里得到一份干净的 A4 报告。
+const PRINT_STYLE_ID = "mc-sprint-print-style";
+if (typeof document !== "undefined" && !document.getElementById(PRINT_STYLE_ID)) {
+  const style = document.createElement("style");
+  style.id = PRINT_STYLE_ID;
+  style.textContent = `
+    @media print {
+      body * { visibility: hidden !important; }
+      #mc-diagnostic-report, #mc-diagnostic-report * { visibility: visible !important; }
+      #mc-diagnostic-report {
+        position: absolute !important;
+        left: 0 !important; top: 0 !important;
+        width: 100% !important;
+        max-width: 720px !important;
+        margin: 24px auto !important;
+        padding: 24px !important;
+        background: #fff !important;
+        border: 1px solid #86EFAC !important;
+        box-shadow: none !important;
+        page-break-inside: avoid !important;
+      }
+      .mc-no-print { display: none !important; }
+      /* 章节分组分行更清晰 */
+      #mc-diagnostic-report b { font-weight: 700; }
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 // =============================================================================
 // 冲刺日历 —— 月视图，支持考试日标记 + 有任务的日期标小圆点 + 点击打开抽屉
 // =============================================================================
@@ -962,7 +992,7 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
           else planText = "基础需要加强。建议每日 70% 时间从薄弱章节的概念 + 例题入手，30% 时间针对性练题——前两周先不做模考，避免打击信心。";
           return (
             <div style={{ padding: "14px 24px 0" }}>
-              <div style={{
+              <div id="mc-diagnostic-report" style={{
                 background: "linear-gradient(135deg,#ECFDF5,#F0FDF4)", border: "1.5px solid #86EFAC",
                 borderRadius: 12, padding: "14px 18px",
               }}>
@@ -979,9 +1009,23 @@ export default function SprintWorkspace({ chatPage, quizPage, onViewWrong, allQu
                     <div style={{ fontSize: 10.5, color: "#6B7280", marginTop: 2 }}>{diag.score} / {diag.total} 题</div>
                   </div>
                   <button
+                    onClick={() => {
+                      // 用户要求：诊断报告能以 PDF 形式保存
+                      // 浏览器原生方案：触发 window.print()，配合 @media print 样式
+                      // 只显示 #mc-diagnostic-report 节点。用户在弹出的对话框里选
+                      // "保存为 PDF" 即可导出。无需任何外部依赖。
+                      try { window.print(); } catch (e) { alert("PDF 导出未支持：" + e.message); }
+                    }}
+                    title="导出为 PDF（浏览器对话框里选'保存为 PDF'）"
+                    style={{ padding: "5px 10px", background: "#fff", color: "#1E40AF", border: "1px solid #BFDBFE", borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", marginRight: 6 }}
+                    className="mc-no-print">
+                    📄 导出 PDF
+                  </button>
+                  <button
                     onClick={startDiagnostic}
                     title="再做一次诊断（会覆盖现有报告）"
-                    style={{ padding: "5px 10px", background: "#fff", color: "#047857", border: "1px solid #86EFAC", borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                    style={{ padding: "5px 10px", background: "#fff", color: "#047857", border: "1px solid #86EFAC", borderRadius: 7, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}
+                    className="mc-no-print">
                     🔁 重测
                   </button>
                 </div>
