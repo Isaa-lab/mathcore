@@ -2,6 +2,13 @@ import { motion } from "framer-motion";
 import katex from "katex";
 import { useMathStore } from "../store/useMathStore";
 import ConceptGraphCard from "../components/ConceptGraphCard";
+import {
+  reviveLatexControlChars,
+  normalizeLatexDelimiters,
+  mergeFragmentedLatex,
+  wrapBareSubscriptVars,
+  mergeAdjacentMathBlocks,
+} from "../utils/latex";
 
 const springTransition = { type: "spring", stiffness: 300, damping: 25 };
 const bubbleVariants = {
@@ -108,7 +115,18 @@ function rescueBareMath(text) {
 function preprocessLaTeX(content) {
   if (!content) return "";
   let processed = String(content);
-  // Normalize whitespace around $$ fences
+  // ── 全套 LaTeX 修复链（与 QuizPage <MathText> 对齐）────────────────────────
+  // 步骤 0a) JSON 反斜杠被吃成控制字符还原回 \frac \int 等
+  processed = reviveLatexControlChars(processed);
+  // 步骤 0b) \( \) \[ \] 归一成 $..$ / $$..$$
+  processed = normalizeLatexDelimiters(processed);
+  // 步骤 0c) 合并被拆碎的 \frac / \binom 跨 $..$ 边界（典型："$\frac{X}${$Y$}" → "$\frac{X}{Y}$"）
+  processed = mergeFragmentedLatex(processed);
+  // 步骤 0d) 把 $..$ 外的"裸下标变量" a_{ij} / x_n / y^{n+1} 单独包成 $..$
+  processed = wrapBareSubscriptVars(processed);
+  // 步骤 0e) 合并被运算符隔开的相邻 $..$ 块：$a_{ij}$ = $a_{ij}$ - $\frac{X}$ → $a_{ij} = a_{ij} - \frac{X}$
+  processed = mergeAdjacentMathBlocks(processed);
+  // ── 原有的 $$ fence 空白归一 ─────────────────────────────────────────────
   processed = processed.replace(/\$\$\s*\n\s*\n+/g, "$$\n");
   processed = processed.replace(/\n\s*\n+\s*\$\$/g, "\n$$");
   processed = processed.replace(/\$\$[ \t]+/g, "$$");
@@ -631,9 +649,58 @@ function extractMacros(src) {
 }
 
 // ── Block renderer ─────────────────────────────────────────────────────────
+// 2A 兜底：AI 不听话没用 [[X]] 包概念时，客户端扫描文本里出现的已知 topic 名字
+// 自动包成 [[X]]，让 renderInline 的 chip 解析能命中。
+// - 跳过 $..$ 数学块（不污染公式）
+// - 跳过已被 AI 包好的 [[X]] 区域（避免双包）
+// - 每个 name 只在首次出现处包一次（避免视觉杂乱）
+// - 长名优先匹配（"矩阵特征值" 比 "矩阵" 先匹配，避免拆碎）
+function autoMarkTopics(text, context) {
+  if (!text) return text;
+  const topics = context && Array.isArray(context.materialTopics) ? context.materialTopics : [];
+  if (topics.length === 0) return text;
+
+  // 1) 把已有的 [[X]] 隔离成占位符，最后还原
+  const existingMarks = [];
+  const SENTINEL = "M";
+  let work = String(text).replace(/\[\[[^\[\]\n]{1,40}\]\]/g, (m) => {
+    existingMarks.push(m);
+    return `${SENTINEL}${existingMarks.length - 1}`;
+  });
+
+  // 2) 收集所有去重后的 name，按长度倒排（保证子串安全）
+  const names = [...new Set(
+    topics
+      .map((t) => String(t?.name || "").trim())
+      .filter((n) => n.length >= 2 && n.length <= 30)
+  )].sort((a, b) => b.length - a.length);
+  if (names.length === 0) {
+    return work.replace(/M(\d+)/g, (_m, i) => existingMarks[Number(i)]);
+  }
+  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const unionRe = new RegExp(names.map(escape).join("|"), "g");
+
+  // 3) 按 $..$ 切分，只在非数学片段里 auto-mark；每个 name 全局只包首次
+  const parts = work.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g);
+  const usedNames = new Set();
+  const out = parts.map((p) => {
+    if (!p || p.startsWith("$")) return p;
+    return p.replace(unionRe, (match) => {
+      if (usedNames.has(match)) return match;
+      usedNames.add(match);
+      return `[[${match}]]`;
+    });
+  }).join("");
+
+  // 4) 还原原有 [[X]]
+  return out.replace(/M(\d+)/g, (_m, i) => existingMarks[Number(i)]);
+}
+
 function renderMarkdown(text, context) {
   if (!text) return null;
-  const cleaned = preprocessLaTeX(text);
+  // 2A：先把已知 topic 名字自动包成 [[X]]（兜底 AI 没包的情况）
+  const marked = autoMarkTopics(text, context);
+  const cleaned = preprocessLaTeX(marked);
   const { out: prepared0, varBlocks, vizBlocks, graphRefs } = extractMacros(cleaned);
   const prepared = prepared0
     .replace(/\\begin\{tikzpicture\}[\s\S]*?\\end\{tikzpicture\}/g, "")
