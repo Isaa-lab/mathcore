@@ -1811,7 +1811,7 @@ async function buildTopicDetailsBulk({ rows, materialContext, detectedProvider, 
   }
 }
 
-const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvider = null, forceUserKey = null, onProgress = null }) => {
+const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvider = null, forceUserKey = null, onProgress = null, skipDetailBuild = false }) => {
   // onProgress(percent: 0-100, label: string) —— 让 UI 实时显示阶段 + 数字进度
   const report = (pct, label) => { try { onProgress && onProgress(Math.max(0, Math.min(100, Math.round(pct))), label); } catch {} };
   report(2, "准备资料元数据…");
@@ -2216,7 +2216,9 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, forceProvi
           // ── 1A：彻底知识库构建 —— 为每个新抽到的 topic 调 /api/topic-detail 填详情入库 ──
           // 设计目标：每个知识点都有 公式 / 解释 / 例题 / 解题思路 四件套，存到 topic_details 表。
           // 进度回调把"知识库构建 N/M"实时报给 UI，让用户知道还在跑。
-          if (insertedRows.length > 0) {
+          // skipDetailBuild = true 时跳过这一步（re-extract 入口用 —— 用户只想换 AI 抽个名字列表，
+          // 不需要把 ~20 个详情也立刻全建出来，避免连续打爆免费档 TPM 导致后续 extract 全 429）。
+          if (insertedRows.length > 0 && !skipDetailBuild) {
             await buildTopicDetailsBulk({
               rows: insertedRows,
               materialContext: chapter,
@@ -5576,6 +5578,11 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         forceProvider: provider,
         forceUserKey: userKeyForProvider,
         actorName: `用户重抽（${provider}）`,
+        // re-extract 只是换 AI 看看抽出的"骨架"差别，不需要立刻把 ~20 个详情也建出来。
+        // 不跳过的话连续点几个 provider 会把免费档 TPM 打爆，引发后续 extract 全部 429
+        // → 用户看到的"全都失败了，抽出知识点还为 0"就是这种连锁反应。
+        // 详情会在用户点击具体 topic 卡片时（GlobalTopicCardPortal）按需懒加载。
+        skipDetailBuild: true,
         onProgress: (pct, label) => {
           setReExtractStatus({ provider, status: "running", msg: `${label || "处理中"}  ${pct}%` });
         },
@@ -16231,7 +16238,7 @@ function GlobalTopicCardPortal() {
   return (
     <AITopicDetailModal
       state={card}
-      providerMeta={PROVIDER_META[(card.topic?.provider || "legacy")] || PROVIDER_META.unknown}
+      providerMeta={KP_PROVIDER_META[(card.topic?.provider || "legacy")] || KP_PROVIDER_META.unknown}
       onClose={closeCard}
     />
   );
