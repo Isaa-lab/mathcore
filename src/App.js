@@ -5392,6 +5392,9 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const [materials, setMaterials] = useState([]);
   const [aiTopics, setAiTopics] = useState([]);
   const [topicMastery, setTopicMastery] = useState({});
+  const [reextracting, setReextracting] = useState(false);
+  const [reextractMsg, setReextractMsg] = useState("");
+  const [aiProvider, setAiProvider] = useState(() => getAIConfig().provider || "server");
   const EXTRACT_MODEL_PRESETS = [
     { label: "自动（推荐）", value: "" },
     { label: "Gemini 2.0 Flash", value: "gemini-2.0-flash" },
@@ -5414,7 +5417,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     try {
       const tRes = await supabase
         .from("material_topics")
-        .select("id,material_id,name,summary,chapter,created_at")
+        .select("id,material_id,name,summary,chapter,created_at,generated_by,ai_model")
         .order("created_at", { ascending: false })
         .limit(800);
       setAiTopics(Array.isArray(tRes.data) ? tRes.data : []);
@@ -5445,6 +5448,15 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [reloadKnowledge]);
+
+  useEffect(() => {
+    const onProviderChange = (e) => {
+      const next = e?.detail?.providerId;
+      if (next && AI_PROVIDER_META[next]) setAiProvider(next);
+    };
+    window.addEventListener("mc:ai-provider-changed", onProviderChange);
+    return () => window.removeEventListener("mc:ai-provider-changed", onProviderChange);
+  }, []);
 
   const markTopicMastery = async (topic, status) => {
     const uid = (await supabase.auth.getUser())?.data?.user?.id;
@@ -5492,6 +5504,39 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   };
 
   const selectedMaterial = materials.find((m) => m.id === selectedMaterialId) || null;
+
+  const reextractTopicsWithCurrentAI = async () => {
+    if (!selectedMaterialId || reextracting) return;
+    setReextracting(true);
+    setReextractMsg("");
+    try {
+      const matRes = await supabase
+        .from("materials")
+        .select("id,title,course,chapter,description,file_name,file_data")
+        .eq("id", selectedMaterialId)
+        .single();
+      if (matRes.error || !matRes.data) throw new Error(matRes.error?.message || "找不到教材");
+      const mat = matRes.data;
+      const fetchedFile = mat.file_data ? await fetchFileAsBrowserFile(mat.file_data, mat.file_name || "material.pdf") : null;
+      const result = await processMaterialWithAI({
+        material: mat,
+        file: fetchedFile,
+        genCount: 12,
+        refine: true,
+        actorName: "知识点重抽取",
+      });
+      const linked = Number(result?.topicsLinked || 0);
+      const providerName = AI_PROVIDER_META[getAIConfig().provider]?.name || "当前 AI";
+      const modelName = getAIConfig().extractModel || "默认模型";
+      setReextractMsg(`✅ 已按 ${providerName} / ${modelName} 重抽取，新增知识点 ${linked} 个。`);
+      await reloadKnowledge();
+    } catch (e) {
+      setReextractMsg(`❌ 重抽取失败：${e?.message || "未知错误"}`);
+    } finally {
+      setReextracting(false);
+      setTimeout(() => setReextractMsg(""), 7000);
+    }
+  };
 
   // Build course knowledge points from hardcoded CHAPTERS + KNOWLEDGE_CONTENT
   const courseTopics = selectedMaterial
@@ -5541,6 +5586,20 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
             </div>
             <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
               <select
+                value={aiProvider}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setAiProvider(next);
+                  setActiveAIProvider(next);
+                }}
+                style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid #dbeafe", background: "#eff6ff", color: "#1d4ed8", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}
+                title="知识点抽取用 AI 提供商"
+              >
+                {AI_PROVIDER_ORDER.map((pid) => (
+                  <option key={pid} value={pid}>{AI_PROVIDER_META[pid]?.name || pid}</option>
+                ))}
+              </select>
+              <select
                 value={extractModel}
                 onChange={(e) => {
                   const next = e.target.value;
@@ -5557,6 +5616,9 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   <option key={opt.label} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
+              <Btn size="sm" variant="primary" onClick={reextractTopicsWithCurrentAI} disabled={!selectedMaterialId || reextracting}>
+                {reextracting ? "重抽取中…" : "按当前AI重抽取"}
+              </Btn>
               <Btn size="sm" onClick={() => reloadKnowledge()}>刷新</Btn>
               <Btn size="sm" onClick={() => setPage("上传资料")}>上传新资料</Btn>
               <Btn size="sm" variant="primary" onClick={() => { if (!selectedMaterial) return; setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || "")); }} disabled={!selectedMaterial}>
@@ -5564,6 +5626,11 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
               </Btn>
             </div>
           </div>
+          {reextractMsg && (
+            <div style={{ marginTop: -6, marginBottom: 14, padding: "9px 12px", borderRadius: 10, background: reextractMsg.startsWith("✅") ? "#ecfdf5" : "#fef2f2", color: reextractMsg.startsWith("✅") ? "#166534" : "#b91c1c", fontSize: 12.5, fontWeight: 600 }}>
+              {reextractMsg}
+            </div>
+          )}
 
           {/* ── AI extracted topics (material_topics) for this material ── */}
           {aiTopicsForMaterial.length > 0 && (
@@ -5595,6 +5662,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 10, color: "#7c3aed", background: "#ede9fe", padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>🤖 AI 生成</span>
                         {t.chapter && <span style={{ fontSize: 10, color: G.blue, background: G.blueLight, padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>{t.chapter}</span>}
+                        {t.generated_by && <ProvenanceBadge provider={t.generated_by} model={t.ai_model || null} size="sm" />}
                       </div>
                       <div style={{ display: "flex", gap: 7, marginTop: 2 }}>
                         <button
