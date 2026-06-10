@@ -5628,48 +5628,52 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   });
 
   const totalTopicCount = courseTopics.length + aiTopicsForMaterial.length;
-  const inferTopicCategory = (t) => {
-    const kind = String(t?.kind || "").toLowerCase();
-    const text = `${t?.name || ""} ${t?.summary || ""}`.toLowerCase();
-    const has = (re) => re.test(text);
-    if (/theorem|lemma|corollary|proposition|axiom|定理|引理|推论|公理|性质/.test(kind) || has(/定理|引理|推论|性质|判别法/)) return "核心定理";
-    if (/method|algorithm|procedure|步骤|算法|消元|分解|迭代|求解|证明/.test(kind) || has(/方法|算法|步骤|流程|消元|分解|迭代|求解|证明/)) return "计算方法";
-    if (/exercise|problem|question|题型|练习/.test(kind) || has(/题型|例题|练习|习题|证明题|计算题|应用题/)) return "典型题型";
-    if (/warning|pitfall|error|memory|技巧|易错|注意/.test(kind) || has(/易错|注意|陷阱|技巧|记忆/)) return "易错与技巧";
-    if (/application|model|实践|应用|case/.test(kind) || has(/应用|建模|场景|案例|综合/)) return "综合应用";
-    return "基础概念";
+  const courseChapters = selectedMaterial?.course ? CHAPTERS.filter(ch => ch.course === selectedMaterial.course) : [];
+  const chapterOrder = Array.from(new Set(courseChapters.map(ch => ch.num)));
+  const normalizeChapterKey = (raw) => {
+    const m = String(raw || "").match(/Ch\.?\s*(\d+[a-z]?)/i);
+    return m ? `Ch.${m[1]}` : null;
   };
-  const aiGroupedByCategory = aiTopicsForMaterial.reduce((acc, t) => {
-    const key = inferTopicCategory(t);
+  const inferTextbookChapter = (t, idx) => {
+    const direct = normalizeChapterKey(t?.chapter);
+    if (direct && chapterOrder.includes(direct)) return direct;
+
+    const mapped = normalizeChapterKey(TOPIC_CHAPTER[t?.name]);
+    if (mapped && chapterOrder.includes(mapped)) return mapped;
+
+    const text = `${t?.name || ""} ${t?.summary || ""}`.toLowerCase();
+    for (const ch of courseChapters) {
+      if ((ch.topics || []).some(topicName => text.includes(String(topicName).toLowerCase()))) return ch.num;
+    }
+
+    if (selectedMaterial?.course === "线性代数") {
+      if (/行列式|determinant|cramer|余子式|代数余子式/.test(text)) return "Ch.2";
+      if (/子空间|向量空间|vector space|basis|基与维数|维数|列空间|零空间|null space|column space|坐标/.test(text)) return "Ch.3";
+      if (/正交|orthogonal|inner product|内积|gram|qr|least squares|最小二乘|投影/.test(text)) return "Ch.4";
+      if (/特征|eigen|对角化|diagonal|谱定理|svd|singular/.test(text)) return "Ch.5";
+      if (/矩阵|matrix|gauss|jordan|消去|线性方程|rank|秩|初等变换|linear system/.test(text)) return "Ch.1";
+    }
+
+    const seq = Number(t?.ai_meta?.extract_order?.seq);
+    const sourceIndex = Number.isFinite(seq) ? seq : idx;
+    if (courseChapters.length > 0) {
+      const approx = Math.min(courseChapters.length - 1, Math.floor((sourceIndex / Math.max(1, aiTopicsForMaterial.length)) * courseChapters.length));
+      return courseChapters[approx]?.num || "未归章";
+    }
+    return "未归章";
+  };
+  const aiGroupedByChapter = aiTopicsForMaterial.reduce((acc, t, idx) => {
+    const key = inferTextbookChapter(t, idx);
     if (!acc[key]) acc[key] = [];
     acc[key].push(t);
     return acc;
   }, {});
-  const chapterOrder = Array.from(new Set((selectedMaterial?.course ? CHAPTERS.filter(ch => ch.course === selectedMaterial.course).map(ch => ch.num) : [])));
-  const categoryLabelOf = (groupKey) => {
-    const map = {
-      "基础概念": "基础概念",
-      "核心定理": "核心定理",
-      "计算方法": "计算方法",
-      "典型题型": "典型题型",
-      "易错与技巧": "易错与技巧",
-      "综合应用": "综合应用",
-    };
-    return map[groupKey] || groupKey;
+  const chapterLabelOf = (groupKey) => {
+    const ch = courseChapters.find(c => c.num === groupKey);
+    return ch ? ch.name : String(groupKey || "未归章");
   };
-  const categoryPillOf = (groupKey) => {
-    const map = {
-      "基础概念": "概念",
-      "核心定理": "定理",
-      "计算方法": "方法",
-      "典型题型": "题型",
-      "易错与技巧": "技巧",
-      "综合应用": "应用",
-    };
-    return map[groupKey] || "分类";
-  };
-  const categorySeqOf = (groupKey) => {
-    const arr = aiGroupedByCategory[groupKey] || [];
+  const chapterSeqOf = (groupKey) => {
+    const arr = aiGroupedByChapter[groupKey] || [];
     let minSeq = Number.POSITIVE_INFINITY;
     for (const t of arr) {
       const s = Number(t?.ai_meta?.extract_order?.seq);
@@ -5677,18 +5681,17 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     }
     return Number.isFinite(minSeq) ? minSeq : null;
   };
-  const categoryOrder = ["基础概念", "核心定理", "计算方法", "典型题型", "易错与技巧", "综合应用"];
-  const orderedGroupKeys = Object.keys(aiGroupedByCategory).sort((a, b) => {
-    const seqA = categorySeqOf(a);
-    const seqB = categorySeqOf(b);
-    if (Number.isFinite(seqA) && Number.isFinite(seqB)) return seqA - seqB; // 优先按学习/抽取顺序
-    if (Number.isFinite(seqA)) return -1;
-    if (Number.isFinite(seqB)) return 1;
-    const ia = categoryOrder.indexOf(a);
-    const ib = categoryOrder.indexOf(b);
+  const orderedGroupKeys = Object.keys(aiGroupedByChapter).sort((a, b) => {
+    const ia = chapterOrder.indexOf(a);
+    const ib = chapterOrder.indexOf(b);
     if (ia >= 0 && ib >= 0) return ia - ib;
     if (ia >= 0) return -1;
     if (ib >= 0) return 1;
+    const seqA = chapterSeqOf(a);
+    const seqB = chapterSeqOf(b);
+    if (Number.isFinite(seqA) && Number.isFinite(seqB)) return seqA - seqB;
+    if (Number.isFinite(seqA)) return -1;
+    if (Number.isFinite(seqB)) return 1;
     return a.localeCompare(b, "zh-CN");
   });
 
@@ -5809,7 +5812,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
               ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: -4 }}>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: "#475569", letterSpacing: "0.02em" }}>按知识类别整理</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#475569", letterSpacing: "0.02em" }}>按教材章节整理</div>
                   <div style={{ display: "flex", gap: 6 }}>
                     <button
                       onClick={() => {
@@ -5838,19 +5841,19 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: collapsedAiChapters[groupKey] ? 0 : 12 }}>
                       <button
                         onClick={() => setCollapsedAiChapters((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }))}
-                        aria-label={collapsedAiChapters[groupKey] ? "展开分类" : "折叠分类"}
+                        aria-label={collapsedAiChapters[groupKey] ? "展开章节" : "折叠章节"}
                         style={{ border: "none", background: "transparent", color: "#64748B", fontSize: 13, lineHeight: 1, padding: 0, cursor: "pointer" }}
                       >
                         {collapsedAiChapters[groupKey] ? "▸" : "▾"}
                       </button>
                       <span style={{ background: "#2563eb", color: "#fff", borderRadius: 8, padding: "3px 8px", fontSize: 11, fontWeight: 800, letterSpacing: "0.04em", whiteSpace: "nowrap" }}>
-                        {categoryPillOf(groupKey)}
+                        {groupKey}
                       </span>
                       <div style={{ fontSize: 14.5, fontWeight: 800, color: "#334155", lineHeight: 1.2, whiteSpace: "nowrap" }}>
-                          {categoryLabelOf(groupKey)}
+                          {chapterLabelOf(groupKey)}
                       </div>
                       <span style={{ fontSize: 12, color: "#94A3B8", whiteSpace: "nowrap" }}>
-                        {aiGroupedByCategory[groupKey]?.length || 0} 个知识点
+                        {aiGroupedByChapter[groupKey]?.length || 0} 个知识点
                       </span>
                       <div style={{ flex: 1, height: 1, background: "#F1F5F9" }} />
                       <button
@@ -5862,11 +5865,11 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                     </div>
                     {collapsedAiChapters[groupKey] ? (
                       <div style={{ marginLeft: 31, marginBottom: 2, fontSize: 12, color: "#94A3B8" }}>
-                        已收起 {aiGroupedByCategory[groupKey]?.length || 0} 个知识点
+                        已收起 {aiGroupedByChapter[groupKey]?.length || 0} 个知识点
                       </div>
                     ) : (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
-                {aiGroupedByCategory[groupKey].map(t => {
+                {aiGroupedByChapter[groupKey].map(t => {
                   const mastery = topicMastery[t.id]?.status || "todo";
                   return (
                     <div
