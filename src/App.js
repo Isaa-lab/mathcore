@@ -545,6 +545,7 @@ const getAIConfig = () => {
     provider,
     key: provider === "server" ? "" : (allKeys[provider] || ""),
     customUrl: localStorage.getItem("mc_ai_custom_url") || "",
+    extractModel: localStorage.getItem("mc_ai_extract_model") || "",
     allKeys,
   };
 };
@@ -911,6 +912,18 @@ function AISettingsModal({ onClose }) {
   const [customUrl, setCustomUrl] = useState(localStorage.getItem("mc_ai_custom_url") || "");
   const [showKey, setShowKey] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [extractModel, setExtractModel] = useState(localStorage.getItem("mc_ai_extract_model") || "");
+  const EXTRACT_MODEL_PRESETS = [
+    { id: "auto", label: "自动（推荐）", value: "" },
+    { id: "gemini20", label: "Gemini 2.0 Flash", value: "gemini-2.0-flash" },
+    { id: "gemini3flash", label: "Gemini 3 Flash Preview", value: "[L]gemini-3-flash-preview" },
+    { id: "gemini25pro", label: "Gemini 2.5 Pro", value: "[L]gemini-2.5-pro" },
+    { id: "groq70b", label: "Groq Llama 3.3 70B", value: "llama-3.3-70b-versatile" },
+    { id: "deepseek", label: "DeepSeek Chat", value: "deepseek-chat" },
+    { id: "kimi", label: "Kimi 8K", value: "moonshot-v1-8k" },
+    { id: "custom", label: "自定义（手动输入）", value: "__custom__" },
+  ];
+  const selectedPreset = EXTRACT_MODEL_PRESETS.find((p) => p.value === extractModel)?.id || (extractModel ? "custom" : "auto");
 
   const curProvider = AI_PROVIDERS.find(p => p.id === provider) || AI_PROVIDERS[0];
 
@@ -927,6 +940,8 @@ function AISettingsModal({ onClose }) {
       setActiveAIProvider("server");
       localStorage.removeItem("mc_ai_custom_url");
     }
+    if (extractModel.trim()) localStorage.setItem("mc_ai_extract_model", extractModel.trim());
+    else localStorage.removeItem("mc_ai_extract_model");
     setSaved(true);
     setTimeout(() => { setSaved(false); onClose(); }, 800);
   };
@@ -936,8 +951,9 @@ function AISettingsModal({ onClose }) {
     try { localStorage.removeItem("mc_ai_keys"); } catch {}
     localStorage.removeItem("mc_ai_key");
     localStorage.removeItem("mc_ai_custom_url");
+    localStorage.removeItem("mc_ai_extract_model");
     setActiveAIProvider("server");
-    setKey(""); setCustomUrl(""); setProvider("groq");
+    setKey(""); setCustomUrl(""); setProvider("groq"); setExtractModel("");
     setSaved(true);
     setTimeout(() => { setSaved(false); onClose(); }, 800);
   };
@@ -999,6 +1015,31 @@ function AISettingsModal({ onClose }) {
             <button onClick={() => setShowKey(v => !v)} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#aaa", fontSize: 16 }}>{showKey ? "🙈" : "👁"}</button>
           </div>
           <div style={{ fontSize: 11, color: "#aaa", marginTop: 4 }}>Key 仅保存在你的浏览器本地，不会上传到服务器</div>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ fontSize: 13, fontWeight: 600, color: "#555", display: "block", marginBottom: 6 }}>知识点抽取模型（可选）</label>
+          <select
+            value={selectedPreset}
+            onChange={(e) => {
+              const preset = EXTRACT_MODEL_PRESETS.find((p) => p.id === e.target.value);
+              if (!preset) return;
+              if (preset.value === "__custom__") return;
+              setExtractModel(preset.value);
+            }}
+            style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", marginBottom: 8, background: "#fff" }}
+          >
+            {EXTRACT_MODEL_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+          </select>
+          <input
+            value={extractModel}
+            onChange={(e) => setExtractModel(e.target.value)}
+            placeholder={provider === "gemini" ? "如：gemini-2.0-flash / [L]gemini-3-flash-preview" : "如：llama-3.3-70b-versatile"}
+            style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #e0e0e0", borderRadius: 10, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box" }}
+          />
+          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>仅影响教材知识点抽取（`/api/extract`），不影响普通聊天答疑。</div>
         </div>
 
         {/* 当前生效提示 */}
@@ -1831,6 +1872,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
             chunkCount: chunks.length,
             refContext: refs,
             refine,
+            extractModel: aiCfg.extractModel || null,
             userProvider: aiCfg.provider, userKey: aiCfg.key, userCustomUrl: aiCfg.customUrl,
           }),
         });

@@ -4,12 +4,15 @@ export default async function handler(req, res) {
   const {
     text, course, chapter, count = 5,
     userProvider, userKey, userCustomUrl,
+    extractModel,
     // 分块管线注入（可选）：让 AI 知道自己在看的是文档片段 N / 共 M，并带上跨片段的引用定义
     chunkIndex = null, chunkCount = null, refContext = null,
     // refine=true：用细化版 prompt（多抽 2-3 倍知识点，强制带 prerequisites / depth / kind）
     // 用户在沙盒里点"🔬 细化分析"或资料库的"重新分析"会传 refine=true
     refine = false,
   } = req.body;
+  const requestedModelRaw = String(extractModel || "").trim();
+  const requestedModel = requestedModelRaw && /^[\w.\-:[\]\/]+$/i.test(requestedModelRaw) ? requestedModelRaw : "";
 
   const GEMINI_KEY = process.env.GEMINI_KEY;
   const GEMINI_OAI_KEY = process.env.Gemini2_0 || process.env.GEMINI2_0 || process.env.GEMINI_2_0 || "";
@@ -124,6 +127,15 @@ The 中文 instructions below override any English fallback you might consider.`
   const providerHint = String(effectiveProvider || ((GEMINI_KEY || GEMINI_OAI_KEY) ? "gemini" : ANTHROPIC_KEY ? "anthropic" : "custom")).toLowerCase();
   const opener = PROVIDER_OPENERS[providerHint] || PROVIDER_OPENERS.custom;
 
+  const lectureStyleBanner = `【讲义风格约束（知识点抽取必须对齐）】
+你输出的 topics 要模拟“期末复习讲义”的教学结构，每个 topic 都要尽量包含以下信息（写入 summary）：
+1) 知识点定义/结论（对应讲义里的 .tip/.key）
+2) 解题步骤线索（对应 .step，至少给 2-4 步的动作短语）
+3) 公式总结（对应 .formula-box，至少出现一个关键公式）
+4) 例题分析方向（对应 .example，说明典型题型）
+5) 记忆方法（对应 .memory，给一句记忆钩子）
+注意：我们现在只抽“知识点卡片”，不是直接生成 HTML，所以把这些结构融入 topic.summary 文本即可。`;
+
   const prompt = `${opener}
 
 【重要警告】以下文本由 PDF 自动提取，数学符号可能存在乱码：
@@ -131,7 +143,8 @@ The 中文 instructions below override any English fallback you might consider.`
 - "d y / d x" 实为 dy/dx，字母间多余空格是乱码
 - 所有数学公式必须还原为正确标准符号，绝对不能照抄乱码原文
 
-${refineNote}${chunkBanner}${refBanner}=== 教材原文（${isEnglish ? "英文" : "中文"}教材，输出用中文）===
+${refineNote}${lectureStyleBanner}
+${chunkBanner}${refBanner}=== 教材原文（${isEnglish ? "英文" : "中文"}教材，输出用中文）===
 ${cleanText}
 === 原文结束 ===
 
@@ -291,7 +304,8 @@ D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条�
   };
   const callGeminiCompat = async (key) => {
     if (!key || !GEMINI_OAI_BASE) return null;
-    for (const model of GEMINI_OAI_MODELS) {
+    const modelList = requestedModel ? [requestedModel, ...GEMINI_OAI_MODELS] : GEMINI_OAI_MODELS;
+    for (const model of modelList) {
       const out = await callOpenAICompat(GEMINI_OAI_BASE, key, model) || "";
       if (out) return out;
     }
@@ -308,7 +322,7 @@ D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条�
   if (hasUserKey) {
     const k = String(userKey).trim();
     if (effectiveProvider === "groq") {
-      const m1 = "llama-3.3-70b-versatile";
+      const m1 = requestedModel || "llama-3.3-70b-versatile";
       responseText = await callOpenAICompat("https://api.groq.com/openai/v1", k, m1) || "";
       if (responseText) { actualProvider = "groq"; actualModel = m1; }
       if (!responseText) {
@@ -318,28 +332,28 @@ D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条�
       }
       if (responseText) apiUsed = "groq(user)";
     } else if (effectiveProvider === "deepseek") {
-      const m = "deepseek-chat";
+      const m = requestedModel || "deepseek-chat";
       responseText = await callOpenAICompat("https://api.deepseek.com", k, m) || "";
       if (responseText) { actualProvider = "deepseek"; actualModel = m; apiUsed = "deepseek(user)"; }
     } else if (effectiveProvider === "kimi") {
-      const m = "moonshot-v1-8k";
+      const m = requestedModel || "moonshot-v1-8k";
       responseText = await callOpenAICompat("https://api.moonshot.cn/v1", k, m) || "";
       if (responseText) { actualProvider = "kimi"; actualModel = m; apiUsed = "kimi(user)"; }
     } else if (effectiveProvider === "custom") {
       const base = String(userCustomUrl || "").trim().replace(/\/$/, "");
       if (base) {
-        const m = "gpt-3.5-turbo";
+        const m = requestedModel || "gpt-3.5-turbo";
         responseText = await callOpenAICompat(base, k, m) || "";
         if (responseText) { actualProvider = "custom"; actualModel = m; apiUsed = "custom(user)"; }
       }
     } else {
       // gemini with user key
-      let m = "gemini-2.0-flash";
+      let m = requestedModel || "gemini-2.0-flash";
       responseText = await callGemini(m, k) || "";
       if (!responseText) responseText = await callGeminiCompat(k) || "";
       if (!responseText) {
         await new Promise(r => setTimeout(r, 2000));
-        m = "gemini-2.0-flash-lite";
+        m = requestedModel || "gemini-2.0-flash-lite";
         responseText = await callGemini(m, k) || "";
       }
       if (responseText) { actualProvider = "gemini"; actualModel = m; apiUsed = "gemini(user)"; }
@@ -348,13 +362,13 @@ D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条�
 
   // ── Priority 2: server Gemini key ─────────────────────────────────────────
   if (!responseText && (GEMINI_KEY || GEMINI_OAI_KEY)) {
-    let m = "gemini-2.0-flash";
+    let m = requestedModel || "gemini-2.0-flash";
     if (GEMINI_KEY) responseText = await callGemini(m, GEMINI_KEY) || "";
     if (!responseText && GEMINI_OAI_KEY) responseText = await callGeminiCompat(GEMINI_OAI_KEY) || "";
     if (!responseText && quotaExceeded && GEMINI_KEY) {
       await new Promise(r => setTimeout(r, 4000));
       quotaExceeded = false;
-      m = "gemini-2.0-flash-lite";
+      m = requestedModel || "gemini-2.0-flash-lite";
       responseText = await callGemini(m, GEMINI_KEY) || "";
     }
     if (responseText) { actualProvider = "gemini"; actualModel = m; apiUsed = "gemini(server)"; }
@@ -512,7 +526,7 @@ D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条�
         : Array.isArray(t.parents) ? t.parents : [];
       return {
         name: String(t.name || t.title || t.concept || "").trim(),
-        summary: String(t.summary || t.description || t.explanation || "").trim(),
+        summary: String(t.summary || t.description || t.explanation || "").trim().slice(0, 1200),
         kind,
         depth,
         prerequisites: prereqs.map(s => String(s).trim()).filter(Boolean).slice(0, 8),
