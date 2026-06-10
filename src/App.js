@@ -3613,6 +3613,13 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
       root.scrollTo({ top, behavior: "smooth" });
     } catch {}
   };
+  const relatedQs = useMemo(() => {
+    if (!chapterStr) return [];
+    const matched = ALL_QUESTIONS.filter(q => q.chapter && q.chapter === chapterStr);
+    if (matched.length > 0) return matched.slice(0, 3);
+    return ALL_QUESTIONS.filter(q => q.chapter && chapterNum && q.chapter.includes(chapterNum)).slice(0, 3);
+  }, [chapterStr, chapterNum]);
+
   const tocItems = useMemo(() => {
     if (isLectureMode) {
       return [
@@ -3635,13 +3642,6 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
     if (relatedQs.length > 0) items.push({ id: "tm-practice", label: "§7 随堂练习" });
     return items;
   }, [isLectureMode, content, vizKey, relatedQs.length]);
-
-  const relatedQs = useMemo(() => {
-    if (!chapterStr) return [];
-    const matched = ALL_QUESTIONS.filter(q => q.chapter && q.chapter === chapterStr);
-    if (matched.length > 0) return matched.slice(0, 3);
-    return ALL_QUESTIONS.filter(q => q.chapter && chapterNum && q.chapter.includes(chapterNum)).slice(0, 3);
-  }, [chapterStr, chapterNum]);
 
   const courseColor = {
     "数值分析": G.teal, "最优化": G.purple, "线性代数": G.blue,
