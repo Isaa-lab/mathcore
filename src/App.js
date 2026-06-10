@@ -3585,6 +3585,25 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
     };
   }, [aiSummary, aiSegments, topic]);
   const isLectureMode = !content && !!aiLectureBlocks;
+  const lectureTheme = {
+    primary: "#7c3aed",
+    primaryLight: "#ede9fe",
+    secondary: "#6d28d9",
+    tipBg: "#eff6ff",
+    tipBorder: "#3b82f6",
+    warnBg: "#fef3c7",
+    warnBorder: "#f59e0b",
+    keyBg: "#f0fdf4",
+    keyBorder: "#22c55e",
+    memBg: "#fdf4ff",
+    memBorder: "#a855f7",
+    stepBg: "#f8fafc",
+    stepBorder: "#64748b",
+    exBg: "#fff7ed",
+    exBorder: "#f97316",
+    formulaBg: "#f5f3ff",
+    formulaBorder: "#8b5cf6",
+  };
   const scrollToSection = (id) => {
     try {
       const root = bodyRef.current;
@@ -3609,25 +3628,25 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,20,40,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: "1rem" }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, maxWidth: 860, width: "100%", maxHeight: "90vh", overflow: "hidden", boxShadow: "0 32px 80px rgba(0,0,0,0.3)" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#f5f3ff", borderRadius: 20, maxWidth: 980, width: "100%", maxHeight: "90vh", overflow: "hidden", boxShadow: "0 32px 80px rgba(0,0,0,0.3)" }}>
 
         {/* ══ Header ══ */}
-        <div style={{ position: "sticky", top: 0, zIndex: 20, background: "#fff", borderBottom: "1px solid #f0f0f0" }}>
-          <div style={{ height: 4, background: courseColor, borderRadius: "20px 20px 0 0" }} />
+        <div style={{ position: "sticky", top: 0, zIndex: 20, background: `linear-gradient(135deg, ${lectureTheme.primary}, ${lectureTheme.secondary})`, color: "#fff", borderRadius: "20px 20px 0 0" }}>
           <div style={{ padding: "1.2rem 1.6rem", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
             <div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: courseColor, letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 5, display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#ddd6fe", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 5, display: "flex", alignItems: "center", gap: 8 }}>
                 <span>{course} · {chapterNum}</span>
                 {isLectureMode && <span style={{ fontSize: 10, color: "#4c1d95", background: "#ede9fe", border: "1px solid #c4b5fd", padding: "2px 8px", borderRadius: 999 }}>站内讲义模式</span>}
               </div>
-              <div style={{ fontSize: 21, fontWeight: 800, color: "#0f172a", lineHeight: 1.3 }}>{topic}</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", lineHeight: 1.3 }}>{topic}</div>
+              <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, background: "rgba(255,255,255,0.2)", display: "inline-block", borderRadius: 999, padding: "2px 10px" }}>📅 考试复习讲义视图</div>
             </div>
-            <button onClick={onClose} style={{ flexShrink: 0, width: 32, height: 32, borderRadius: "50%", border: "none", background: "#f3f4f6", cursor: "pointer", fontSize: 14, color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 2 }}>✕</button>
+            <button onClick={onClose} style={{ flexShrink: 0, width: 32, height: 32, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.2)", cursor: "pointer", fontSize: 14, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 2 }}>✕</button>
           </div>
         </div>
 
         {/* ══ Body ══ */}
-        <div ref={bodyRef} style={{ padding: "1.6rem", maxHeight: "calc(90vh - 130px)", overflowY: "auto" }}>
+        <div ref={bodyRef} style={{ padding: "1.4rem", maxHeight: "calc(90vh - 140px)", overflowY: "auto" }}>
           {!content && !aiLectureBlocks ? (
             <div style={{ padding: "3rem 2rem", textAlign: "center" }}>
               <div style={{ fontSize: 40, marginBottom: 14 }}>📝</div>
@@ -3639,7 +3658,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
             <>
               {!content && aiLectureBlocks && (
                 <>
-                  <section id="tm-s0" style={{ marginBottom: 14, background: "#faf5ff", border: "1px solid #ddd6fe", borderRadius: 12, padding: "12px 14px" }}>
+                  <section id="tm-s0" style={{ marginBottom: 14, background: "#fff", border: "1px solid #ddd6fe", borderRadius: 12, padding: "12px 14px", boxShadow: "0 2px 8px rgba(124,58,237,0.08)" }}>
                     <div style={{ fontSize: 13, fontWeight: 800, color: "#6d28d9", marginBottom: 8 }}>📋 目录</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                       {[
@@ -3657,19 +3676,19 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                     </div>
                   </section>
                   <section style={{ marginBottom: 20 }}>
-                    <div id="tm-s1" style={{ padding: "12px 14px", borderRadius: 10, background: "#eff6ff", borderLeft: "4px solid #3b82f6", marginBottom: 10 }}>
+                    <div id="tm-s1" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.tipBg, borderLeft: `4px solid ${lectureTheme.tipBorder}`, marginBottom: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#2563eb", letterSpacing: "0.08em", marginBottom: 4 }}>TIP · 知识点</div>
                       <div style={{ fontSize: 14, color: "#1e3a8a", lineHeight: 1.8 }}>{aiLectureBlocks.tip}</div>
                     </div>
-                    <div id="tm-s2" style={{ padding: "12px 14px", borderRadius: 10, background: "#f0fdf4", borderLeft: "4px solid #22c55e", marginBottom: 10 }}>
+                    <div id="tm-s2" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.keyBg, borderLeft: `4px solid ${lectureTheme.keyBorder}`, marginBottom: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#16a34a", letterSpacing: "0.08em", marginBottom: 4 }}>KEY · 重点性质</div>
                       <div style={{ fontSize: 14, color: "#14532d", lineHeight: 1.8 }}>{aiLectureBlocks.key}</div>
                     </div>
-                    <div id="tm-s3" style={{ padding: "12px 14px", borderRadius: 10, background: "#f5f3ff", borderLeft: "4px solid #8b5cf6", marginBottom: 10 }}>
+                    <div id="tm-s3" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.formulaBg, borderLeft: `4px solid ${lectureTheme.formulaBorder}`, marginBottom: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#6d28d9", letterSpacing: "0.08em", marginBottom: 4 }}>FORMULA · 公式总结</div>
                       <div style={{ fontSize: 14, color: "#4c1d95", lineHeight: 1.8 }}><MathText text={aiLectureBlocks.formula} /></div>
                     </div>
-                    <div id="tm-s4" style={{ padding: "12px 14px", borderRadius: 10, background: "#f8fafc", borderLeft: "4px solid #64748b", marginBottom: 10 }}>
+                    <div id="tm-s4" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.stepBg, borderLeft: `4px solid ${lectureTheme.stepBorder}`, marginBottom: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#475569", letterSpacing: "0.08em", marginBottom: 6 }}>STEP · 解题步骤</div>
                       <ol style={{ margin: 0, paddingLeft: 18 }}>
                         {(aiLectureBlocks.step.length > 0 ? aiLectureBlocks.step : ["识别题型与已知条件", "写出核心定义或公式", "代入并检查边界/条件"]).map((s, i) => (
@@ -3677,11 +3696,11 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                         ))}
                       </ol>
                     </div>
-                    <div id="tm-s5" style={{ padding: "12px 14px", borderRadius: 10, background: "#fff7ed", borderLeft: "4px solid #f97316", marginBottom: 10 }}>
+                    <div id="tm-s5" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.exBg, borderLeft: `4px solid ${lectureTheme.exBorder}`, marginBottom: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#c2410c", letterSpacing: "0.08em", marginBottom: 4 }}>EXAMPLE · 例题分析</div>
                       <div style={{ fontSize: 14, color: "#7c2d12", lineHeight: 1.8 }}>{aiLectureBlocks.example}</div>
                     </div>
-                    <div id="tm-s6" style={{ padding: "12px 14px", borderRadius: 10, background: "#fdf4ff", borderLeft: "4px solid #a855f7" }}>
+                    <div id="tm-s6" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.memBg, borderLeft: `4px solid ${lectureTheme.memBorder}`, marginBottom: 8 }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#9333ea", letterSpacing: "0.08em", marginBottom: 4 }}>MEMORY · 记忆方法</div>
                       <div style={{ fontSize: 14, color: "#581c87", lineHeight: 1.8 }}>{aiLectureBlocks.memory}</div>
                     </div>
@@ -3803,17 +3822,18 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
 
           {/* ══ 相关练习题 ══ */}
           {relatedQs.length > 0 && (
-            <section>
+            <section style={{ marginTop: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
                 <div style={{ width: 28, height: 28, borderRadius: 8, background: G.blue, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📝</div>
                 <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>随堂练习</span>
                 <span style={{ fontSize: 12, color: "#9ca3af" }}>· {chapterStr}</span>
               </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               {relatedQs.map((q, qi) => {
                 const opts = q.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
                 const letters = ["A","B","C","D"];
                 return (
-                  <div key={q.id} style={{ marginBottom: 14, borderRadius: 14, border: "1px solid #e5e7eb", overflow: "hidden" }}>
+                  <div key={q.id} style={{ borderRadius: 12, border: `1px solid ${lectureTheme.primaryLight}`, background: "#fff", overflow: "hidden", boxShadow: "0 2px 8px rgba(124,58,237,0.12)" }}>
                     <div style={{ padding: "14px 18px", background: "#f8fafc" }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: G.blue, marginBottom: 7, display: "flex", alignItems: "center", gap: 6 }}>
                         <span style={{ background: G.blueLight, color: G.blue, padding: "2px 8px", borderRadius: 20 }}>Q{qi+1}</span>
@@ -3853,6 +3873,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                   </div>
                 );
               })}
+              </div>
             </section>
           )}
         </div>
@@ -5349,6 +5370,16 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const [materials, setMaterials] = useState([]);
   const [aiTopics, setAiTopics] = useState([]);
   const [topicMastery, setTopicMastery] = useState({});
+  const EXTRACT_MODEL_PRESETS = [
+    { label: "自动（推荐）", value: "" },
+    { label: "Gemini 2.0 Flash", value: "gemini-2.0-flash" },
+    { label: "Gemini 3 Flash Preview", value: "[L]gemini-3-flash-preview" },
+    { label: "Gemini 2.5 Pro", value: "[L]gemini-2.5-pro" },
+    { label: "Groq Llama 3.3 70B", value: "llama-3.3-70b-versatile" },
+    { label: "DeepSeek Chat", value: "deepseek-chat" },
+    { label: "Kimi 8K", value: "moonshot-v1-8k" },
+  ];
+  const [extractModel, setExtractModel] = useState(() => localStorage.getItem("mc_ai_extract_model") || "");
   const selectedMaterialId = currentMaterial?.id || (materials[0]?.id || null);
 
   const reloadKnowledge = useCallback(async () => {
@@ -5487,6 +5518,23 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+              <select
+                value={extractModel}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setExtractModel(next);
+                  try {
+                    if (next) localStorage.setItem("mc_ai_extract_model", next);
+                    else localStorage.removeItem("mc_ai_extract_model");
+                  } catch {}
+                }}
+                style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid #ddd6fe", background: "#faf5ff", color: "#5b21b6", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}
+                title="AI 抽取模型"
+              >
+                {EXTRACT_MODEL_PRESETS.map((opt) => (
+                  <option key={opt.label} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
               <Btn size="sm" onClick={() => reloadKnowledge()}>刷新</Btn>
               <Btn size="sm" onClick={() => setPage("上传资料")}>上传新资料</Btn>
               <Btn size="sm" variant="primary" onClick={() => { if (!selectedMaterial) return; setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || "")); }} disabled={!selectedMaterial}>
@@ -5510,7 +5558,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   return (
                     <div
                       key={t.id}
-                      style={{ border: `1.5px solid ${mastery === "done" ? G.teal + "55" : "#ede9fe"}`, borderRadius: 14, padding: "16px", background: mastery === "done" ? "#f0fdf4" : "linear-gradient(180deg,#faf5ff 0%,#ffffff 80%)", display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease" }}
+                      onClick={() => openTopic(t, selectedMaterial, { chapterNum: t.chapter || selectedMaterial?.chapter || "专题", aiTopicData: t })}
+                      style={{ border: `1.5px solid ${mastery === "done" ? G.teal + "55" : "#ede9fe"}`, borderRadius: 14, padding: "16px", background: mastery === "done" ? "#f0fdf4" : "linear-gradient(180deg,#faf5ff 0%,#ffffff 80%)", display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease", cursor: "pointer" }}
                       onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 6px 20px rgba(124,58,237,0.15)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
                       onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
                     >
@@ -5527,13 +5576,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                       </div>
                       <div style={{ display: "flex", gap: 7, marginTop: 2 }}>
                         <button
-                          onClick={() => openTopic(t, selectedMaterial, { chapterNum: t.chapter || selectedMaterial?.chapter || "专题", aiTopicData: t })}
-                          style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: "#EEF2FF", color: "#3730A3", border: "1px solid #C7D2FE", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
-                        >
-                          📖 查看讲义
-                        </button>
-                        <button
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             // 按资料 + topic 出题：跳到该资料的专属题池
                             if (typeof setQuizIntent === "function") {
                               setQuizIntent({ source: "ai_topic", materialId: selectedMaterialId, topicName: t.name, count: 5 });
@@ -5547,7 +5591,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                           ✏️ 按此知识点做题
                         </button>
                         <button
-                          onClick={() => markTopicMastery(t, mastery === "done" ? "todo" : "done")}
+                          onClick={(e) => { e.stopPropagation(); markTopicMastery(t, mastery === "done" ? "todo" : "done"); }}
                           title={mastery === "done" ? "取消掌握" : "标记已掌握"}
                           style={{ padding: "7px 10px", fontSize: 15, background: mastery === "done" ? G.tealLight : "#f9fafb", border: `1.5px solid ${mastery === "done" ? G.teal : "#e5e7eb"}`, borderRadius: 8, cursor: "pointer", lineHeight: 1 }}
                         >
