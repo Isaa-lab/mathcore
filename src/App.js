@@ -1568,6 +1568,20 @@ const isLowQualityQuestion = (q) => {
   return false;
 };
 
+const parseQuestionOptions = (options) => {
+  if (!options) return null;
+  if (Array.isArray(options)) return options;
+  if (typeof options !== "string") return null;
+  const trimmed = options.trim();
+  if (!trimmed || trimmed === "null") return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
 const isLikelyRelevantClaim = (claimText = "") => {
   const t = String(claimText || "").trim();
   if (t.length < 8) return false;
@@ -3908,7 +3922,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, setQuizIntent, 
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               {relatedQs.map((q, qi) => {
-                const opts = q.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
+                const opts = parseQuestionOptions(q.options);
                 const letters = ["A","B","C","D"];
                 return (
                   <div key={q.id} style={{ borderRadius: 12, border: "1px solid #e2e8f0", background: "#fff", overflow: "hidden", boxShadow: "0 1px 3px rgba(15,23,42,0.08)" }}>
@@ -6178,13 +6192,22 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [uploadSaveBusy, setUploadSaveBusy] = useState(false);
   const [uploadSaveMsg, setUploadSaveMsg] = useState("");
   const [activeExerciseHub, setActiveExerciseHub] = useState("upload_solved");
+  const [bankView, setBankView] = useState(null); // null = Hub；textbook/ai_generated/upload_solved = 对应列表页
+  const [bankFilters, setBankFilters] = useState({ query: "", chapter: "all", type: "all", difficulty: "all", status: "all", provider: "all", advanced: false });
+  const [selectedBankIds, setSelectedBankIds] = useState([]);
+  const [answerPreviewId, setAnswerPreviewId] = useState(null);
+  const [, setBookmarkTick] = useState(0);
   const [textbookQuestionInput, setTextbookQuestionInput] = useState("");
+  const [textbookEntryChapter, setTextbookEntryChapter] = useState("");
+  const [textbookEntryType, setTextbookEntryType] = useState("计算");
+  const [textbookEntryDifficulty, setTextbookEntryDifficulty] = useState("基础");
   const [textbookSolveBusy, setTextbookSolveBusy] = useState(false);
   const [textbookSolveResult, setTextbookSolveResult] = useState(null);
   const [textbookSaveBusy, setTextbookSaveBusy] = useState(false);
   const [textbookSaveMsg, setTextbookSaveMsg] = useState("");
   const [aiGenChapter, setAiGenChapter] = useState("");
   const [aiGenType, setAiGenType] = useState("计算");
+  const [aiGenDifficulty, setAiGenDifficulty] = useState("基础");
   const [aiGenCount, setAiGenCount] = useState(5);
   const [aiGenerateBusy, setAiGenerateBusy] = useState(false);
   const [aiGeneratedDrafts, setAiGeneratedDrafts] = useState([]);
@@ -6194,6 +6217,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const customPanelRef = useRef(null);
 
   const inferExerciseOrigin = (q) => {
+    const source = String(q?.source || "").toLowerCase();
+    if (source === "textbook") return "textbook";
+    if (source === "ai") return "ai_generated";
+    if (source === "upload") return "upload_solved";
     const srcType = String(q?.ai_meta?.source_type || "").toLowerCase();
     const by = String(q?.generated_by || "").toLowerCase();
     const quote = String(q?.source_quote || "");
@@ -6203,6 +6230,47 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     if (quote.includes("课本习题") || quote.includes("教材习题")) return "textbook";
     if (["groq", "gemini", "deepseek", "kimi", "anthropic", "custom", "server"].includes(by) || q?.ai_meta?.refine) return "ai_generated";
     return "textbook";
+  };
+
+  const questionKeyOf = (q) => String(q?.id || q?.question || "");
+  const normalizeQuestionType = (q) => {
+    const raw = String(q?.ai_meta?.ability || q?.ai_meta?.question_type || q?.question_type || q?.type || "").toLowerCase();
+    if (["概念", "concept", "概念理解", "单选题", "判断题"].includes(raw)) return "概念";
+    if (["计算", "calc", "计算推演", "填空题"].includes(raw)) return "计算";
+    if (["证明", "proof", "证明题"].includes(raw)) return "证明";
+    if (["应用", "application", "综合应用"].includes(raw)) return "应用";
+    const ability = QUIZ_abilityOf(q);
+    return ({ concept: "概念", calc: "计算", proof: "证明", application: "应用" }[ability] || "计算");
+  };
+  const normalizeDifficulty = (q) => {
+    const raw = String(q?.ai_meta?.ui_difficulty || q?.ai_meta?.difficulty || q?.difficulty || "").toLowerCase();
+    if (["基础", "easy", "basic"].includes(raw)) return "基础";
+    if (["进阶", "medium", "intermediate"].includes(raw)) return "进阶";
+    if (["挑战", "hard", "challenge"].includes(raw)) return "挑战";
+    return "基础";
+  };
+  const mapDifficultyForDb = (label) => {
+    if (label === "挑战" || label === "hard") return "hard";
+    if (label === "进阶" || label === "medium") return "medium";
+    return "easy";
+  };
+  const getQuestionStatus = (q) => {
+    const key = questionKeyOf(q);
+    const rec = sessionAnswers[key] || sessionAnswers[q?.question];
+    if (!rec) return "未做";
+    return rec.correct ? "做对" : "做错";
+  };
+  const getBookmarks = () => {
+    try { return JSON.parse(localStorage.getItem("mc_quiz_bookmarks") || "[]"); } catch { return []; }
+  };
+  const isBookmarked = (q) => getBookmarks().includes(questionKeyOf(q));
+  const toggleQuestionBookmark = (q) => {
+    const key = questionKeyOf(q);
+    if (!key) return;
+    const bookmarks = getBookmarks();
+    const next = bookmarks.includes(key) ? bookmarks.filter(x => x !== key) : [...bookmarks, key];
+    localStorage.setItem("mc_quiz_bookmarks", JSON.stringify(next));
+    setBookmarkTick((v) => v + 1);
   };
 
   const isOwnUploadQuestion = (q, uid) => {
@@ -6547,27 +6615,41 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       const raw = String(data.answer || data.text || data.result || "").trim();
       const answerMatch = raw.match(/最终答案[:：]\s*([^\n]+)/);
       const explainMatch = raw.match(/解析[:：]\s*([\s\S]+)/);
-      setResult({
+      const resultObj = {
         finalAnswer: answerMatch?.[1]?.trim() || "详见解析",
         explanation: explainMatch?.[1]?.trim() || raw,
         rawText: raw,
         model: data?.model || null,
-      });
+      };
+      setResult(resultObj);
+      return resultObj;
     } catch (e) {
-      setResult({ finalAnswer: "解答失败", explanation: String(e?.message || "未知错误"), rawText: "", model: null, isError: true });
+      const errObj = { finalAnswer: "解答失败", explanation: String(e?.message || "未知错误"), rawText: "", model: null, isError: true };
+      setResult(errObj);
+      return errObj;
     } finally {
       setBusy(false);
     }
   };
   const solveUploadedQuestion = async () => {
     if (uploadSolveBusy) return;
-    await solveExerciseQuestion({
+    const result = await solveExerciseQuestion({
       text: uploadQuestionInput,
       setBusy: setUploadSolveBusy,
       setResult: setUploadSolveResult,
       setMsg: setUploadSaveMsg,
       materialTitle: "上传题目求解",
     });
+    if (result && !result.isError) {
+      await saveSolvedQuestion({
+        text: uploadQuestionInput,
+        result,
+        sourceType: "user_upload_solved",
+        setBusy: setUploadSaveBusy,
+        setMsg: setUploadSaveMsg,
+        publicQuestion: false,
+      });
+    }
   };
   const solveTextbookQuestion = async () => {
     if (textbookSolveBusy) return;
@@ -6579,20 +6661,32 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       materialTitle: "课本习题答案生成",
     });
   };
-  const saveSolvedQuestion = async ({ text, result, sourceType, setBusy, setMsg, publicQuestion = false }) => {
+  const saveSolvedQuestion = async ({ text, result, sourceType, setBusy, setMsg, publicQuestion = false, chapterOverride = null, ability = "计算", uiDifficulty = "基础" }) => {
     if (!result) return;
     setBusy(true);
     setMsg("");
     try {
       const uid = (await supabase.auth.getUser())?.data?.user?.id || null;
-      const chapterCandidate = selectedChapters[0] || (Array.isArray(currentMaterial?.chapters) ? currentMaterial.chapters[0] : null) || `${currentMaterial?.course || "本资料"} Ch.1`;
+      const textKey = String(text || "").trim();
+      const duplicated = allQuestions.some(q => String(q.question || "").trim() === textKey && inferExerciseOrigin(q) === (sourceType === "textbook_exercise" ? "textbook" : "upload_solved"));
+      if (duplicated) {
+        setMsg(sourceType === "textbook_exercise" ? "⚠️ 课本库已有相同题干，未重复保存" : "⚠️ 我的题库已有相同题干，未重复保存");
+        return;
+      }
+      const chapterCandidate = chapterOverride || selectedChapters[0] || (Array.isArray(currentMaterial?.chapters) ? currentMaterial.chapters[0] : null) || `${currentMaterial?.course || "本资料"} Ch.1`;
       const generatedBy = sourceType === "textbook_exercise" ? "textbook_solver" : "upload_solver";
+      const source = sourceType === "textbook_exercise" ? "textbook" : "upload";
+      const owner = publicQuestion ? "public" : uid;
       const baseRow = {
-        question: String(text || "").trim(),
+        source,
+        owner,
+        answer_status: "generated",
+        question: textKey,
         options: null,
         answer: result.finalAnswer || "详见解析",
         explanation: result.explanation || result.rawText || "",
         type: "填空题",
+        difficulty: mapDifficultyForDb(uiDifficulty),
         chapter: chapterCandidate,
         course: currentMaterial?.course || "数学",
         material_id: effectiveMaterialId || currentMaterial?.id || null,
@@ -6601,8 +6695,12 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         created_by: publicQuestion ? null : uid,
         ai_meta: {
           source_type: sourceType,
-          owner: publicQuestion ? "public" : uid,
+          source,
+          owner,
+          answer_status: "generated",
           owner_user_id: publicQuestion ? null : uid,
+          ability,
+          ui_difficulty: uiDifficulty,
           manual_upload: sourceType === "user_upload_solved",
           textbook_entry: sourceType === "textbook_exercise",
         },
@@ -6614,9 +6712,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       };
       const candidates = [
         baseRow,
-        strip(baseRow, ["created_by"]),
-        strip(baseRow, ["generated_by", "ai_model", "ai_meta", "created_by"]),
-        strip(baseRow, ["generated_by", "ai_model", "ai_meta", "material_id", "created_by"]),
+        strip(baseRow, ["source", "owner", "answer_status"]),
+        strip(baseRow, ["source", "owner", "answer_status", "created_by"]),
+        strip(baseRow, ["source", "owner", "answer_status", "difficulty", "created_by"]),
+        strip(baseRow, ["source", "owner", "answer_status", "generated_by", "ai_model", "ai_meta", "created_by"]),
+        strip(baseRow, ["source", "owner", "answer_status", "generated_by", "ai_model", "ai_meta", "difficulty", "material_id", "created_by"]),
       ];
       let inserted = false;
       let lastErr = null;
@@ -6631,7 +6731,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         id: `${sourceType}_${Date.now()}`,
       };
       setAllQuestions((prev) => [localRow, ...prev]);
-      setMsg(sourceType === "textbook_exercise" ? "✅ 已保存到课本习题库" : "✅ 已保存到我的上传题库");
+      setMsg(sourceType === "textbook_exercise" ? "✅ 已保存到课本习题库，可在列表中筛选查看" : "✅ 已保存到「我的题库」  可在列表中重新练习");
     } catch (e) {
       setMsg(`❌ 保存失败：${e?.message || "未知错误"}`);
     } finally {
@@ -6647,6 +6747,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       setBusy: setUploadSaveBusy,
       setMsg: setUploadSaveMsg,
       publicQuestion: false,
+      chapterOverride: selectedChapters[0] || `${currentMaterial?.course || "数学"} Ch.1`,
+      ability: "计算",
+      uiDifficulty: "基础",
     });
   };
   const saveTextbookSolvedQuestion = async () => {
@@ -6658,6 +6761,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       setBusy: setTextbookSaveBusy,
       setMsg: setTextbookSaveMsg,
       publicQuestion: true,
+      chapterOverride: textbookEntryChapter || selectedChapters[0] || `${currentMaterial?.course || "数学"} Ch.1`,
+      ability: textbookEntryType,
+      uiDifficulty: textbookEntryDifficulty,
     });
   };
   const parseAIQuestionDrafts = (raw) => {
@@ -6688,7 +6794,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     setAiGeneratedDrafts([]);
     try {
       const chapter = aiGenChapter || selectedChapters[0] || currentMaterial?.chapter || `${currentMaterial?.course || "数学"} Ch.1`;
-      const prompt = `请生成 ${aiGenCount} 道数学练习题，用于题库保存。\n要求：\n1. 章节：${chapter}\n2. 题型能力：${aiGenType}\n3. 每题必须有题目、最终答案、完整解析。\n4. 只输出 JSON 数组，不要 Markdown，不要额外解释。\n\nJSON 格式：\n[\n  { "chapter": "${chapter}", "type": "简答题", "question": "...", "answer": "...", "explanation": "..." }\n]`;
+      const prompt = `请生成 ${aiGenCount} 道数学练习题，用于题库保存。\n要求：\n1. 章节：${chapter}\n2. 题型能力：${aiGenType}\n3. 难度：${aiGenDifficulty}\n4. 每题必须有题目、最终答案、完整解析。\n5. 只输出 JSON 数组，不要 Markdown，不要额外解释。\n\nJSON 格式：\n[\n  { "chapter": "${chapter}", "type": "简答题", "question": "...", "answer": "...", "explanation": "..." }\n]`;
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -6719,22 +6825,32 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     setAiGenerateMsg("");
     try {
       const rows = aiGeneratedDrafts.map((q) => ({
+        source: "ai",
+        owner: "public",
+        answer_status: "generated",
         question: q.question,
         options: null,
         answer: q.answer || "详见解析",
         explanation: q.explanation || "",
         type: ["单选题", "判断题", "填空题", "简答题"].includes(q.type) ? q.type : "简答题",
+        difficulty: mapDifficultyForDb(aiGenDifficulty),
         chapter: q.chapter || aiGenChapter || selectedChapters[0] || `${currentMaterial?.course || "数学"} Ch.1`,
         course: currentMaterial?.course || "数学",
         material_id: effectiveMaterialId || currentMaterial?.id || null,
         generated_by: "server",
         ai_model: q.ai_model || null,
-        ai_meta: { source_type: "ai_generated", owner: "public", generated_from_quiz_hub: true, ability: aiGenType },
-      }));
+        ai_meta: { source_type: "ai_generated", source: "ai", owner: "public", answer_status: "generated", generated_from_quiz_hub: true, ability: aiGenType, ui_difficulty: aiGenDifficulty },
+      })).filter((row) => !allQuestions.some(q => inferExerciseOrigin(q) === "ai_generated" && String(q.question || "").trim() === String(row.question || "").trim()));
+      if (rows.length === 0) {
+        setAiGenerateMsg("⚠️ 这些 AI 题都已存在，未重复保存");
+        return;
+      }
       const candidates = [
         rows,
-        rows.map(({ generated_by, ai_model, ai_meta, ...r }) => r),
-        rows.map(({ generated_by, ai_model, ai_meta, material_id, ...r }) => r),
+        rows.map(({ source, owner, answer_status, ...r }) => r),
+        rows.map(({ source, owner, answer_status, difficulty, ...r }) => r),
+        rows.map(({ source, owner, answer_status, generated_by, ai_model, ai_meta, ...r }) => r),
+        rows.map(({ source, owner, answer_status, generated_by, ai_model, ai_meta, difficulty, material_id, ...r }) => r),
       ];
       let ok = false;
       let lastErr = null;
@@ -6768,7 +6884,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   };
 
   const q = displayQ[current];
-  const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
+  const opts = parseQuestionOptions(q?.options);
   const letters = ["A", "B", "C", "D"];
 
   // 最近一次 askQuestionAI 的输入，用于失败后"重试"按钮
@@ -7065,6 +7181,21 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         setWrongList(w => [...w, q]);
       }
       if (onAnswer && q) onAnswer(q.id || q.question, correct, q.chapter || "Unknown", q);
+      // 题库列表页的“做对/做错”未来可从 attempts 表读取；表未建时不影响答题。
+      (async () => {
+        try {
+          const uid = (await supabase.auth.getUser())?.data?.user?.id;
+          if (!uid || !q?.id || String(q.id).startsWith("upload_") || String(q.id).startsWith("ai_generated_")) return;
+          await supabase.from("attempts").upsert({
+            user_id: uid,
+            question_id: q.id,
+            result: correct ? "correct" : "wrong",
+            attempted_at: new Date().toISOString(),
+          }, { onConflict: "user_id,question_id" });
+        } catch {
+          // attempts 表未建 / RLS 未配置时退化为本地 mc_answers 状态
+        }
+      })();
       // 概念级掌握度更新（先更新本地即时反馈，再尝试写回 concept_mastery）
       const labels = questionConceptMap[String(q.id || "")] || [];
       if (labels.length > 0) {
@@ -7392,6 +7523,158 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       },
     ];
 
+    const bankMeta = {
+      textbook: { icon: "📘", title: "课本习题库", subtitle: "管理员录入 · AI 生成答案 · 公共共享", color: "#1D4ED8", bg: "#EFF6FF", pool: textbookPool },
+      ai_generated: { icon: "🤖", title: "AI 题库", subtitle: "AI 生成题目与解析 · 公共共享", color: "#7C3AED", bg: "#F5F3FF", pool: aiQuestionPool },
+      upload_solved: { icon: "📤", title: "我的题库", subtitle: "上传求解自动保存 · 仅自己可见", color: "#047857", bg: "#ECFDF5", pool: uploadQuestionPool },
+    };
+    const currentBank = bankMeta[bankView];
+    const applyBankFilter = (pool) => {
+      const query = String(bankFilters.query || "").trim().toLowerCase();
+      return pool.filter((q) => {
+        const text = `${q.question || ""} ${q.answer || ""} ${q.explanation || ""}`.toLowerCase();
+        if (query && !text.includes(query)) return false;
+        if (bankFilters.chapter !== "all" && String(q.chapter || "") !== bankFilters.chapter) return false;
+        if (bankFilters.type !== "all" && normalizeQuestionType(q) !== bankFilters.type) return false;
+        if (bankFilters.difficulty !== "all" && normalizeDifficulty(q) !== bankFilters.difficulty) return false;
+        if (bankFilters.status === "starred" && !isBookmarked(q)) return false;
+        if (["未做", "做对", "做错"].includes(bankFilters.status) && getQuestionStatus(q) !== bankFilters.status) return false;
+        if (bankFilters.provider !== "all" && String(q.generated_by || "manual") !== bankFilters.provider) return false;
+        return true;
+      });
+    };
+    const currentBankPool = currentBank?.pool || [];
+    const bankFilteredPool = applyBankFilter(currentBankPool);
+    const bankChapters = [...new Set(currentBankPool.map(q => q.chapter).filter(Boolean))].sort((a, b) => {
+      const na = parseInt((String(a).match(/\d+/) || [0])[0]);
+      const nb = parseInt((String(b).match(/\d+/) || [0])[0]);
+      return na !== nb ? na - nb : String(a).localeCompare(String(b), "zh");
+    });
+    const bankProviders = [...new Set(currentBankPool.map(q => q.generated_by || "manual").filter(Boolean))];
+    const setBankFilter = (key, value) => setBankFilters((prev) => ({ ...prev, [key]: value }));
+    const resetBankFilters = () => setBankFilters({ query: "", chapter: "all", type: "all", difficulty: "all", status: "all", provider: "all", advanced: false });
+    const toggleBankSelected = (q) => {
+      const key = questionKeyOf(q);
+      setSelectedBankIds((prev) => prev.includes(key) ? prev.filter(x => x !== key) : [...prev, key]);
+    };
+    const selectedBankPool = bankFilteredPool.filter(q => selectedBankIds.includes(questionKeyOf(q)));
+
+    if (bankView && currentBank) {
+      return (
+        <div style={{ padding: "0 0 24px", maxWidth: 1040, margin: "0 auto" }}>
+          <PageHeader
+            title={`${currentBank.icon} ${currentBank.title}`}
+            subtitle={currentBank.subtitle}
+            onBack={() => { setBankView(null); setSelectedBankIds([]); setAnswerPreviewId(null); }}
+            actions={<>
+              <Btn size="sm" onClick={() => startWithPool(currentBankPool, Math.min(quizCount || 5, currentBankPool.length || 0))} disabled={currentBankPool.length === 0}>练习全部</Btn>
+              <Btn size="sm" variant="primary" onClick={() => setBankView(null)}>回到题库首页</Btn>
+            </>}
+          />
+
+          <SectionCard style={{ padding: "1rem 1.15rem", marginBottom: 14, border: `1px solid ${currentBank.color}22`, background: currentBank.bg }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) repeat(4, minmax(112px, 0.8fr))", gap: 8, alignItems: "center" }}>
+              <input
+                value={bankFilters.query}
+                onChange={(e) => setBankFilter("query", e.target.value)}
+                placeholder="搜索题目关键词..."
+                style={{ border: "1px solid #CBD5E1", borderRadius: 10, padding: "9px 11px", fontSize: 13, fontFamily: "inherit", background: "#fff" }}
+              />
+              <select value={bankFilters.chapter} onChange={(e) => setBankFilter("chapter", e.target.value)} style={{ border: "1px solid #CBD5E1", borderRadius: 10, padding: "9px 8px", fontSize: 13, fontFamily: "inherit", background: "#fff" }}>
+                <option value="all">全部章节</option>
+                {bankChapters.map(ch => <option key={ch} value={ch}>{ch}</option>)}
+              </select>
+              <select value={bankFilters.type} onChange={(e) => setBankFilter("type", e.target.value)} style={{ border: "1px solid #CBD5E1", borderRadius: 10, padding: "9px 8px", fontSize: 13, fontFamily: "inherit", background: "#fff" }}>
+                <option value="all">全部题型</option>
+                {["概念", "计算", "证明", "应用"].map(x => <option key={x} value={x}>{x}</option>)}
+              </select>
+              <select value={bankFilters.difficulty} onChange={(e) => setBankFilter("difficulty", e.target.value)} style={{ border: "1px solid #CBD5E1", borderRadius: 10, padding: "9px 8px", fontSize: 13, fontFamily: "inherit", background: "#fff" }}>
+                <option value="all">全部难度</option>
+                {["基础", "进阶", "挑战"].map(x => <option key={x} value={x}>{x}</option>)}
+              </select>
+              <select value={bankFilters.status} onChange={(e) => setBankFilter("status", e.target.value)} style={{ border: "1px solid #CBD5E1", borderRadius: 10, padding: "9px 8px", fontSize: 13, fontFamily: "inherit", background: "#fff" }}>
+                <option value="all">全部状态</option>
+                {["未做", "做对", "做错"].map(x => <option key={x} value={x}>{x}</option>)}
+                <option value="starred">已收藏</option>
+              </select>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+              <span style={{ fontSize: 12.5, color: "#475569", fontWeight: 700 }}>当前共 {bankFilteredPool.length} / {currentBankPool.length} 题</span>
+              <button onClick={() => setBankFilter("advanced", !bankFilters.advanced)} style={{ border: "none", background: "#fff", color: currentBank.color, fontSize: 12.5, fontWeight: 800, borderRadius: 999, padding: "5px 10px", cursor: "pointer", fontFamily: "inherit" }}>{bankFilters.advanced ? "收起高级筛选" : "高级筛选"}</button>
+              <button onClick={resetBankFilters} style={{ border: "none", background: "#fff", color: "#64748B", fontSize: 12.5, fontWeight: 700, borderRadius: 999, padding: "5px 10px", cursor: "pointer", fontFamily: "inherit" }}>重置筛选</button>
+              {bankFilters.advanced && (
+                <select value={bankFilters.provider} onChange={(e) => setBankFilter("provider", e.target.value)} style={{ border: "1px solid #CBD5E1", borderRadius: 999, padding: "5px 10px", fontSize: 12.5, fontFamily: "inherit", background: "#fff" }}>
+                  <option value="all">全部 AI / 来源</option>
+                  {bankProviders.map(p => <option key={p} value={p}>{AI_PROVIDER_META[p]?.name || p}</option>)}
+                </select>
+              )}
+            </div>
+          </SectionCard>
+
+          {bankFilteredPool.length === 0 ? (
+            <SectionCard style={{ padding: "2rem", textAlign: "center" }}>
+              <div style={{ fontSize: 42, marginBottom: 8 }}>{currentBank.icon}</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: "#0F172A", marginBottom: 6 }}>这里还没有符合条件的题</div>
+              <div style={{ fontSize: 13, color: "#64748B", marginBottom: 14 }}>
+                {bankView === "textbook" ? "回到题库首页录入课本习题。" : bankView === "ai_generated" ? "回到题库首页生成 AI 题。" : "回到题库首页上传一道题，AI 解完会自动保存。"}
+              </div>
+              <Btn variant="primary" onClick={() => setBankView(null)}>去添加题目</Btn>
+            </SectionCard>
+          ) : (
+            <div style={{ display: "grid", gap: 10 }}>
+              {bankFilteredPool.map((q, idx) => {
+                const key = questionKeyOf(q);
+                const checked = selectedBankIds.includes(key);
+                const starred = isBookmarked(q);
+                const status = getQuestionStatus(q);
+                const statusColor = status === "做对" ? "#047857" : status === "做错" ? "#B91C1C" : "#64748B";
+                const previewOpen = answerPreviewId === key;
+                return (
+                  <SectionCard key={key || idx} style={{ padding: "0.95rem 1rem", border: checked ? `1.5px solid ${currentBank.color}` : undefined }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleBankSelected(q)} style={{ marginTop: 5, accentColor: currentBank.color }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 7 }}>
+                          {[q.chapter || "未标章节", normalizeQuestionType(q), normalizeDifficulty(q)].map((tag) => <span key={tag} style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 999, background: "#F1F5F9", color: "#475569", fontWeight: 700 }}>{tag}</span>)}
+                          <span style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 999, background: status === "做对" ? "#ECFDF5" : status === "做错" ? "#FEF2F2" : "#F8FAFC", color: statusColor, fontWeight: 800 }}>{status}</span>
+                          {starred && <span style={{ fontSize: 11.5, padding: "3px 8px", borderRadius: 999, background: "#FEF3C7", color: "#92400E", fontWeight: 800 }}>⭐ 收藏</span>}
+                        </div>
+                        <div style={{ fontSize: 14, color: "#0F172A", fontWeight: 750, lineHeight: 1.65 }}>
+                          <MathText text={String(q.question || "").slice(0, 180) + (String(q.question || "").length > 180 ? "..." : "")} />
+                        </div>
+                        {previewOpen && (
+                          <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: "#F8FAFC", border: "1px solid #E2E8F0" }}>
+                            <div style={{ fontSize: 12.5, fontWeight: 900, color: "#0F172A", marginBottom: 5 }}>答案：{q.answer || "暂无答案"}</div>
+                            <div style={{ fontSize: 12.5, color: "#475569", lineHeight: 1.75 }}><MathText text={q.explanation || "暂无解析"} /></div>
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 7, minWidth: 92 }}>
+                        <button onClick={() => startWithPool([q], 1)} style={{ padding: "6px 10px", borderRadius: 9, border: "none", background: currentBank.color, color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>练这道</button>
+                        <button onClick={() => setAnswerPreviewId(previewOpen ? null : key)} style={{ padding: "6px 10px", borderRadius: 9, border: "1px solid #CBD5E1", background: "#fff", color: "#334155", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{previewOpen ? "收起答案" : "查看答案"}</button>
+                        <button onClick={() => toggleQuestionBookmark(q)} style={{ padding: "6px 10px", borderRadius: 9, border: "1px solid #FDE68A", background: starred ? "#FEF3C7" : "#fff", color: "#92400E", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{starred ? "取消收藏" : "⭐ 收藏"}</button>
+                      </div>
+                    </div>
+                  </SectionCard>
+                );
+              })}
+            </div>
+          )}
+
+          {bankFilteredPool.length > 0 && (
+            <div style={{ position: "sticky", bottom: 12, marginTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 12px", borderRadius: 14, background: "#fff", border: "1px solid #E2E8F0", boxShadow: "0 12px 34px rgba(15,23,42,0.12)", zIndex: 8 }}>
+              <div style={{ fontSize: 13, color: "#475569", fontWeight: 800 }}>已选 {selectedBankPool.length} 题</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setSelectedBankIds(bankFilteredPool.map(questionKeyOf).filter(Boolean))} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #CBD5E1", background: "#fff", color: "#334155", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>全选当前</button>
+                <button onClick={() => setSelectedBankIds([])} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #CBD5E1", background: "#fff", color: "#334155", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}>清空</button>
+                <button onClick={() => startWithPool(selectedBankPool.length > 0 ? selectedBankPool : bankFilteredPool, selectedBankPool.length > 0 ? selectedBankPool.length : Math.min(quizCount || 10, bankFilteredPool.length))} style={{ padding: "8px 14px", borderRadius: 10, border: "none", background: currentBank.color, color: "#fff", fontSize: 12.5, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}>{selectedBankPool.length > 0 ? `练习选中 ${selectedBankPool.length} 题` : `全部练习 ${Math.min(quizCount || 10, bankFilteredPool.length)} 题`}</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     // 题库为空时的兜底（只针对资料模式）
     if (effectiveMaterialId && allQuestions.length === 0) {
       return (
@@ -7435,30 +7718,33 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
             <div style={{ fontSize: 12.5, color: "#64748B" }}>三种题分开管理：课本习题和 AI 出题是公共题库，上传求解是当前用户私有题库。</div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12, marginBottom: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12, marginBottom: 14 }}>
             {[
               { id: "textbook", icon: "📘", title: "课本习题", desc: "管理员录入题目，AI 生成答案", count: textbookPool.length, action: "录入题目", color: "#1D4ED8", bg: "#EFF6FF" },
               { id: "ai_generated", icon: "🤖", title: "AI 出题", desc: "AI 生成题目和解析，保存为公共题库", count: aiQuestionPool.length, action: "生成题目", color: "#7C3AED", bg: "#F5F3FF" },
-              { id: "upload_solved", icon: "📤", title: "上传求解", desc: "用户粘贴题目，AI 解答后存入我的题库", count: uploadQuestionPool.length, action: "上传题目", color: "#047857", bg: "#ECFDF5" },
+              { id: "upload_solved", icon: "📤", title: "我的题库", desc: "上传求解自动保存，只有自己可见", count: uploadQuestionPool.length, action: "上传题目", color: "#047857", bg: "#ECFDF5" },
             ].map((hub) => {
               const active = activeExerciseHub === hub.id;
               const pool = { textbook: textbookPool, ai_generated: aiQuestionPool, upload_solved: uploadQuestionPool }[hub.id] || [];
               return (
-                <button
+                <div
                   key={hub.id}
-                  onClick={() => setActiveExerciseHub(hub.id)}
-                  style={{ textAlign: "left", padding: 16, borderRadius: 16, border: `1.5px solid ${active ? hub.color : "#E2E8F0"}`, background: active ? hub.bg : "#fff", cursor: "pointer", fontFamily: "inherit", boxShadow: active ? "0 10px 24px rgba(15,23,42,0.08)" : "none" }}
+                  style={{ textAlign: "left", padding: 16, borderRadius: 16, border: `1.5px solid ${active ? hub.color : "#E2E8F0"}`, background: active ? hub.bg : "#fff", fontFamily: "inherit", boxShadow: active ? "0 10px 24px rgba(15,23,42,0.08)" : "none" }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <div onClick={() => setActiveExerciseHub(hub.id)} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, cursor: "pointer" }}>
                     <span style={{ fontSize: 24 }}>{hub.icon}</span>
                     <span style={{ fontSize: 15, fontWeight: 900, color: "#0F172A" }}>{hub.title}</span>
                   </div>
                   <div style={{ fontSize: 12.5, color: "#64748B", lineHeight: 1.5, minHeight: 38 }}>{hub.desc}</div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
                     <span style={{ fontSize: 12, fontWeight: 800, color: hub.color }}>{hub.id === "upload_solved" ? "我的" : "共"} {pool.length} 题</span>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: active ? "#fff" : hub.color, background: active ? hub.color : "#fff", border: `1px solid ${hub.color}55`, borderRadius: 999, padding: "4px 9px" }}>{hub.action}</span>
+                    <span onClick={() => setActiveExerciseHub(hub.id)} style={{ fontSize: 12, fontWeight: 800, color: active ? "#fff" : hub.color, background: active ? hub.color : "#fff", border: `1px solid ${hub.color}55`, borderRadius: 999, padding: "4px 9px", cursor: "pointer" }}>{hub.action}</span>
                   </div>
-                </button>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+                    <button onClick={() => { setBankView(hub.id); setSelectedBankIds([]); setAnswerPreviewId(null); }} style={{ padding: "7px 0", borderRadius: 10, border: `1.5px solid ${hub.color}55`, background: "#fff", color: hub.color, fontSize: 12.5, fontWeight: 900, cursor: "pointer", fontFamily: "inherit" }}>进入列表</button>
+                    <button onClick={() => startWithPool(pool, Math.min(quizCount || 5, pool.length || 0))} disabled={pool.length === 0} style={{ padding: "7px 0", borderRadius: 10, border: "none", background: pool.length ? hub.color : "#CBD5E1", color: "#fff", fontSize: 12.5, fontWeight: 900, cursor: pool.length ? "pointer" : "not-allowed", fontFamily: "inherit" }}>直接练习</button>
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -7472,6 +7758,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                     <div style={{ fontSize: 12, color: "#64748B" }}>你只粘贴题目，AI 生成答案和解析，保存后所有用户可练。</div>
                   </div>
                   <button onClick={() => startWithPool(textbookPool, Math.min(quizCount || 5, textbookPool.length || 0))} disabled={textbookPool.length === 0} style={{ padding: "8px 12px", borderRadius: 10, border: "none", background: textbookPool.length ? "#1D4ED8" : "#CBD5E1", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: textbookPool.length ? "pointer" : "not-allowed", fontFamily: "inherit" }}>开始练习课本题</button>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 130px 130px", gap: 8, marginBottom: 8 }}>
+                  <input value={textbookEntryChapter} onChange={(e) => setTextbookEntryChapter(e.target.value)} placeholder={selectedChapters[0] || "章节，例如 Ch.1 矩阵"} style={{ border: "1px solid #DBEAFE", borderRadius: 10, padding: "9px 10px", fontFamily: "inherit", fontSize: 13 }} />
+                  <select value={textbookEntryType} onChange={(e) => setTextbookEntryType(e.target.value)} style={{ border: "1px solid #DBEAFE", borderRadius: 10, padding: "9px 10px", fontFamily: "inherit", fontSize: 13 }}><option>概念</option><option>计算</option><option>证明</option><option>应用</option></select>
+                  <select value={textbookEntryDifficulty} onChange={(e) => setTextbookEntryDifficulty(e.target.value)} style={{ border: "1px solid #DBEAFE", borderRadius: 10, padding: "9px 10px", fontFamily: "inherit", fontSize: 13 }}><option>基础</option><option>进阶</option><option>挑战</option></select>
                 </div>
                 <textarea value={textbookQuestionInput} onChange={(e) => setTextbookQuestionInput(e.target.value)} placeholder="粘贴课本习题题干..." style={{ width: "100%", minHeight: 82, resize: "vertical", border: "1px solid #DBEAFE", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }} />
                 <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
@@ -7492,9 +7783,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                   </div>
                   <button onClick={() => startWithPool(aiQuestionPool, Math.min(quizCount || 5, aiQuestionPool.length || 0))} disabled={aiQuestionPool.length === 0} style={{ padding: "8px 12px", borderRadius: 10, border: "none", background: aiQuestionPool.length ? "#7C3AED" : "#CBD5E1", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: aiQuestionPool.length ? "pointer" : "not-allowed", fontFamily: "inherit" }}>开始练习 AI 题</button>
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 120px", gap: 8, marginBottom: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 120px 110px", gap: 8, marginBottom: 8 }}>
                   <input value={aiGenChapter} onChange={(e) => setAiGenChapter(e.target.value)} placeholder={selectedChapters[0] || "章节，例如 Ch.1 矩阵"} style={{ border: "1px solid #E2E8F0", borderRadius: 10, padding: "9px 10px", fontFamily: "inherit", fontSize: 13 }} />
                   <select value={aiGenType} onChange={(e) => setAiGenType(e.target.value)} style={{ border: "1px solid #E2E8F0", borderRadius: 10, padding: "9px 10px", fontFamily: "inherit", fontSize: 13 }}><option>概念</option><option>计算</option><option>证明</option><option>应用</option></select>
+                  <select value={aiGenDifficulty} onChange={(e) => setAiGenDifficulty(e.target.value)} style={{ border: "1px solid #E2E8F0", borderRadius: 10, padding: "9px 10px", fontFamily: "inherit", fontSize: 13 }}><option>基础</option><option>进阶</option><option>挑战</option></select>
                   <select value={aiGenCount} onChange={(e) => setAiGenCount(Number(e.target.value))} style={{ border: "1px solid #E2E8F0", borderRadius: 10, padding: "9px 10px", fontFamily: "inherit", fontSize: 13 }}><option value={3}>3 题</option><option value={5}>5 题</option><option value={10}>10 题</option></select>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -7548,29 +7840,39 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           </div>
         )}
 
-        {/* ══ 意图卡片（6 宫格） ══ */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12, marginBottom: 16 }}>
-          {intentCards.map(card => (
-            <button key={card.id} onClick={card.disabled ? undefined : card.onClick}
-                    disabled={card.disabled}
-                    style={{
-                      textAlign: "left", padding: "18px 18px", borderRadius: 16,
-                      background: card.disabled ? "#F8FAFC" : card.bg,
-                      border: "1px solid " + (card.disabled ? "#E2E8F0" : card.ring),
-                      cursor: card.disabled ? "not-allowed" : "pointer",
-                      opacity: card.disabled ? 0.55 : 1,
-                      fontFamily: "inherit",
-                      transition: "transform 0.15s, box-shadow 0.15s",
-                    }}
-                    onMouseEnter={e => { if (!card.disabled) { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 8px 20px rgba(15,23,42,0.06)"; }}}
-                    onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-                <span style={{ fontSize: 22 }}>{card.icon}</span>
-                <span style={{ fontSize: 15, fontWeight: 800, color: card.disabled ? "#94A3B8" : "#0F172A", letterSpacing: "-0.005em" }}>{card.title}</span>
+        {/* ══ 练习模式：日常 / 专项 ══ */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
+          {[
+            { title: "日常练习", ids: ["daily", "weak", "wrong"] },
+            { title: "专项练习", ids: ["chapter", "mock", "custom"] },
+          ].map((group) => (
+            <SectionCard key={group.title} style={{ padding: "1rem" }}>
+              <div style={{ fontSize: 13, fontWeight: 900, color: "#334155", letterSpacing: "0.04em", marginBottom: 10 }}>{group.title}</div>
+              <div style={{ display: "grid", gap: 10 }}>
+                {intentCards.filter(card => group.ids.includes(card.id)).map(card => (
+                  <button key={card.id} onClick={card.disabled ? undefined : card.onClick}
+                          disabled={card.disabled}
+                          style={{
+                            textAlign: "left", padding: "14px 15px", borderRadius: 14,
+                            background: card.disabled ? "#F8FAFC" : card.bg,
+                            border: "1px solid " + (card.disabled ? "#E2E8F0" : card.ring),
+                            cursor: card.disabled ? "not-allowed" : "pointer",
+                            opacity: card.disabled ? 0.55 : 1,
+                            fontFamily: "inherit",
+                            transition: "transform 0.15s, box-shadow 0.15s",
+                          }}
+                          onMouseEnter={e => { if (!card.disabled) { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 8px 20px rgba(15,23,42,0.06)"; }}}
+                          onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                      <span style={{ fontSize: 20 }}>{card.icon}</span>
+                      <span style={{ fontSize: 14, fontWeight: 850, color: card.disabled ? "#94A3B8" : "#0F172A" }}>{card.title}</span>
+                    </div>
+                    <div style={{ fontSize: 12.5, color: card.disabled ? "#94A3B8" : "#475569", marginBottom: 4, lineHeight: 1.45 }}>{card.subtitle}</div>
+                    <div style={{ fontSize: 11.5, color: card.disabled ? "#CBD5E1" : card.tone, fontWeight: 700 }}>{card.meta}</div>
+                  </button>
+                ))}
               </div>
-              <div style={{ fontSize: 13, color: card.disabled ? "#94A3B8" : "#475569", marginBottom: 6, lineHeight: 1.5 }}>{card.subtitle}</div>
-              <div style={{ fontSize: 11.5, color: card.disabled ? "#CBD5E1" : card.tone, fontWeight: 600 }}>{card.meta}</div>
-            </button>
+            </SectionCard>
           ))}
         </div>
 
@@ -8180,7 +8482,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const metaKnowledge = Array.isArray(q.knowledgePoints) && q.knowledgePoints.length
     ? q.knowledgePoints.join(" · ")
     : (q.topic || "");
-  const conceptChips = useMemo(() => {
+  const conceptChips = (() => {
     if (!q) return [];
     const byId = questionConceptMap[String(q.id || "")] || [];
     if (byId.length > 0) {
@@ -8194,8 +8496,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       : Array.isArray(q.knowledgePoints) ? q.knowledgePoints
       : [];
     return fallback.map(String).filter(Boolean).slice(0, 4);
-  }, [q, questionConceptMap]);
-  const weakConcepts = useMemo(() => {
+  })();
+  const weakConcepts = (() => {
     const merged = {};
     const apply = (obj) => {
       for (const [k, v] of Object.entries(obj || {})) {
@@ -8214,7 +8516,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       .filter(v => Number(v.attempts || 0) >= 2 && Number(v.rate || 0) < 80)
       .sort((a, b) => a.rate - b.rate || b.attempts - a.attempts)
       .slice(0, 5);
-  }, [dbConceptMastery, liveConceptPerf]);
+  })();
   const metaDifficulty = q.difficulty || q.level || "";
 
   return (
@@ -10397,7 +10699,7 @@ function WrongDrill({ questions, onExit, onMastered }) {
   const [answered, setAnswered] = useState(false);
   const [masteredCount, setMasteredCount] = useState(0);
   const q = questions[idx];
-  const opts = q?.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
+  const opts = parseQuestionOptions(q?.options);
   const letters = ["A","B","C","D"];
   if (!q) return (
     <div style={{ ...s.card, textAlign: "center", padding: "3rem" }}>
@@ -13977,7 +14279,7 @@ function TeacherPage({ setPage, profile }) {
                   <div style={{ fontSize: 15, color: "#111", lineHeight: 1.7, marginBottom: 10 }}>{q.question}</div>
                   {q.options && (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-                      {(typeof q.options === "string" ? JSON.parse(q.options) : q.options).map((opt, idx) => (
+                      {(parseQuestionOptions(q.options) || []).map((opt, idx) => (
                         <div key={idx} style={{ fontSize: 13, padding: "8px 10px", background: "#fff", border: "1px solid #eee", borderRadius: 8, color: "#444" }}>{opt}</div>
                       ))}
                     </div>
