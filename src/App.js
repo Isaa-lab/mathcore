@@ -3586,23 +3586,21 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
   }, [aiSummary, aiSegments, topic]);
   const isLectureMode = !content && !!aiLectureBlocks;
   const lectureTheme = {
-    primary: "#7c3aed",
-    primaryLight: "#ede9fe",
-    secondary: "#6d28d9",
-    tipBg: "#eff6ff",
+    primary: "#4f46e5",
+    primaryLight: "#e0e7ff",
+    secondary: "#4338ca",
+    tipBg: "#ffffff",
     tipBorder: "#3b82f6",
-    warnBg: "#fef3c7",
-    warnBorder: "#f59e0b",
-    keyBg: "#f0fdf4",
-    keyBorder: "#22c55e",
-    memBg: "#fdf4ff",
-    memBorder: "#a855f7",
-    stepBg: "#f8fafc",
+    keyBg: "#ffffff",
+    keyBorder: "#10b981",
+    memBg: "#ffffff",
+    memBorder: "#8b5cf6",
+    stepBg: "#ffffff",
     stepBorder: "#64748b",
-    exBg: "#fff7ed",
-    exBorder: "#f97316",
-    formulaBg: "#f5f3ff",
-    formulaBorder: "#8b5cf6",
+    exBg: "#ffffff",
+    exBorder: "#f59e0b",
+    formulaBg: "#ffffff",
+    formulaBorder: "#6366f1",
   };
   const scrollToSection = (id) => {
     try {
@@ -3649,17 +3647,17 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
   }[course] || G.teal;
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(15,20,40,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: "1rem" }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "#f5f3ff", borderRadius: 20, maxWidth: 980, width: "100%", maxHeight: "90vh", overflow: "visible", boxShadow: "0 32px 80px rgba(0,0,0,0.3)", position: "relative" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.52)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: "1rem" }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#f8fafc", borderRadius: 20, maxWidth: 980, width: "100%", maxHeight: "90vh", overflow: "visible", boxShadow: "0 20px 48px rgba(2,6,23,0.28)", position: "relative", border: "1px solid #e2e8f0" }}>
         {tocItems.length > 0 && (
-          <div style={{ position: "absolute", left: -168, top: 104, width: 156, background: "#ffffff", border: "1px solid #ddd6fe", borderRadius: 12, boxShadow: "0 10px 24px rgba(76,29,149,0.18)", padding: "10px 8px", zIndex: 30 }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: "#7c3aed", letterSpacing: "0.08em", marginBottom: 8, padding: "0 6px" }}>目录</div>
+          <div style={{ position: "absolute", left: -168, top: 104, width: 156, background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: 12, boxShadow: "0 8px 20px rgba(15,23,42,0.12)", padding: "10px 8px", zIndex: 30 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#475569", letterSpacing: "0.08em", marginBottom: 8, padding: "0 6px" }}>目录</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {tocItems.map((it) => (
                 <button
                   key={it.id}
                   onClick={() => scrollToSection(it.id)}
-                  style={{ textAlign: "left", fontSize: 12, color: "#5b21b6", background: "#faf5ff", border: "1px solid #ede9fe", borderRadius: 8, padding: "6px 8px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                  style={{ textAlign: "left", fontSize: 12, color: "#334155", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 8px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
                 >
                   {it.label}
                 </button>
@@ -3677,7 +3675,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                 {isLectureMode && <span style={{ fontSize: 10, color: "#4c1d95", background: "#ede9fe", border: "1px solid #c4b5fd", padding: "2px 8px", borderRadius: 999 }}>站内讲义模式</span>}
               </div>
               <div style={{ fontSize: 22, fontWeight: 800, color: "#fff", lineHeight: 1.3 }}>{topic}</div>
-              <div style={{ marginTop: 8, fontSize: 12, fontWeight: 600, background: "rgba(255,255,255,0.2)", display: "inline-block", borderRadius: 999, padding: "2px 10px" }}>📅 考试复习讲义视图</div>
+              <div style={{ marginTop: 8, fontSize: 11, fontWeight: 600, background: "rgba(255,255,255,0.16)", display: "inline-block", borderRadius: 999, padding: "3px 10px" }}>考试复习讲义视图</div>
             </div>
             <button onClick={onClose} style={{ flexShrink: 0, width: 32, height: 32, borderRadius: "50%", border: "none", background: "rgba(255,255,255,0.2)", cursor: "pointer", fontSize: 14, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 2 }}>✕</button>
           </div>
@@ -3697,19 +3695,19 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
               {!content && aiLectureBlocks && (
                 <>
                   <section style={{ marginBottom: 20 }}>
-                    <div id="tm-s1" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.tipBg, borderLeft: `4px solid ${lectureTheme.tipBorder}`, marginBottom: 10 }}>
+                    <div id="tm-s1" style={{ padding: "14px 16px", borderRadius: 10, background: lectureTheme.tipBg, borderLeft: `3px solid ${lectureTheme.tipBorder}`, marginBottom: 10, border: "1px solid #e2e8f0" }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#2563eb", letterSpacing: "0.08em", marginBottom: 4 }}>TIP · 知识点</div>
                       <div style={{ fontSize: 14, color: "#1e3a8a", lineHeight: 1.8 }}>{aiLectureBlocks.tip}</div>
                     </div>
-                    <div id="tm-s2" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.keyBg, borderLeft: `4px solid ${lectureTheme.keyBorder}`, marginBottom: 10 }}>
+                    <div id="tm-s2" style={{ padding: "14px 16px", borderRadius: 10, background: lectureTheme.keyBg, borderLeft: `3px solid ${lectureTheme.keyBorder}`, marginBottom: 10, border: "1px solid #e2e8f0" }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#16a34a", letterSpacing: "0.08em", marginBottom: 4 }}>KEY · 重点性质</div>
                       <div style={{ fontSize: 14, color: "#14532d", lineHeight: 1.8 }}>{aiLectureBlocks.key}</div>
                     </div>
-                    <div id="tm-s3" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.formulaBg, borderLeft: `4px solid ${lectureTheme.formulaBorder}`, marginBottom: 10 }}>
+                    <div id="tm-s3" style={{ padding: "14px 16px", borderRadius: 10, background: lectureTheme.formulaBg, borderLeft: `3px solid ${lectureTheme.formulaBorder}`, marginBottom: 10, border: "1px solid #e2e8f0" }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#6d28d9", letterSpacing: "0.08em", marginBottom: 4 }}>FORMULA · 公式总结</div>
                       <div style={{ fontSize: 14, color: "#4c1d95", lineHeight: 1.8 }}><MathText text={aiLectureBlocks.formula} /></div>
                     </div>
-                    <div id="tm-s4" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.stepBg, borderLeft: `4px solid ${lectureTheme.stepBorder}`, marginBottom: 10 }}>
+                    <div id="tm-s4" style={{ padding: "14px 16px", borderRadius: 10, background: lectureTheme.stepBg, borderLeft: `3px solid ${lectureTheme.stepBorder}`, marginBottom: 10, border: "1px solid #e2e8f0" }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#475569", letterSpacing: "0.08em", marginBottom: 6 }}>STEP · 解题步骤</div>
                       <ol style={{ margin: 0, paddingLeft: 18 }}>
                         {(aiLectureBlocks.step.length > 0 ? aiLectureBlocks.step : ["识别题型与已知条件", "写出核心定义或公式", "代入并检查边界/条件"]).map((s, i) => (
@@ -3717,11 +3715,11 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                         ))}
                       </ol>
                     </div>
-                    <div id="tm-s5" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.exBg, borderLeft: `4px solid ${lectureTheme.exBorder}`, marginBottom: 10 }}>
+                    <div id="tm-s5" style={{ padding: "14px 16px", borderRadius: 10, background: lectureTheme.exBg, borderLeft: `3px solid ${lectureTheme.exBorder}`, marginBottom: 10, border: "1px solid #e2e8f0" }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#c2410c", letterSpacing: "0.08em", marginBottom: 4 }}>EXAMPLE · 例题分析</div>
                       <div style={{ fontSize: 14, color: "#7c2d12", lineHeight: 1.8 }}>{aiLectureBlocks.example}</div>
                     </div>
-                    <div id="tm-s6" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.memBg, borderLeft: `4px solid ${lectureTheme.memBorder}`, marginBottom: 8 }}>
+                    <div id="tm-s6" style={{ padding: "14px 16px", borderRadius: 10, background: lectureTheme.memBg, borderLeft: `3px solid ${lectureTheme.memBorder}`, marginBottom: 8, border: "1px solid #e2e8f0" }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#9333ea", letterSpacing: "0.08em", marginBottom: 4 }}>MEMORY · 记忆方法</div>
                       <div style={{ fontSize: 14, color: "#581c87", lineHeight: 1.8 }}>{aiLectureBlocks.memory}</div>
                     </div>
@@ -3856,10 +3854,10 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                 const opts = q.options ? (typeof q.options === "string" ? JSON.parse(q.options) : q.options) : null;
                 const letters = ["A","B","C","D"];
                 return (
-                  <div key={q.id} style={{ borderRadius: 12, border: `1px solid ${lectureTheme.primaryLight}`, background: "#fff", overflow: "hidden", boxShadow: "0 2px 8px rgba(124,58,237,0.12)" }}>
+                  <div key={q.id} style={{ borderRadius: 12, border: "1px solid #e2e8f0", background: "#fff", overflow: "hidden", boxShadow: "0 1px 3px rgba(15,23,42,0.08)" }}>
                     <div style={{ padding: "14px 18px", background: "#f8fafc" }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: G.blue, marginBottom: 7, display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ background: G.blueLight, color: G.blue, padding: "2px 8px", borderRadius: 20 }}>Q{qi+1}</span>
+                        <span style={{ background: "#e2e8f0", color: "#334155", padding: "2px 8px", borderRadius: 20 }}>Q{qi+1}</span>
                         <span style={{ color: "#9ca3af" }}>{q.type}</span>
                       </div>
                       <div style={{ fontSize: 14, color: "#111827", lineHeight: 1.75, fontWeight: 500 }}>{q.question}</div>
@@ -3885,7 +3883,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                     {q.explanation && (
                       <div style={{ padding: "8px 18px 14px", background: "#fff", borderTop: "1px solid #f3f4f6" }}>
                         <details>
-                          <summary style={{ cursor: "pointer", color: G.purple, fontWeight: 700, fontSize: 12.5, background: "#f3e8ff", display: "inline-block", borderRadius: 6, padding: "4px 10px" }}>查看解答</summary>
+                          <summary style={{ cursor: "pointer", color: "#334155", fontWeight: 700, fontSize: 12.5, background: "#f1f5f9", display: "inline-block", borderRadius: 6, padding: "4px 10px", border: "1px solid #e2e8f0" }}>查看解答</summary>
                           <div style={{ marginTop: 10, fontSize: 13, color: "#6b7280", lineHeight: 1.75, display: "flex", gap: 8, alignItems: "flex-start", background: "#f9fafb", borderRadius: 8, padding: "10px 12px" }}>
                             <span style={{ color: G.amber, flexShrink: 0 }}>💡</span>
                             <span>{q.explanation}</span>
