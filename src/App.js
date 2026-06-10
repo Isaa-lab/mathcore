@@ -3558,10 +3558,31 @@ const KNOWLEDGE_CONTENT = {
 };
 
 // ── Topic Modal ───────────────────────────────────────────────────────────────
-function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, course }) {
+function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, course, aiTopicData = null }) {
   const content = KNOWLEDGE_CONTENT[topic];
   const vizKey = content?.viz;
   const chapterStr = (course && course !== "数值分析") ? `${course} ${chapterNum}` : chapterNum;
+  const aiSummary = String(aiTopicData?.summary || "").trim();
+  const aiSegments = useMemo(() => {
+    if (!aiSummary) return [];
+    return aiSummary
+      .split(/\n+|(?<=[。！？；;])/)
+      .map(s => s.replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .slice(0, 12);
+  }, [aiSummary]);
+  const aiLectureBlocks = useMemo(() => {
+    if (!aiSummary) return null;
+    const pick = (idx, fallback) => aiSegments[idx] || fallback;
+    return {
+      tip: pick(0, `${topic} 的核心定义与结论。`),
+      key: pick(1, `${topic} 的关键性质和成立条件。`),
+      step: aiSegments.slice(2, 6),
+      formula: aiSegments.find(s => /[=≠≤≥∫∑λμσπΔ]|\\[a-zA-Z]+/.test(s)) || pick(2, `${topic} 的关键公式需要结合教材原文推导。`),
+      example: pick(6, `${topic} 常见题型：定义辨析、公式应用、参数判断。`),
+      memory: pick(7, `记忆提示：先抓定义，再看条件，最后套入公式验证。`),
+    };
+  }, [aiSummary, aiSegments, topic]);
 
   const relatedQs = useMemo(() => {
     if (!chapterStr) return [];
@@ -3593,7 +3614,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
 
         {/* ══ Body ══ */}
         <div style={{ padding: "1.6rem" }}>
-          {!content ? (
+          {!content && !aiLectureBlocks ? (
             <div style={{ padding: "3rem 2rem", textAlign: "center" }}>
               <div style={{ fontSize: 40, marginBottom: 14 }}>📝</div>
               <div style={{ fontSize: 16, fontWeight: 600, color: "#374151", marginBottom: 8 }}>内容正在完善中</div>
@@ -3602,8 +3623,42 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
             </div>
           ) : (
             <>
+              {!content && aiLectureBlocks && (
+                <>
+                  <section style={{ marginBottom: 20 }}>
+                    <div style={{ padding: "12px 14px", borderRadius: 10, background: "#eff6ff", borderLeft: "4px solid #3b82f6", marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#2563eb", letterSpacing: "0.08em", marginBottom: 4 }}>TIP · 知识点</div>
+                      <div style={{ fontSize: 14, color: "#1e3a8a", lineHeight: 1.8 }}>{aiLectureBlocks.tip}</div>
+                    </div>
+                    <div style={{ padding: "12px 14px", borderRadius: 10, background: "#f0fdf4", borderLeft: "4px solid #22c55e", marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#16a34a", letterSpacing: "0.08em", marginBottom: 4 }}>KEY · 重点性质</div>
+                      <div style={{ fontSize: 14, color: "#14532d", lineHeight: 1.8 }}>{aiLectureBlocks.key}</div>
+                    </div>
+                    <div style={{ padding: "12px 14px", borderRadius: 10, background: "#f5f3ff", borderLeft: "4px solid #8b5cf6", marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#6d28d9", letterSpacing: "0.08em", marginBottom: 4 }}>FORMULA · 公式总结</div>
+                      <div style={{ fontSize: 14, color: "#4c1d95", lineHeight: 1.8 }}><MathText text={aiLectureBlocks.formula} /></div>
+                    </div>
+                    <div style={{ padding: "12px 14px", borderRadius: 10, background: "#f8fafc", borderLeft: "4px solid #64748b", marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#475569", letterSpacing: "0.08em", marginBottom: 6 }}>STEP · 解题步骤</div>
+                      <ol style={{ margin: 0, paddingLeft: 18 }}>
+                        {(aiLectureBlocks.step.length > 0 ? aiLectureBlocks.step : ["识别题型与已知条件", "写出核心定义或公式", "代入并检查边界/条件"]).map((s, i) => (
+                          <li key={i} style={{ fontSize: 14, color: "#334155", lineHeight: 1.8, marginBottom: 2 }}>{s}</li>
+                        ))}
+                      </ol>
+                    </div>
+                    <div style={{ padding: "12px 14px", borderRadius: 10, background: "#fff7ed", borderLeft: "4px solid #f97316", marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#c2410c", letterSpacing: "0.08em", marginBottom: 4 }}>EXAMPLE · 例题分析</div>
+                      <div style={{ fontSize: 14, color: "#7c2d12", lineHeight: 1.8 }}>{aiLectureBlocks.example}</div>
+                    </div>
+                    <div style={{ padding: "12px 14px", borderRadius: 10, background: "#fdf4ff", borderLeft: "4px solid #a855f7" }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#9333ea", letterSpacing: "0.08em", marginBottom: 4 }}>MEMORY · 记忆方法</div>
+                      <div style={{ fontSize: 14, color: "#581c87", lineHeight: 1.8 }}>{aiLectureBlocks.memory}</div>
+                    </div>
+                  </section>
+                </>
+              )}
               {/* §1 核心概念 */}
-              <section style={{ marginBottom: 28 }}>
+              {content && <section style={{ marginBottom: 28 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                   <div style={{ width: 28, height: 28, borderRadius: 8, background: courseColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📖</div>
                   <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>核心概念</span>
@@ -3611,10 +3666,10 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                 <div style={{ fontSize: 15, color: "#374151", lineHeight: 1.9, padding: "16px 20px", background: "#f8fafc", borderRadius: 12, borderLeft: `4px solid ${courseColor}` }}>
                   {content.intro}
                 </div>
-              </section>
+              </section>}
 
               {/* §2 关键公式 */}
-              <section style={{ marginBottom: 28 }}>
+              {content && <section style={{ marginBottom: 28 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                   <div style={{ width: 28, height: 28, borderRadius: 8, background: G.purple, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📐</div>
                   <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>关键公式</span>
@@ -3630,10 +3685,10 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                     </div>
                   ))}
                 </div>
-              </section>
+              </section>}
 
               {/* §3 解题步骤 */}
-              {content.steps && (
+              {content?.steps && (
                 <section style={{ marginBottom: 28 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                     <div style={{ width: 28, height: 28, borderRadius: 8, background: G.blue, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🔢</div>
@@ -3651,7 +3706,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
               )}
 
               {/* §4 可视化 */}
-              {vizKey && VIZ_MAP[vizKey] && (
+              {content && vizKey && VIZ_MAP[vizKey] && (
                 <section style={{ marginBottom: 28 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                     <div style={{ width: 28, height: 28, borderRadius: 8, background: G.amber, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🎨</div>
@@ -3664,7 +3719,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
               )}
 
               {/* §5 重要提示 */}
-              {content.note && (
+              {content?.note && (
                 <div style={{ marginBottom: 28, display: "flex", gap: 12, padding: "14px 18px", background: "#fffbeb", borderRadius: 12, border: "1px solid #fcd34d", alignItems: "flex-start" }}>
                   <span style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>⚡</span>
                   <div style={{ fontSize: 14, color: "#78350f", lineHeight: 1.8 }}><strong>重点提示：</strong>{content.note}</div>
@@ -3672,7 +3727,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
               )}
 
               {/* §6 例题讲解 */}
-              {content.examples?.length > 0 && (
+              {content?.examples?.length > 0 && (
                 <section style={{ marginBottom: 28 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
                     <div style={{ width: 28, height: 28, borderRadius: 8, background: "#10b981", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>✏️</div>
@@ -5338,9 +5393,13 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const [selectedTopic, setSelectedTopic] = useState(null);
   const [selectedTopicMeta, setSelectedTopicMeta] = useState(null);
 
-  const openTopic = (t, mat) => {
+  const openTopic = (t, mat, extra = {}) => {
     setSelectedTopic(t.name);
-    setSelectedTopicMeta({ chapterNum: t.chapterNum, course: mat?.course });
+    setSelectedTopicMeta({
+      chapterNum: extra.chapterNum || t.chapterNum || t.chapter || mat?.chapter || "专题",
+      course: extra.course || mat?.course || "数学",
+      aiTopicData: extra.aiTopicData || null,
+    });
   };
 
   const selectedMaterial = materials.find((m) => m.id === selectedMaterialId) || null;
@@ -5375,6 +5434,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           setChapterFilter={setChapterFilter}
           chapterNum={selectedTopicMeta?.chapterNum}
           course={selectedTopicMeta?.course}
+          aiTopicData={selectedTopicMeta?.aiTopicData || null}
         />
       )}
       <div style={{ padding: "0 0 18px", maxWidth: 1200, margin: "0 auto" }}>
@@ -5430,6 +5490,12 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                         {t.chapter && <span style={{ fontSize: 10, color: G.blue, background: G.blueLight, padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>{t.chapter}</span>}
                       </div>
                       <div style={{ display: "flex", gap: 7, marginTop: 2 }}>
+                        <button
+                          onClick={() => openTopic(t, selectedMaterial, { chapterNum: t.chapter || selectedMaterial?.chapter || "专题", aiTopicData: t })}
+                          style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: "#EEF2FF", color: "#3730A3", border: "1px solid #C7D2FE", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
+                        >
+                          📖 查看讲义
+                        </button>
                         <button
                           onClick={() => {
                             // 按资料 + topic 出题：跳到该资料的专属题池
