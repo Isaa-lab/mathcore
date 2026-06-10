@@ -338,6 +338,14 @@ function isLowQualityQuestion(q) {
   return false;
 }
 
+function normalizeKey(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[，。、“”‘’【】（）()\-_:;,.!?]/g, "")
+    .trim();
+}
+
 // ── 5) 主流程 ──────────────────────────────────────────────────────────
 (async () => {
   const start = Date.now();
@@ -350,6 +358,7 @@ function isLowQualityQuestion(q) {
 
   let materialId = null;
   let pubUrlStr = null;
+  let materialTitle = TITLE_OVERRIDE;
 
   if (REUSE_MATERIAL_ID) {
     const r = await supabase.from("materials").select("id,title,file_data").eq("id", REUSE_MATERIAL_ID).single();
@@ -358,6 +367,7 @@ function isLowQualityQuestion(q) {
       process.exit(1);
     }
     materialId = r.data.id;
+    materialTitle = r.data.title || materialTitle;
     pubUrlStr = r.data.file_data;
     console.log(`[reuse] 命中 ${r.data.title}`);
     if (CLEAN) {
@@ -419,6 +429,7 @@ function isLowQualityQuestion(q) {
       inserted = r.data;
     }
     materialId = inserted.id;
+    materialTitle = inserted.title || materialTitle;
     console.log(`[materials] ok · id = ${materialId.slice(0, 8)}…`);
   }
 
@@ -590,6 +601,124 @@ function isLowQualityQuestion(q) {
     } else {
       console.log(`[topics] ok · 写入 ${tInserted.length} 条`);
     }
+  }
+
+  // 7) B 阶段：并入课程级概念网 + 自动打 question_concepts 标签
+  // ───────────────────────────────────────────────────────────────────────
+  // 设计目标：
+  //   - material_topics 是“教材视角”，concepts 是“课程本体”
+  //   - 每次上传都把新 topic 合并到 course concepts，再把题目打概念标签
+  console.log("\n[graph] 开始并入课程级概念图…");
+  // 7.1 课程行（线代 MVP）
+  const courseCode = "MATH-LA-UNDERGRAD";
+  let courseId = null;
+  {
+    const q = await supabase.from("courses").select("id,code").eq("code", courseCode).maybeSingle();
+    if (!q.error && q.data) {
+      courseId = q.data.id;
+    } else {
+      const ins = await supabase.from("courses").insert({
+        code: courseCode,
+        name: "线性代数",
+        major: "数学与应用数学",
+        stage: "undergraduate",
+        semester: 2,
+        kind: "required",
+        description: "线性代数课程级概念网络（多教材汇总）",
+      }).select("id").single();
+      if (ins.error) console.warn("[graph] courses insert failed:", ins.error.message);
+      else courseId = ins.data.id;
+    }
+  }
+
+  if (courseId) {
+    // 7.2 读取本教材 topics（带 id，回填 concept_id）
+    const mt = await supabase
+      .from("material_topics")
+      .select("id,name,summary,kind,depth,prerequisites")
+      .eq("material_id", materialId);
+    const topics = Array.isArray(mt.data) ? mt.data : [];
+
+    // 7.3 课程已有 concepts
+    const ec = await supabase.from("concepts").select("id,name").eq("course_id", courseId);
+    const conceptByNorm = new Map((ec.data || []).map(c => [normalizeKey(c.name), c]));
+
+    // 7.4 合并/创建 concepts + 回填 material_topics.concept_id
+    const topicToConcept = new Map();
+    for (const t of topics) {
+      const nk = normalizeKey(t.name);
+      if (!nk) continue;
+      let c = conceptByNorm.get(nk);
+      if (!c) {
+        const ins = await supabase.from("concepts").insert({
+          course_id: courseId,
+          name: t.name,
+          summary: t.summary || null,
+          kind: t.kind || null,
+          depth: Number.isFinite(t.depth) ? t.depth : null,
+          source_material_count: 1,
+        }).select("id,name").single();
+        if (ins.error) {
+          console.warn(`[graph] concept insert failed(${t.name}): ${ins.error.message}`);
+          continue;
+        }
+        c = ins.data;
+        conceptByNorm.set(nk, c);
+      }
+      topicToConcept.set(t.id, c.id);
+      await supabase.from("material_topics").update({ concept_id: c.id }).eq("id", t.id);
+    }
+
+    // 7.5 prerequisites -> concept_edges
+    const topicByNorm = new Map(topics.map(t => [normalizeKey(t.name), t]));
+    let edgeCount = 0;
+    for (const t of topics) {
+      const toCid = topicToConcept.get(t.id);
+      if (!toCid) continue;
+      const pres = Array.isArray(t.prerequisites) ? t.prerequisites : [];
+      for (const p of pres) {
+        const pt = topicByNorm.get(normalizeKey(p));
+        if (!pt) continue;
+        const fromCid = topicToConcept.get(pt.id);
+        if (!fromCid || fromCid === toCid) continue;
+        const e = await supabase.from("concept_edges").upsert({
+          course_id: courseId,
+          from_concept_id: fromCid,
+          to_concept_id: toCid,
+          relation: "prerequisite",
+          weight: 1.0,
+          source_material_id: materialId,
+        }, { onConflict: "from_concept_id,to_concept_id,relation" }).select("id");
+        if (!e.error && Array.isArray(e.data)) edgeCount += e.data.length;
+      }
+    }
+
+    // 7.6 questions -> question_concepts（按 knowledge_points 文本映射到 concept）
+    const qs = await supabase
+      .from("questions")
+      .select("id,knowledge_points")
+      .eq("material_id", materialId);
+    const questions = Array.isArray(qs.data) ? qs.data : [];
+    let qcCount = 0;
+    for (const q of questions) {
+      const kps = Array.isArray(q.knowledge_points) ? q.knowledge_points : [];
+      for (let i = 0; i < kps.length; i++) {
+        const c = conceptByNorm.get(normalizeKey(kps[i]));
+        if (!c) continue;
+        const qc = await supabase.from("question_concepts").upsert({
+          question_id: q.id,
+          concept_id: c.id,
+          role: i === 0 ? "primary" : "secondary",
+          weight: i === 0 ? 1.0 : 0.6,
+          confidence: 85,
+          source_material_id: materialId,
+        }, { onConflict: "question_id,concept_id" }).select("id");
+        if (!qc.error && Array.isArray(qc.data)) qcCount += qc.data.length;
+      }
+    }
+    console.log(`[graph] course=${courseCode} · material_topics→concept linked=${topicToConcept.size} · edges~${edgeCount} · question_concepts~${qcCount}`);
+  } else {
+    console.warn("[graph] 跳过课程图谱写入：未拿到 courseId");
   }
 
   console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");

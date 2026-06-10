@@ -14,10 +14,29 @@ const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
 const supa = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-const MID = "fc56c6d6-3d2b-43b9-b270-9a4ff50244d1";
+const MID = process.env.MATERIAL_ID || null;
 
 (async () => {
-  const m = await supa.from("materials").select("id,title,course,file_data,uploaded_by,is_public,status").eq("id", MID).single();
+  let targetId = MID;
+  let m;
+  if (targetId) {
+    m = await supa.from("materials").select("id,title,course,file_data,uploaded_by,is_public,status").eq("id", targetId).single();
+  } else {
+    const auto = await supa
+      .from("materials")
+      .select("id,title,course,file_data,uploaded_by,is_public,status,created_at")
+      .ilike("title", "%Linear Algebra with Applications%")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    targetId = auto.data?.id || null;
+    m = { data: auto.data, error: auto.error };
+  }
+  if (!targetId || !m.data) {
+    console.log("=== materials ===");
+    console.log("  未找到 Leon 教材，请先检查 materials 表。");
+    return;
+  }
   console.log("=== materials ===");
   console.log(`  id     : ${m.data?.id}`);
   console.log(`  title  : ${m.data?.title}`);
@@ -25,7 +44,7 @@ const MID = "fc56c6d6-3d2b-43b9-b270-9a4ff50244d1";
   console.log(`  status : ${m.data?.status} · public: ${m.data?.is_public}`);
   console.log(`  pdf    : ${m.data?.file_data?.slice(0, 90)}…`);
 
-  const t = await supa.from("material_topics").select("id,name,kind,depth,prerequisites,generated_by").eq("material_id", MID);
+  const t = await supa.from("material_topics").select("id,name,kind,depth,prerequisites,generated_by").eq("material_id", targetId);
   console.log(`\n=== material_topics (${t.data?.length || 0}) ===`);
   const byKind = {};
   for (const r of t.data || []) byKind[r.kind || "(无)"] = (byKind[r.kind || "(无)"] || 0) + 1;
@@ -37,7 +56,7 @@ const MID = "fc56c6d6-3d2b-43b9-b270-9a4ff50244d1";
     console.log(`    · [${r.kind || "?"}/d${r.depth || "?"}] ${r.name}` + (r.prerequisites?.length ? `  ← 依赖：${r.prerequisites.slice(0,2).join("/")}` : ""));
   }
 
-  const q = await supa.from("questions").select("id,type,question,answer,knowledge_points,generated_by,ai_model,ai_meta").eq("material_id", MID);
+  const q = await supa.from("questions").select("id,type,question,answer,knowledge_points,generated_by,ai_model,ai_meta").eq("material_id", targetId);
   console.log(`\n=== questions (${q.data?.length || 0}) ===`);
   const byType = {};
   for (const r of q.data || []) byType[r.type] = (byType[r.type] || 0) + 1;
@@ -54,5 +73,10 @@ const MID = "fc56c6d6-3d2b-43b9-b270-9a4ff50244d1";
     if (r.knowledge_points?.length) console.log(`        kp: ${r.knowledge_points.slice(0,2).join(" / ")}`);
   }
 
+  const qc = await supa.from("question_concepts").select("id", { count: "exact", head: true }).eq("source_material_id", targetId);
+  const mtLinked = await supa.from("material_topics").select("id", { count: "exact", head: true }).eq("material_id", targetId).not("concept_id", "is", null);
+  console.log(`\n=== course graph links ===`);
+  console.log(`  material_topics.concept_id 已关联：${mtLinked.count || 0}`);
+  console.log(`  question_concepts 标签数：${qc.count || 0}`);
   console.log(`\n✅ 沙盒里点开 "${m.data?.title}" → 知识点 / 小测 / 📖 PDF 都能用了。`);
 })();
