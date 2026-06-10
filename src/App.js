@@ -5431,6 +5431,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const [extractProgress, setExtractProgress] = useState({ pct: 0, detail: "", etaSec: null, startedAt: 0 });
   const [extractModel, setExtractModel] = useState(() => localStorage.getItem("mc_ai_extract_model") || "");
   const [topicProviderFilter, setTopicProviderFilter] = useState(() => localStorage.getItem("mc_topic_provider_filter") || "all");
+  const [collapsedAiChapters, setCollapsedAiChapters] = useState({});
   const EXTRACT_PLAN_OPTIONS = [
     { label: "平台内置自动", provider: "server", model: "" },
     { label: "Gemini · 2.0 Flash", provider: "gemini", model: "gemini-2.0-flash" },
@@ -5634,7 +5635,27 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     return acc;
   }, {});
   const chapterOrder = Array.from(new Set((selectedMaterial?.course ? CHAPTERS.filter(ch => ch.course === selectedMaterial.course).map(ch => ch.num) : [])));
+  const chapterLabelOf = (groupKey) => {
+    const m = String(groupKey || "").match(/(\d+(?:\.\d+)?)/);
+    if (!m) return String(groupKey || "未分章");
+    const n = m[1];
+    return `第${n}章 / Chapter ${n}`;
+  };
+  const chapterSeqOf = (groupKey) => {
+    const arr = aiGroupedByChapter[groupKey] || [];
+    let minSeq = Number.POSITIVE_INFINITY;
+    for (const t of arr) {
+      const s = Number(t?.ai_meta?.extract_order?.seq);
+      if (Number.isFinite(s) && s < minSeq) minSeq = s;
+    }
+    return Number.isFinite(minSeq) ? minSeq : null;
+  };
   const orderedGroupKeys = Object.keys(aiGroupedByChapter).sort((a, b) => {
+    const seqA = chapterSeqOf(a);
+    const seqB = chapterSeqOf(b);
+    if (Number.isFinite(seqA) && Number.isFinite(seqB)) return seqA - seqB; // 优先按学习/抽取顺序
+    if (Number.isFinite(seqA)) return -1;
+    if (Number.isFinite(seqB)) return 1;
     const ia = chapterOrder.indexOf(a);
     const ib = chapterOrder.indexOf(b);
     if (ia >= 0 && ib >= 0) return ia - ib;
@@ -5761,14 +5782,24 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 {orderedGroupKeys.map((groupKey, gIdx) => (
                   <div key={groupKey} style={{ border: "1px solid #ede9fe", borderRadius: 14, padding: "12px 12px 10px", background: "#fff" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                      <div style={{ fontSize: 15.5, fontWeight: 900, color: "#4c1d95", letterSpacing: "0.01em" }}>
-                        {`第 ${gIdx + 1} 组 · ${groupKey}`}
+                    <div
+                      onClick={() => setCollapsedAiChapters((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }))}
+                      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: collapsedAiChapters[groupKey] ? 2 : 10, cursor: "pointer", userSelect: "none" }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 18, color: "#6d28d9", lineHeight: 1 }}>{collapsedAiChapters[groupKey] ? "▸" : "▾"}</span>
+                        <div style={{ fontSize: 24, fontWeight: 900, color: "#4c1d95", letterSpacing: "0.01em", lineHeight: 1.15 }}>
+                          {chapterLabelOf(groupKey)}
+                        </div>
                       </div>
                       <div style={{ fontSize: 11.5, color: "#7c3aed", fontWeight: 700 }}>
-                        {aiGroupedByChapter[groupKey]?.length || 0} 个知识点
+                        {`学习顺序 ${gIdx + 1} · ${aiGroupedByChapter[groupKey]?.length || 0} 个知识点`}
                       </div>
                     </div>
+                    <div style={{ fontSize: 12, color: "#8b5cf6", fontWeight: 700, marginBottom: collapsedAiChapters[groupKey] ? 0 : 10, marginLeft: 30 }}>
+                      原章节标记：{groupKey}
+                    </div>
+                    {!collapsedAiChapters[groupKey] && (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
                 {aiGroupedByChapter[groupKey].map(t => {
                   const mastery = topicMastery[t.id]?.status || "todo";
@@ -5820,6 +5851,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   );
                 })}
                     </div>
+                    )}
                   </div>
                 ))}
               </div>
