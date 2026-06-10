@@ -6138,7 +6138,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [quizCount, setQuizCount] = useState(10);
   const [timerOn, setTimerOn] = useState(!!isSprint);
   // 新版设置界面状态
-  const [expandedCustom, setExpandedCustom] = useState(false);     // 是否展开"自定义"面板
+  const [expandedCustom, setExpandedCustom] = useState(true);      // 默认展开，习题来源/上传求解入口不能藏起来
   const [subjectFocus, setSubjectFocus] = useState(null);          // 当前选中学科（用于层级章节选择）
   const [selectedAbilities, setSelectedAbilities] = useState([]);  // 能力维度筛选
   const [selectedStatuses, setSelectedStatuses] = useState([]);    // 掌握状态筛选
@@ -6179,6 +6179,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [uploadSaveMsg, setUploadSaveMsg] = useState("");
   const autoGenTriedRef = useRef(false);
   const timerRef = useRef(null);
+  const customPanelRef = useRef(null);
 
   const inferExerciseOrigin = (q) => {
     const srcType = String(q?.ai_meta?.source_type || "").toLowerCase();
@@ -7135,6 +7136,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
     // 覆盖章节数
     const coveredChapters = new Set(customPool.slice(0, effectiveCount).map(q => q.chapter).filter(Boolean));
+    const sourceOnlyPool = buildPool(customChapters, [], selectedSources, selectedOrigins);
 
     // 推荐卡片（有学习数据时才出现）
     const hasHistory = Object.keys(sessionAnswers).length > 0;
@@ -7179,7 +7181,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         subtitle: "选一个章节深入",
         meta: courseList.length + " 门课 · 灵活组合",
         disabled: courseList.length === 0,
-        onClick: () => { setExpandedCustom(true); if (!subjectFocus && courseList.length) setSubjectFocus(courseList[0]); },
+        onClick: () => {
+          setExpandedCustom(true);
+          if (!subjectFocus && courseList.length) setSubjectFocus(courseList[0]);
+          setTimeout(() => customPanelRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 30);
+        },
       },
       {
         id: "wrong",
@@ -7219,7 +7225,10 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         subtitle: "完全自己配置",
         meta: expandedCustom ? "已展开" : "点击展开 →",
         disabled: false,
-        onClick: () => setExpandedCustom(v => !v),
+        onClick: () => {
+          setExpandedCustom(v => !v);
+          setTimeout(() => customPanelRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" }), 30);
+        },
       },
     ];
 
@@ -7258,6 +7267,84 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     return (
       <div style={{ padding: "0 0 16px", maxWidth: 960, margin: "0 auto" }}>
         <PageHeader title="题库练习" subtitle={effectiveMaterialTitle ? `${effectiveMaterialTitle} · 基于资料` : "你今天想练什么？"} onBack={() => setPage("首页")} />
+
+        {/* ══ 习题库来源与上传求解（固定可见，不再藏在自定义里） ══ */}
+        <SectionCard style={{ padding: "1.15rem 1.25rem", marginBottom: 16, border: "1px solid #DBEAFE", background: "#F8FBFF" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: "#0F172A", marginBottom: 3 }}>习题库来源</div>
+              <div style={{ fontSize: 12.5, color: "#64748B" }}>课本习题、AI 出题、上传题目求解都在这里管理</div>
+            </div>
+            <button
+              onClick={() => setExpandedCustom(true)}
+              style={{ padding: "7px 12px", borderRadius: 9, border: "1.5px solid #BFDBFE", background: "#fff", color: "#1D4ED8", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}
+            >
+              打开完整筛选
+            </button>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            {[
+              { id: "textbook", label: "📘 课本习题", color: "#1D4ED8", bg: "#EFF6FF", count: originCounts.textbook },
+              { id: "ai_generated", label: "🤖 AI 出题", color: "#7C3AED", bg: "#F5F3FF", count: originCounts.ai_generated },
+              { id: "upload_solved", label: "📤 上传求解", color: "#047857", bg: "#ECFDF5", count: originCounts.upload_solved },
+            ].map((o) => {
+              const active = selectedOrigins.includes(o.id);
+              return (
+                <button
+                  key={o.id}
+                  onClick={() => toggleOrigin(o.id)}
+                  style={{ padding: "8px 13px", borderRadius: 999, border: `1.5px solid ${active ? o.color : "#E2E8F0"}`, background: active ? o.bg : "#fff", color: active ? o.color : "#475569", fontFamily: "inherit", fontSize: 12.5, fontWeight: 800, cursor: "pointer", display: "inline-flex", gap: 6, alignItems: "center" }}
+                >
+                  {o.label}<span style={{ color: "#94A3B8", fontWeight: 600 }}>· {o.count}</span>
+                </button>
+              );
+            })}
+            <button
+              onClick={() => startWithPool(sourceOnlyPool, Math.min(quizCount || 5, sourceOnlyPool.length || 0))}
+              disabled={sourceOnlyPool.length === 0}
+              style={{ padding: "8px 13px", borderRadius: 999, border: "none", background: sourceOnlyPool.length === 0 ? "#CBD5E1" : "#2563EB", color: "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 800, cursor: sourceOnlyPool.length === 0 ? "not-allowed" : "pointer" }}
+            >
+              按当前来源开始练习 · {sourceOnlyPool.length}
+            </button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "stretch" }}>
+            <textarea
+              value={uploadQuestionInput}
+              onChange={(e) => setUploadQuestionInput(e.target.value)}
+              placeholder="粘贴课本习题 / 作业题，AI 会解出答案和解析..."
+              style={{ width: "100%", minHeight: 74, resize: "vertical", border: "1px solid #DBEAFE", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", background: "#fff" }}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 120 }}>
+              <button
+                onClick={solveUploadedQuestion}
+                disabled={uploadSolveBusy || !String(uploadQuestionInput || "").trim()}
+                style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: "none", background: uploadSolveBusy ? "#CBD5E1" : "#2563EB", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: uploadSolveBusy ? "wait" : "pointer", fontFamily: "inherit" }}
+              >
+                {uploadSolveBusy ? "解答中…" : "AI 解答"}
+              </button>
+              <button
+                onClick={saveUploadedSolvedQuestion}
+                disabled={!uploadSolveResult || !!uploadSolveResult?.isError || uploadSaveBusy}
+                style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: "1.5px solid #10B98155", background: "#ECFDF5", color: "#047857", fontSize: 12.5, fontWeight: 800, cursor: (!uploadSolveResult || uploadSaveBusy) ? "not-allowed" : "pointer", fontFamily: "inherit" }}
+              >
+                {uploadSaveBusy ? "保存中…" : "保存题库"}
+              </button>
+            </div>
+          </div>
+          {uploadSolveResult && (
+            <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: uploadSolveResult.isError ? "#FEF2F2" : "#FFFFFF", border: `1px solid ${uploadSolveResult.isError ? "#FECACA" : "#DBEAFE"}` }}>
+              <div style={{ fontSize: 12.5, fontWeight: 800, color: uploadSolveResult.isError ? "#B91C1C" : "#0F172A", marginBottom: 6 }}>
+                {uploadSolveResult.isError ? "解答失败" : `最终答案：${uploadSolveResult.finalAnswer}`}
+              </div>
+              <div style={{ fontSize: 12.5, color: "#475569", lineHeight: 1.7 }}>
+                <MathText text={uploadSolveResult.explanation || ""} />
+              </div>
+            </div>
+          )}
+          {uploadSaveMsg && <div style={{ marginTop: 8, fontSize: 12.5, color: uploadSaveMsg.startsWith("✅") ? "#166534" : "#b91c1c", fontWeight: 800 }}>{uploadSaveMsg}</div>}
+        </SectionCard>
 
         {/* ══ 数据驱动的推荐条（仅有历史数据时） ══ */}
         {hasHistory && !effectiveMaterialId && (recentWeak || poolWrong.length > 0) && (
@@ -7306,11 +7393,12 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
         {/* ══ 自定义面板（折叠） ══ */}
         {expandedCustom && (
-          <SectionCard style={{ padding: "1.3rem" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-              <div style={{ fontSize: 15, fontWeight: 800, color: "#0F172A" }}>⚙️ 自定义练习范围</div>
-              <button onClick={() => setExpandedCustom(false)} style={{ background: "transparent", color: "#94A3B8", border: "none", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>收起 ×</button>
-            </div>
+          <div ref={customPanelRef}>
+            <SectionCard style={{ padding: "1.3rem" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: "#0F172A" }}>⚙️ 自定义练习范围</div>
+                <button onClick={() => setExpandedCustom(false)} style={{ background: "transparent", color: "#94A3B8", border: "none", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>收起 ×</button>
+              </div>
 
             {/* Step 1 · 学科 → 章节（两级） */}
             <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 1 · 想巩固哪门课？</div>
@@ -7576,7 +7664,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                              letterSpacing: "0.02em" }}>
               {customPool.length === 0 ? "请放宽筛选条件" : `开始练习 → ${effectiveCount} 题`}
             </button>
-          </SectionCard>
+            </SectionCard>
+          </div>
         )}
 
         {/* 兼容：资料模式的补题提示（放在底部） */}
@@ -9542,7 +9631,6 @@ function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
   const tq = stats.reduce((a, c) => a + c.total, 0);
   const pct = tq > 0 ? Math.round(tc / tq * 100) : 0;
   const weak = [...stats].sort((a, b) => (a.correct / a.total) - (b.correct / b.total)).slice(0, 3);
-  const strong = [...stats].sort((a, b) => (b.correct / b.total) - (a.correct / a.total)).slice(0, 2);
 
   const streak = (() => {
     try { return JSON.parse(localStorage.getItem("mc_streak") || "{}").days || 0; } catch { return 0; }
@@ -9556,20 +9644,6 @@ function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
   };
   const level = getLevel(pct);
 
-  // SVG Radar Chart —— 现以 "科目" 为维度，单独章节交给右侧进度条
-  const subjectsAgg = aggregateBySubject(stats);
-  const radarData = subjectsAgg.slice(0, 6).map(a => ({ label: a.subject, value: a.total > 0 ? a.correct / a.total : 0, pct: a.pct, color: a.color }));
-  const N = radarData.length || 1;
-  const cx = 130, cy = 130, R = 90;
-  const angleStep = (2 * Math.PI) / N;
-  const toXY = (i, r) => ({
-    x: cx + r * Math.sin(i * angleStep),
-    y: cy - r * Math.cos(i * angleStep),
-  });
-  const radarPoints = radarData.map((d, i) => toXY(i, d.value * R));
-  const radarPath = radarPoints.map((p, i) => (i === 0 ? "M" + p.x + "," + p.y : "L" + p.x + "," + p.y)).join(" ") + " Z";
-  const gridLevels = [0.25, 0.5, 0.75, 1.0];
-
   // 计划摘要（顶部紧凑栏 + 底部完整 ExamPlanSection 折叠用）
   const examDateRaw = (typeof window !== "undefined" && localStorage.getItem("mc_exam_date")) || "";
   const examSubjectRaw = (typeof window !== "undefined" && localStorage.getItem("mc_exam_subject")) || "";
@@ -9578,7 +9652,6 @@ function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
   const daysLeftRaw = examDateRaw ? Math.ceil((new Date(examDateRaw) - new Date()) / 86400000) : null;
   const hasPlan = !!examDateRaw;
   const [planOpen, setPlanOpen] = useState(false); // 底部完整 ExamPlanSection 是否展开
-  const [hoverChapter, setHoverChapter] = useState(null);
 
   return (
     <div style={{ padding: "0 0 96px", maxWidth: 1040, margin: "0 auto" }}>
@@ -9720,166 +9793,12 @@ function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
         </div>
       </div>
 
-      {/* ④ 雷达 + 章节掌握度（掌握度改为按科目分组） */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-        {/* 雷达图 —— 科目级（6 个维度） */}
-        <SectionCard>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>
-            <div style={{ fontSize: 16, fontWeight: 700 }}>📡 能力雷达图</div>
-            <span style={{ fontSize: 11, color: "#94A3B8" }}>按科目维度聚合</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <svg width="260" height="260" viewBox="0 0 260 260" style={{ flexShrink: 0 }}>
-              {gridLevels.map((lv, gi) => (
-                <polygon key={gi}
-                  points={Array.from({ length: N }, (_, i) => { const p = toXY(i, lv * R); return p.x + "," + p.y; }).join(" ")}
-                  fill="none" stroke="#e5e7eb" strokeWidth="1"
-                />
-              ))}
-              {radarData.map((_, i) => {
-                const outer = toXY(i, R);
-                return <line key={i} x1={cx} y1={cy} x2={outer.x} y2={outer.y} stroke="#e5e7eb" strokeWidth="1" />;
-              })}
-              <path d={radarPath} fill={G.teal + "55"} stroke={G.teal} strokeWidth="2" />
-              {radarPoints.map((p, i) => (
-                <circle key={i} cx={p.x} cy={p.y} r="4" fill={G.teal} stroke="#fff" strokeWidth="1.5" />
-              ))}
-              {radarData.map((d, i) => {
-                const p = toXY(i, R + 22);
-                return (
-                  <g key={i}>
-                    <text x={p.x} y={p.y - 5} textAnchor="middle" dominantBaseline="middle" fontSize="11" fill="#334155" fontFamily="system-ui,sans-serif" fontWeight="700">{d.label}</text>
-                    <text x={p.x} y={p.y + 8} textAnchor="middle" dominantBaseline="middle" fontSize="10" fill={d.value >= 0.8 ? G.teal : d.value >= 0.6 ? G.amber : G.red} fontFamily="system-ui,sans-serif">{d.pct}%</text>
-                  </g>
-                );
-              })}
-            </svg>
-            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-              {subjectsAgg.slice(0, 6).map((d, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: 2, background: d.color, flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span style={{ color: "#334155", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.subject}</span>
-                      <span style={{ fontWeight: 700, color: d.pct >= 80 ? G.teal : d.pct >= 60 ? G.amber : G.red, flexShrink: 0 }}>{d.pct}%</span>
-                    </div>
-                    <div style={{ fontSize: 10, color: "#94A3B8" }}>{d.chapters.length} 章 · {d.correct}/{d.total}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </SectionCard>
-
-        {/* 章节掌握度 —— 按科目分组，hover 显示详细 */}
-        <SectionCard>
-          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>📚 章节掌握度</div>
-          <div style={{ maxHeight: 360, overflowY: "auto", paddingRight: 4 }}>
-            {subjectsAgg.map((group, gi) => (
-              <div key={gi} style={{ marginBottom: gi < subjectsAgg.length - 1 ? 14 : 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, paddingBottom: 4, borderBottom: "1px dashed #E5E7EB" }}>
-                  <span style={{ width: 4, height: 14, background: group.color, borderRadius: 2 }} />
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>{group.subject}</span>
-                  <span style={{ fontSize: 11, color: "#94A3B8" }}>{group.chapters.length} 章</span>
-                  <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: group.pct >= 80 ? G.teal : group.pct >= 60 ? G.amber : G.red }}>{group.pct}%</span>
-                </div>
-                {group.chapters.map((c, ci) => {
-                  const p = Math.round(c.correct / c.total * 100);
-                  const col = p >= 80 ? G.teal : p >= 60 ? G.amber : G.red;
-                  const badge = p >= 80 ? "✅" : p >= 60 ? "📈" : "⚠️";
-                  const key = gi + "-" + ci;
-                  const hovering = hoverChapter === key;
-                  return (
-                    <div key={ci}
-                      onMouseEnter={() => setHoverChapter(key)}
-                      onMouseLeave={() => setHoverChapter(null)}
-                      style={{ marginBottom: 10, position: "relative" }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-                        <span style={{ fontSize: 12.5, color: "#334155" }}>{c.name}</span>
-                        <span style={{ fontSize: 11.5, fontWeight: 700, color: col }}>{badge} {p}%</span>
-                      </div>
-                      <ProgressBar value={c.correct} max={c.total} color={col} height={5} />
-                      {hovering && (
-                        <div style={{
-                          position: "absolute", right: 0, bottom: -2, transform: "translateY(100%)",
-                          background: "#0F172A", color: "#fff",
-                          fontSize: 11, padding: "6px 10px", borderRadius: 6,
-                          whiteSpace: "nowrap", zIndex: 5,
-                          boxShadow: "0 4px 12px rgba(0,0,0,0.2)"
-                        }}>
-                          正确 {c.correct} / {c.total} 题 · 正确率 {p}%
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      </div>
-
-      {/* ⑤ 优势章节 */}
-      <div style={{ marginBottom: 16 }}>
-        <SectionCard>
-          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>🌟 优势章节</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
-            {strong.map((c, i) => (
-              <div key={i} style={{ padding: "10px 14px", background: G.tealLight, borderRadius: 10, border: "1px solid " + G.teal + "33", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontSize: 13, color: "#0F172A", fontWeight: 600 }}>{c.name}</div>
-                  <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>{inferSubjectFromChapter(c.name)}</div>
-                </div>
-                <Badge color="teal">{Math.round(c.correct / c.total * 100)}% 🎉</Badge>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      </div>
-
-      {/* ⑥ 完整备考计划（默认收起，点顶部摘要栏"查看完整日程"展开） */}
+      {/* ④ 完整备考计划（默认收起，点顶部摘要栏"查看完整日程"展开） */}
       {planOpen && (
         <div style={{ marginBottom: 16 }}>
           <ExamPlanSection weak={weak} setPage={setPage} setChapterFilter={setChapterFilter} startWithFormOpen={!hasPlan} currentMaterial={currentMaterial} />
         </div>
       )}
-
-      {/* ⑦ 粘底行动栏 —— 看完报告最核心的动作就是去练习 */}
-      <div style={{
-        position: "sticky", bottom: 12, zIndex: 10,
-        margin: "24px auto 0", maxWidth: 620,
-        background: "#fff",
-        borderRadius: 18,
-        padding: "10px 14px",
-        display: "flex", alignItems: "center", gap: 12,
-        boxShadow: "0 12px 36px rgba(15,23,42,0.12)",
-        border: "1.5px solid " + G.teal + "33",
-      }}>
-        <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 10, background: G.tealLight, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🎯</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A" }}>
-            下一步：{weak[0] ? "攻破 " + weak[0].name : "巩固薄弱章节"}
-          </div>
-          <div style={{ fontSize: 11, color: "#64748B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {weak[0] ? "正确率 " + Math.round(weak[0].correct / weak[0].total * 100) + "% · 建议 5 题巩固" : "从题库挑一组练一练"}
-          </div>
-        </div>
-        <button onClick={() => setPage("知识点")} style={{
-          padding: "8px 14px", background: "transparent", color: G.blue,
-          border: "1.5px solid " + G.blue + "66", borderRadius: 10, fontSize: 13, fontWeight: 700,
-          cursor: "pointer", fontFamily: "inherit",
-        }}>知识点</button>
-        <button onClick={() => {
-          if (weak[0] && setChapterFilter) setChapterFilter([weak[0].name]);
-          setPage("题库练习");
-        }} style={{
-          padding: "9px 20px", background: G.teal, color: "#fff",
-          border: "none", borderRadius: 10, fontSize: 13.5, fontWeight: 800,
-          cursor: "pointer", fontFamily: "inherit",
-          boxShadow: "0 4px 12px rgba(29,158,117,0.25)",
-        }}>开始练习 →</button>
-      </div>
     </div>
   );
 }
