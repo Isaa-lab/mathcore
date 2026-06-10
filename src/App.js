@@ -5405,6 +5405,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     { label: "Kimi 8K", value: "moonshot-v1-8k" },
   ];
   const [extractModel, setExtractModel] = useState(() => localStorage.getItem("mc_ai_extract_model") || "");
+  const [topicProviderFilter, setTopicProviderFilter] = useState(() => localStorage.getItem("mc_topic_provider_filter") || "all");
   const selectedMaterialId = currentMaterial?.id || (materials[0]?.id || null);
 
   const reloadKnowledge = useCallback(async () => {
@@ -5504,6 +5505,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   };
 
   const selectedMaterial = materials.find((m) => m.id === selectedMaterialId) || null;
+  const currentPlanLabel = `${AI_PROVIDER_META[aiProvider]?.name || aiProvider}${extractModel ? ` · ${extractModel}` : " · 默认模型"}`;
 
   const reextractTopicsWithCurrentAI = async () => {
     if (!selectedMaterialId || reextracting) return;
@@ -5554,7 +5556,12 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     : [];
 
   // AI-extracted topics from DB (for future use when AI extraction works)
-  const aiTopicsForMaterial = aiTopics.filter((t) => t.material_id === selectedMaterialId);
+  const aiTopicsForMaterialAll = aiTopics.filter((t) => t.material_id === selectedMaterialId);
+  const aiTopicsForMaterial = aiTopicsForMaterialAll.filter((t) => {
+    if (topicProviderFilter === "all") return true;
+    if (topicProviderFilter === "manual") return !t.generated_by;
+    return (t.generated_by || "manual") === topicProviderFilter;
+  });
 
   const totalTopicCount = courseTopics.length + aiTopicsForMaterial.length;
 
@@ -5638,8 +5645,30 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                 <span style={{ background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 800, letterSpacing: "0.06em" }}>🤖 AI 抽取</span>
                 <span style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>本资料 AI 提取的核心知识点</span>
-                <span style={{ fontSize: 12, color: "#9ca3af" }}>{aiTopicsForMaterial.length} 个</span>
+                <span style={{ fontSize: 12, color: "#9ca3af" }}>{aiTopicsForMaterial.length} / {aiTopicsForMaterialAll.length} 个</span>
                 <div style={{ flex: 1, height: 1, background: "#f3f4f6" }} />
+                <select
+                  value={topicProviderFilter}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setTopicProviderFilter(v);
+                    try { localStorage.setItem("mc_topic_provider_filter", v); } catch {}
+                  }}
+                  style={{ padding: "5px 8px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", color: "#475569", fontSize: 11.5, fontWeight: 600, fontFamily: "inherit" }}
+                  title="按 AI 来源筛选知识点"
+                >
+                  <option value="all">全部来源</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="groq">Groq</option>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="kimi">Kimi</option>
+                  <option value="anthropic">Claude</option>
+                  <option value="custom">自定义</option>
+                  <option value="manual">未标注</option>
+                </select>
+              </div>
+              <div style={{ marginBottom: 10, fontSize: 11.5, color: "#64748B" }}>
+                当前抽取方案：<span style={{ fontWeight: 700, color: "#334155" }}>{currentPlanLabel}</span>。点击「按当前AI重抽取」后，本次新结果会按该方案写入并保留。
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
                 {aiTopicsForMaterial.map(t => {
