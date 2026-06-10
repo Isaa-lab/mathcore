@@ -10026,23 +10026,15 @@ function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
   })();
   const chapterStats = getChapterStats(savedAnswers);
   const hasRealData = Object.keys(chapterStats).length > 0;
-
-  const demoStats = [
-    { name: "Ch.1 方程求解", correct: 7, total: 10 },
-    { name: "Ch.2 线性方程组", correct: 6, total: 10 },
-    { name: "Ch.3 插值", correct: 4, total: 10 },
-    { name: "Ch.4 最小二乘", correct: 3, total: 8 },
-    { name: "Ch.5 数值微积分", correct: 5, total: 8 },
-    { name: "最优化 Ch.1", correct: 5, total: 10 },
-  ];
-  const stats = hasRealData
-    ? Object.entries(chapterStats).map(([name, s]) => ({ name, correct: s.correct, total: s.total }))
-    : demoStats;
+  const stats = Object.entries(chapterStats).map(([name, s]) => ({ name, correct: s.correct, total: s.total }));
 
   const tc = stats.reduce((a, c) => a + c.correct, 0);
   const tq = stats.reduce((a, c) => a + c.total, 0);
   const pct = tq > 0 ? Math.round(tc / tq * 100) : 0;
-  const weak = [...stats].sort((a, b) => (a.correct / a.total) - (b.correct / b.total)).slice(0, 3);
+  const weak = [...stats]
+    .filter((c) => c.total > 0)
+    .sort((a, b) => (a.correct / a.total) - (b.correct / b.total) || b.total - a.total)
+    .slice(0, 3);
 
   const streak = (() => {
     try { return JSON.parse(localStorage.getItem("mc_streak") || "{}").days || 0; } catch { return 0; }
@@ -10064,6 +10056,10 @@ function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
   const daysLeftRaw = examDateRaw ? Math.ceil((new Date(examDateRaw) - new Date()) / 86400000) : null;
   const hasPlan = !!examDateRaw;
   const [planOpen, setPlanOpen] = useState(false); // 底部完整 ExamPlanSection 是否展开
+  const startChapterPractice = (chapter) => {
+    if (chapter && setChapterFilter) setChapterFilter([chapter]);
+    setPage("题库练习");
+  };
 
   return (
     <div style={{ padding: "0 0 96px", maxWidth: 1040, margin: "0 auto" }}>
@@ -10072,11 +10068,27 @@ function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
         subtitle="掌握度、薄弱点与备考行动建议一屏查看。"
         onBack={() => setPage("首页")}
         actions={<>
-          {!hasRealData && <span style={{ fontSize: 12, background: G.amberLight, color: G.amber, padding: "3px 10px", borderRadius: 20, fontWeight: 600 }}>演示数据 — 完成题库练习后显示真实数据</span>}
-          <Btn size="sm" onClick={() => { if (window.confirm("确定重置本地答题记录？")) { localStorage.removeItem("mc_answers"); window.location.reload(); } }}>重置记录</Btn>
+          {!hasRealData && <span style={{ fontSize: 12, background: "#EFF6FF", color: G.blue, padding: "3px 10px", borderRadius: 20, fontWeight: 700 }}>暂无真实答题数据</span>}
+          {hasRealData && <Btn size="sm" onClick={() => { if (window.confirm("确定重置本地答题记录？")) { localStorage.removeItem("mc_answers"); window.location.reload(); } }}>重置记录</Btn>}
         </>}
       />
 
+      {!hasRealData && (
+        <SectionCard style={{ padding: "2rem", textAlign: "center", marginBottom: 16 }}>
+          <div style={{ fontSize: 44, marginBottom: 10 }}>📊</div>
+          <div style={{ fontSize: 18, fontWeight: 900, color: "#0F172A", marginBottom: 6 }}>学习报告还没有可分析的数据</div>
+          <div style={{ fontSize: 13, color: "#64748B", lineHeight: 1.7, maxWidth: 520, margin: "0 auto 18px" }}>
+            完成一次题库练习后，这里会自动生成真实正确率、薄弱章节和今日行动建议。不会再展示假数据。
+          </div>
+          <div style={{ display: "flex", justifyContent: "center", gap: 10, flexWrap: "wrap" }}>
+            <Btn variant="primary" onClick={() => setPage("题库练习")}>去题库练习</Btn>
+            <Btn onClick={() => setPage("知识点")}>先看知识点</Btn>
+          </div>
+        </SectionCard>
+      )}
+
+      {hasRealData && (
+      <>
       {/* ① 首屏：级别 + 统计 —— 最重要的"当前学习状态" */}
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 14, marginBottom: 14 }}>
         <div style={{ background: "linear-gradient(135deg," + level.color + "22," + level.color + "11)", borderRadius: 16, padding: "20px 24px", border: "1.5px solid " + level.color + "44", display: "flex", alignItems: "center", gap: 16 }}>
@@ -10160,6 +10172,11 @@ function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
         {/* 薄弱章节 */}
         <SectionCard>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>⚠️ 薄弱章节（优先复习）</div>
+          {weak.length === 0 && (
+            <div style={{ padding: "16px 0", color: "#64748B", fontSize: 13 }}>
+              暂时没有明显薄弱章节。继续做几组题后，系统会按真实正确率自动识别。
+            </div>
+          )}
           {weak.map((c, i) => {
             const p = Math.round(c.correct / c.total * 100);
             return (
@@ -10171,22 +10188,24 @@ function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <Badge color="red">{p}%</Badge>
-                    <Btn size="sm" onClick={() => setPage("题库练习")}>练习</Btn>
+                    <Btn size="sm" onClick={() => startChapterPractice(c.name)}>练习</Btn>
                   </div>
                 </div>
               </div>
             );
           })}
-          <div style={{ marginTop: 14, padding: "12px 14px", background: G.amberLight, borderRadius: 10, fontSize: 13, color: "#92400e", lineHeight: 1.7 }}>
-            💡 <strong>建议：</strong>从 <strong>{weak[0]?.name || "薄弱章节"}</strong> 开始，先看知识点卡片，再做 5 题巩固！
-          </div>
+          {weak[0] && (
+            <div style={{ marginTop: 14, padding: "12px 14px", background: G.amberLight, borderRadius: 10, fontSize: 13, color: "#92400e", lineHeight: 1.7 }}>
+              💡 <strong>建议：</strong>从 <strong>{weak[0].name}</strong> 开始，先看知识点卡片，再做 5 题巩固！
+            </div>
+          )}
         </SectionCard>
 
         {/* 今日计划 */}
         <div style={{ ...s.card }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 14, paddingBottom: 12, borderBottom: "1px solid #f0f0f0" }}>🗓️ 今日计划</div>
           {[
-            { day: "🔥 现在", task: "复习 " + (weak[0]?.name || "薄弱章节"), urgent: true },
+            { day: "🔥 现在", task: weak[0] ? "复习 " + weak[0].name : "完成一组诊断练习", urgent: true },
             { day: "✏️ 今天", task: "完成 10 道练习题", urgent: false },
             { day: "🃏 今晚", task: "记忆卡片复习 15 张", urgent: false },
           ].map((a, i) => (
@@ -10199,11 +10218,13 @@ function ReportPage({ setPage, setChapterFilter, currentMaterial = null }) {
             </div>
           ))}
           <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-            <Btn variant="primary" onClick={() => setPage("题库练习")} style={{ flex: 1 }}>立即开练</Btn>
+            <Btn variant="primary" onClick={() => weak[0] ? startChapterPractice(weak[0].name) : setPage("题库练习")} style={{ flex: 1 }}>立即开练</Btn>
             <Btn onClick={() => setPage("知识点")} style={{ flex: 1 }}>看知识点</Btn>
           </div>
         </div>
       </div>
+      </>
+      )}
 
       {/* ④ 完整备考计划（默认收起，点顶部摘要栏"查看完整日程"展开） */}
       {planOpen && (
