@@ -5628,38 +5628,37 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   });
 
   const totalTopicCount = courseTopics.length + aiTopicsForMaterial.length;
-  const baseAiGroups = aiTopicsForMaterial.reduce((acc, t) => {
-    const key = String(t?.chapter || "未分章");
+  const inferTopicCategory = (t) => {
+    const kind = String(t?.kind || "").toLowerCase();
+    const text = `${t?.name || ""} ${t?.summary || ""}`.toLowerCase();
+    const has = (re) => re.test(text);
+    if (/theorem|lemma|corollary|proposition|axiom|定理|引理|推论|公理|性质/.test(kind) || has(/定理|引理|推论|性质|判别法/)) return "核心定理";
+    if (/method|algorithm|procedure|步骤|算法|消元|分解|迭代|求解|证明/.test(kind) || has(/方法|算法|步骤|流程|消元|分解|迭代|求解|证明/)) return "计算方法";
+    if (/exercise|problem|question|题型|练习/.test(kind) || has(/题型|例题|练习|习题|证明题|计算题|应用题/)) return "典型题型";
+    if (/warning|pitfall|error|memory|技巧|易错|注意/.test(kind) || has(/易错|注意|陷阱|技巧|记忆/)) return "易错与技巧";
+    if (/application|model|实践|应用|case/.test(kind) || has(/应用|建模|场景|案例|综合/)) return "综合应用";
+    return "基础概念";
+  };
+  const aiGroupedByCategory = aiTopicsForMaterial.reduce((acc, t) => {
+    const key = inferTopicCategory(t);
     if (!acc[key]) acc[key] = [];
     acc[key].push(t);
     return acc;
   }, {});
-  let aiGroupedByChapter = { ...baseAiGroups };
-  // 兜底：如果所有知识点几乎都落在同一章且数量很多，则按学习顺序切成多个“学习单元”，避免看起来没有分门别类
-  if (Object.keys(aiGroupedByChapter).length <= 1 && aiTopicsForMaterial.length >= 10) {
-    const fallback = {};
-    const batchSize = 8;
-    aiTopicsForMaterial.forEach((t, idx) => {
-      const unit = Math.floor(idx / batchSize) + 1;
-      const key = `第${unit}单元`;
-      if (!fallback[key]) fallback[key] = [];
-      fallback[key].push(t);
-    });
-    aiGroupedByChapter = fallback;
-  }
   const chapterOrder = Array.from(new Set((selectedMaterial?.course ? CHAPTERS.filter(ch => ch.course === selectedMaterial.course).map(ch => ch.num) : [])));
-  const chapterLabelOf = (groupKey) => {
-    if (/^第\d+单元$/.test(String(groupKey || ""))) {
-      const n = String(groupKey).match(/\d+/)?.[0] || "1";
-      return `${groupKey} / Unit ${n}`;
-    }
-    const m = String(groupKey || "").match(/(\d+(?:\.\d+)?)/);
-    if (!m) return String(groupKey || "未分章");
-    const n = m[1];
-    return `第${n}章 / Chapter ${n}`;
+  const categoryLabelOf = (groupKey) => {
+    const map = {
+      "基础概念": "基础概念 / Core Concepts",
+      "核心定理": "核心定理 / Key Theorems",
+      "计算方法": "计算方法 / Methods",
+      "典型题型": "典型题型 / Problem Types",
+      "易错与技巧": "易错与技巧 / Pitfalls & Tips",
+      "综合应用": "综合应用 / Applications",
+    };
+    return map[groupKey] || `${groupKey} / Category`;
   };
-  const chapterSeqOf = (groupKey) => {
-    const arr = aiGroupedByChapter[groupKey] || [];
+  const categorySeqOf = (groupKey) => {
+    const arr = aiGroupedByCategory[groupKey] || [];
     let minSeq = Number.POSITIVE_INFINITY;
     for (const t of arr) {
       const s = Number(t?.ai_meta?.extract_order?.seq);
@@ -5667,14 +5666,15 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     }
     return Number.isFinite(minSeq) ? minSeq : null;
   };
-  const orderedGroupKeys = Object.keys(aiGroupedByChapter).sort((a, b) => {
-    const seqA = chapterSeqOf(a);
-    const seqB = chapterSeqOf(b);
+  const categoryOrder = ["基础概念", "核心定理", "计算方法", "典型题型", "易错与技巧", "综合应用"];
+  const orderedGroupKeys = Object.keys(aiGroupedByCategory).sort((a, b) => {
+    const seqA = categorySeqOf(a);
+    const seqB = categorySeqOf(b);
     if (Number.isFinite(seqA) && Number.isFinite(seqB)) return seqA - seqB; // 优先按学习/抽取顺序
     if (Number.isFinite(seqA)) return -1;
     if (Number.isFinite(seqB)) return 1;
-    const ia = chapterOrder.indexOf(a);
-    const ib = chapterOrder.indexOf(b);
+    const ia = categoryOrder.indexOf(a);
+    const ib = categoryOrder.indexOf(b);
     if (ia >= 0 && ib >= 0) return ia - ib;
     if (ia >= 0) return -1;
     if (ib >= 0) return 1;
@@ -5798,7 +5798,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
               ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid #ede9fe", borderRadius: 12, padding: "10px 12px", background: "#faf5ff" }}>
-                  <div style={{ fontSize: 20, fontWeight: 900, color: "#4c1d95" }}>知识点目录（按学习顺序分组）</div>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: "#4c1d95" }}>知识点目录（按知识类别分组）</div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button
                       onClick={() => {
@@ -5828,11 +5828,11 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <span style={{ fontSize: 18, color: "#6d28d9", lineHeight: 1 }}>{collapsedAiChapters[groupKey] ? "▸" : "▾"}</span>
                         <div style={{ fontSize: 24, fontWeight: 900, color: "#4c1d95", letterSpacing: "0.01em", lineHeight: 1.15 }}>
-                          {chapterLabelOf(groupKey)}
+                          {categoryLabelOf(groupKey)}
                         </div>
                       </div>
                       <div style={{ fontSize: 11.5, color: "#7c3aed", fontWeight: 700 }}>
-                        {`学习顺序 ${gIdx + 1} · ${aiGroupedByChapter[groupKey]?.length || 0} 个知识点`}
+                        {`分类序号 ${gIdx + 1} · ${aiGroupedByCategory[groupKey]?.length || 0} 个知识点`}
                       </div>
                     </div>
                     <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
@@ -5840,15 +5840,15 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                         onClick={() => setCollapsedAiChapters((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }))}
                         style={{ padding: "5px 9px", borderRadius: 8, border: "1px solid #c4b5fd", background: "#fff", color: "#6d28d9", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}
                       >
-                        {collapsedAiChapters[groupKey] ? "展开本章" : "折叠本章"}
+                        {collapsedAiChapters[groupKey] ? "展开本类" : "折叠本类"}
                       </button>
                     </div>
                     <div style={{ fontSize: 12, color: "#8b5cf6", fontWeight: 700, marginBottom: collapsedAiChapters[groupKey] ? 0 : 10, marginLeft: 30 }}>
-                      原章节标记：{groupKey}
+                      分类标签：{groupKey}
                     </div>
                     {!collapsedAiChapters[groupKey] && (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
-                {aiGroupedByChapter[groupKey].map(t => {
+                {aiGroupedByCategory[groupKey].map(t => {
                   const mastery = topicMastery[t.id]?.status || "todo";
                   return (
                     <div
