@@ -30,6 +30,7 @@ const keyFromPlatformSlot = (pid) =>
 
 const GROQ_KEY      = process.env.GROQ_KEY      || keyFromPlatformSlot("groq");
 const GEMINI_KEY    = process.env.GEMINI_KEY    || keyFromPlatformSlot("gemini");
+const GEMINI_OAI_KEY = process.env.Gemini2_0 || process.env.GEMINI2_0 || process.env.GEMINI_2_0 || "";
 const DEEPSEEK_KEY  = process.env.DEEPSEEK_KEY  || keyFromPlatformSlot("deepseek");
 const KIMI_KEY      = process.env.KIMI_KEY      || keyFromPlatformSlot("kimi");
 const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || keyFromPlatformSlot("anthropic");
@@ -37,7 +38,7 @@ const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || keyFromPlatformSlot("anthropi
 export const SERVER_KEY_FOR = {
   groq:      GROQ_KEY,
   deepseek:  DEEPSEEK_KEY,
-  gemini:    GEMINI_KEY,
+  gemini:    GEMINI_KEY || GEMINI_OAI_KEY,
   kimi:      KIMI_KEY,
   anthropic: ANTHROPIC_KEY,
 };
@@ -220,6 +221,16 @@ async function callByProvider(pid, key, callOpts) {
         key, model: "moonshot-v1-8k", ...callOpts,
       });
     case "gemini":
+      // 若是第三方 Gemini 网关 key，优先走 OpenAI-compatible。
+      if (key === GEMINI_OAI_KEY && GEMINI_OAI_KEY) {
+        const base = String(process.env.GEMINI_OPENAI_BASE_URL || "https://bboluo.com/v1").trim().replace(/\/$/, "");
+        const models = String(process.env.GEMINI_OPENAI_MODELS || "gemini-2.0-flash,[L]gemini-3-flash-preview,[L]gemini-2.5-pro")
+          .split(",").map((s) => s.trim()).filter(Boolean);
+        for (const model of models) {
+          const r = await callOpenAICompat({ baseUrl: base, key, model, ...callOpts });
+          if (r.text) return r;
+        }
+      }
       return callGemini({ key, ...callOpts });
     case "anthropic":
     case "claude":

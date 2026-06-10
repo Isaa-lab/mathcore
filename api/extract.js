@@ -12,13 +12,19 @@ export default async function handler(req, res) {
   } = req.body;
 
   const GEMINI_KEY = process.env.GEMINI_KEY;
+  const GEMINI_OAI_KEY = process.env.Gemini2_0 || process.env.GEMINI2_0 || process.env.GEMINI_2_0 || "";
+  const GEMINI_OAI_BASE = String(process.env.GEMINI_OPENAI_BASE_URL || "https://bboluo.com/v1").trim().replace(/\/$/, "");
+  const GEMINI_OAI_MODELS = String(process.env.GEMINI_OPENAI_MODELS || "gemini-2.0-flash,[L]gemini-3-flash-preview,[L]gemini-2.5-pro")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY;
 
   // Determine effective API config: user-supplied key takes priority
   const hasUserKey = userKey && String(userKey).trim().length > 8;
   const effectiveProvider = hasUserKey ? (userProvider || "gemini") : null;
 
-  if (!hasUserKey && !GEMINI_KEY && !ANTHROPIC_KEY) {
+  if (!hasUserKey && !GEMINI_KEY && !GEMINI_OAI_KEY && !ANTHROPIC_KEY) {
     return res.status(500).json({ error: "未配置 API Key。请在首页点击「AI 设置」输入你的 API Key，或在 Vercel 环境变量里添加 GEMINI_KEY。" });
   }
 
@@ -115,7 +121,7 @@ The 中文 instructions below override any English fallback you might consider.`
     custom: `你是一位专业数学教授，正在为中国大学生制作习题和知识点卡片。教材原文可能是英文，但所有输出内容必须使用中文。
 请直接输出严格 JSON 对象，禁止 markdown 包裹，禁止任何附加说明。`,
   };
-  const providerHint = String(effectiveProvider || (GEMINI_KEY ? "gemini" : ANTHROPIC_KEY ? "anthropic" : "custom")).toLowerCase();
+  const providerHint = String(effectiveProvider || ((GEMINI_KEY || GEMINI_OAI_KEY) ? "gemini" : ANTHROPIC_KEY ? "anthropic" : "custom")).toLowerCase();
   const opener = PROVIDER_OPENERS[providerHint] || PROVIDER_OPENERS.custom;
 
   const prompt = `${opener}
@@ -283,6 +289,14 @@ D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条�
       return null;
     }
   };
+  const callGeminiCompat = async (key) => {
+    if (!key || !GEMINI_OAI_BASE) return null;
+    for (const model of GEMINI_OAI_MODELS) {
+      const out = await callOpenAICompat(GEMINI_OAI_BASE, key, model) || "";
+      if (out) return out;
+    }
+    return null;
+  };
 
   let responseText = "";
   let apiUsed = "";
@@ -322,6 +336,7 @@ D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条�
       // gemini with user key
       let m = "gemini-2.0-flash";
       responseText = await callGemini(m, k) || "";
+      if (!responseText) responseText = await callGeminiCompat(k) || "";
       if (!responseText) {
         await new Promise(r => setTimeout(r, 2000));
         m = "gemini-2.0-flash-lite";
@@ -332,10 +347,11 @@ D. 每题必须包含至少一个具体的数学对象（公式 / 算子 / 条�
   }
 
   // ── Priority 2: server Gemini key ─────────────────────────────────────────
-  if (!responseText && GEMINI_KEY) {
+  if (!responseText && (GEMINI_KEY || GEMINI_OAI_KEY)) {
     let m = "gemini-2.0-flash";
-    responseText = await callGemini(m, GEMINI_KEY) || "";
-    if (!responseText && quotaExceeded) {
+    if (GEMINI_KEY) responseText = await callGemini(m, GEMINI_KEY) || "";
+    if (!responseText && GEMINI_OAI_KEY) responseText = await callGeminiCompat(GEMINI_OAI_KEY) || "";
+    if (!responseText && quotaExceeded && GEMINI_KEY) {
       await new Promise(r => setTimeout(r, 4000));
       quotaExceeded = false;
       m = "gemini-2.0-flash-lite";

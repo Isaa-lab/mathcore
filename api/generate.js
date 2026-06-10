@@ -88,6 +88,13 @@ async function runHandler(req, res) {
     (__platformSlotProv === pid && __platformSlotKey && __platformSlotKey.trim().length > 8)
       ? __platformSlotKey : null;
   const GEMINI_KEY    = process.env.GEMINI_KEY    || __fromPlatformSlot("gemini");
+  // 兼容国内 OpenAI 兼容网关上的 Gemini key 命名（用户当前在 Vercel 使用 Gemini2_0）。
+  const GEMINI_OAI_KEY = process.env.Gemini2_0 || process.env.GEMINI2_0 || process.env.GEMINI_2_0 || "";
+  const GEMINI_OAI_BASE = String(process.env.GEMINI_OPENAI_BASE_URL || "https://bboluo.com/v1").trim().replace(/\/$/, "");
+  const GEMINI_OAI_MODELS = String(process.env.GEMINI_OPENAI_MODELS || "gemini-2.0-flash,[L]gemini-3-flash-preview,[L]gemini-2.5-pro")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || __fromPlatformSlot("anthropic");
   const GROQ_KEY      = process.env.GROQ_KEY      || __fromPlatformSlot("groq");
   const DEEPSEEK_KEY  = process.env.DEEPSEEK_KEY  || __fromPlatformSlot("deepseek");
@@ -96,7 +103,7 @@ async function runHandler(req, res) {
   // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底
   const SERVER_KEY_FOR = {
     groq: GROQ_KEY,
-    gemini: GEMINI_KEY,
+    gemini: GEMINI_KEY || GEMINI_OAI_KEY,
     deepseek: DEEPSEEK_KEY,
     kimi: KIMI_KEY,
     anthropic: ANTHROPIC_KEY,
@@ -104,7 +111,7 @@ async function runHandler(req, res) {
 
   const hasUserKey = userKey && String(userKey).trim().length > 8;
   const effectiveProvider = hasUserKey ? (userProvider || "groq") : null;
-  const hasServerKey = !!(GROQ_KEY || GEMINI_KEY || ANTHROPIC_KEY || DEEPSEEK_KEY || KIMI_KEY);
+  const hasServerKey = !!(GROQ_KEY || GEMINI_KEY || GEMINI_OAI_KEY || ANTHROPIC_KEY || DEEPSEEK_KEY || KIMI_KEY);
 
   // ── Provider-aware：判断这次请求"最终会落在哪个 provider"，用来选配不同的 VIZ 指令 ──
   // 不同模型的结构化输出能力差异很大：
@@ -120,7 +127,7 @@ async function runHandler(req, res) {
     // server 模式默认走 Groq（最快最便宜）
     if (GROQ_KEY) return "groq";
     if (DEEPSEEK_KEY) return "deepseek";
-    if (GEMINI_KEY) return "gemini";
+    if (GEMINI_KEY || GEMINI_OAI_KEY) return "gemini";
     if (ANTHROPIC_KEY) return "anthropic";
     if (KIMI_KEY) return "kimi";
     return "groq";
@@ -783,9 +790,9 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   };
 
   // ── Gemini helper ──────────────────────────────────────────────────────────
-  const callGemini = async (key) => {
+  const callGeminiOfficial = async (key) => {
     const budget = Math.min(PER_PROVIDER_MS, remainingBudget());
-    if (budget < 1500) { providerDiag.push(`gemini: skipped(budget_exhausted)`); return null; }
+    if (budget < 1500) { providerDiag.push(`gemini(official): skipped(budget_exhausted)`); return null; }
     const t0 = Date.now();
     try {
       // Convert messages to Gemini format
@@ -820,18 +827,26 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
       if (r.ok) {
         const d = await r.json();
         const content = d?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-        providerDiag.push(`gemini: ok(${dt}ms, ${content.length}ch)`);
+        providerDiag.push(`gemini(official): ok(${dt}ms, ${content.length}ch)`);
         return content;
       }
-      providerDiag.push(`gemini: http_${r.status}(${dt}ms)`);
+      providerDiag.push(`gemini(official): http_${r.status}(${dt}ms)`);
       return null;
     } catch (e) {
       const dt = Date.now() - t0;
       const reason = e?.name === "AbortError" ? "timeout" : (e?.message || "exception").slice(0, 60);
-      providerDiag.push(`gemini: ${reason}(${dt}ms)`);
+      providerDiag.push(`gemini(official): ${reason}(${dt}ms)`);
       console.error("Gemini exception:", e.message);
       return null;
     }
+  };
+  const callGeminiCompat = async (key, sourceTag = "server") => {
+    if (!key || !GEMINI_OAI_BASE) return "";
+    for (const model of GEMINI_OAI_MODELS) {
+      const out = await callOpenAICompat(GEMINI_OAI_BASE, key, model, `gemini(${sourceTag}-compat):${model}`) || "";
+      if (out) return out;
+    }
+    return "";
   };
 
   let responseText = "";
@@ -857,7 +872,14 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
       return await callOpenAICompat("https://api.moonshot.cn/v1", k, "moonshot-v1-8k", `kimi(${tagSrc})`) || "";
     }
     if (pid === "gemini") {
-      return await callGemini(k) || "";
+      // 优先官方 Gemini；失败后尝试 OpenAI 兼容网关（例如 bboluo）。
+      if (GEMINI_KEY && k === GEMINI_KEY) {
+        const official = await callGeminiOfficial(k) || "";
+        if (official) return official;
+      }
+      const compat = await callGeminiCompat(k, tagSrc) || "";
+      if (compat) return compat;
+      return await callGeminiOfficial(k) || "";
     }
     if (pid === "custom") {
       const base = String(userCustomUrl || "").trim().replace(/\/$/, "");
@@ -898,8 +920,9 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   }
 
   // Priority 4: server Gemini
-  if (!responseText && GEMINI_KEY) {
-    responseText = await callGemini(GEMINI_KEY) || "";
+  if (!responseText && (GEMINI_KEY || GEMINI_OAI_KEY)) {
+    if (GEMINI_KEY) responseText = await callGeminiOfficial(GEMINI_KEY) || "";
+    if (!responseText && GEMINI_OAI_KEY) responseText = await callGeminiCompat(GEMINI_OAI_KEY, "server") || "";
   }
 
   // Priority 4.5: server Kimi

@@ -17,6 +17,8 @@ function hasKeyFor(provider) {
     anthropic: "ANTHROPIC_KEY",
   }[provider];
   if (explicitVar && looksSet(process.env[explicitVar])) return true;
+  // 兼容国内 Gemini 代售 key 命名（Vercel: Gemini2_0）。
+  if (provider === "gemini" && (looksSet(process.env.Gemini2_0) || looksSet(process.env.GEMINI2_0) || looksSet(process.env.GEMINI_2_0))) return true;
   const platformProvider = String(process.env.PLATFORM_PROVIDER || "").trim().toLowerCase();
   if (platformProvider === provider && looksSet(process.env.PLATFORM_API_KEY)) return true;
   return false;

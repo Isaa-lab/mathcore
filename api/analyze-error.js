@@ -49,6 +49,11 @@ function getEffectiveKey({ userProvider, userKey }) {
   if (process.env.GROQ_KEY && String(process.env.GROQ_KEY).trim().length > 8) {
     return { provider: "groq", key: process.env.GROQ_KEY.trim(), isPlatform: true };
   }
+  // 兼容国内 Gemini OpenAI 网关 key（优先作为 gemini provider 的平台 key）。
+  const geminiOaiKey = process.env.Gemini2_0 || process.env.GEMINI2_0 || process.env.GEMINI_2_0;
+  if (geminiOaiKey && String(geminiOaiKey).trim().length > 8) {
+    return { provider: "gemini", key: String(geminiOaiKey).trim(), isPlatform: true, viaCompat: true };
+  }
   const platformProvider = String(process.env.PLATFORM_PROVIDER || "").trim().toLowerCase();
   if (platformProvider && process.env.PLATFORM_API_KEY && String(process.env.PLATFORM_API_KEY).trim().length > 8) {
     return { provider: platformProvider, key: process.env.PLATFORM_API_KEY.trim(), isPlatform: true };
@@ -77,6 +82,27 @@ async function callGroq({ key, prompt }) {
 }
 
 async function callGemini({ key, prompt }) {
+  const base = String(process.env.GEMINI_OPENAI_BASE_URL || "").trim().replace(/\/$/, "");
+  if (base) {
+    const model = String(process.env.GEMINI_OPENAI_MODEL || "gemini-2.0-flash").trim();
+    const resp = await fetch(`${base}/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+        temperature: 0.3,
+        max_tokens: 300,
+      }),
+    });
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      throw new Error(`Gemini-compat ${resp.status}: ${errText.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    return data?.choices?.[0]?.message?.content || "";
+  }
   const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
