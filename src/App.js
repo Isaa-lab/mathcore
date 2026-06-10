@@ -5739,7 +5739,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           {selectedMaterial && (
             <div style={{ marginBottom: 28 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                <span style={{ background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 800, letterSpacing: "0.06em" }}>🤖 AI 抽取</span>
+                <span style={{ background: "#2563eb", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 800, letterSpacing: "0.06em" }}>🤖 AI 抽取</span>
                 <span style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>本资料 AI 提取的核心知识点</span>
                 <span style={{ fontSize: 12, color: "#9ca3af" }}>{aiTopicsForMaterial.length} / {aiTopicsForMaterialAll.length} 个</span>
                 <div style={{ flex: 1, height: 1, background: "#f3f4f6" }} />
@@ -5757,7 +5757,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                       else localStorage.removeItem("mc_ai_extract_model");
                     } catch {}
                   }}
-                  style={{ padding: "5px 8px", borderRadius: 8, border: "1px solid #ddd6fe", background: "#faf5ff", color: "#5b21b6", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}
+                  style={{ padding: "5px 8px", borderRadius: 8, border: "1px solid #DBEAFE", background: "#EFF6FF", color: "#1D4ED8", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}
                   title="AI 抽取方案"
                 >
                   {EXTRACT_PLAN_OPTIONS.map((opt) => (
@@ -5767,7 +5767,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                 <button
                   onClick={reextractTopicsWithCurrentAI}
                   disabled={!selectedMaterialId || reextracting}
-                  style={{ padding: "6px 10px", borderRadius: 8, border: "none", background: reextracting ? "#cbd5e1" : "#7c3aed", color: "#fff", fontSize: 11.5, fontWeight: 700, cursor: reextracting ? "wait" : "pointer", fontFamily: "inherit" }}
+                  style={{ padding: "6px 10px", borderRadius: 8, border: "none", background: reextracting ? "#cbd5e1" : "#2563eb", color: "#fff", fontSize: 11.5, fontWeight: 700, cursor: reextracting ? "wait" : "pointer", fontFamily: "inherit" }}
                 >
                   {reextracting ? "抽取中…" : "按当前方案重抽取"}
                 </button>
@@ -5794,7 +5794,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
               {reextracting && (
                 <div style={{ marginBottom: 10 }}>
                   <div style={{ height: 7, borderRadius: 999, background: "#ede9fe", overflow: "hidden" }}>
-                    <div style={{ width: `${Math.max(2, Math.min(100, extractProgress.pct || 0))}%`, height: "100%", background: "linear-gradient(90deg,#8b5cf6,#6366f1)", transition: "width .28s ease" }} />
+                    <div style={{ width: `${Math.max(2, Math.min(100, extractProgress.pct || 0))}%`, height: "100%", background: "#2563eb", transition: "width .28s ease" }} />
                   </div>
                   <div style={{ marginTop: 4, fontSize: 11.5, color: "#64748B" }}>
                     {extractProgress.detail || "抽取中…"} · {Math.max(0, Math.min(100, extractProgress.pct || 0))}%
@@ -5875,9 +5875,9 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                     <div
                       key={t.id}
                       onClick={() => openTopic(t, selectedMaterial, { chapterNum: t.chapter || selectedMaterial?.chapter || "专题", aiTopicData: t })}
-                      style={{ border: `1.5px solid ${mastery === "done" ? G.teal + "55" : "#ede9fe"}`, borderRadius: 14, padding: "16px", background: mastery === "done" ? "#f0fdf4" : "linear-gradient(180deg,#faf5ff 0%,#ffffff 80%)", display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease", cursor: "pointer" }}
-                      onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 6px 20px rgba(124,58,237,0.15)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "none"; }}
+                      style={{ border: `1.5px solid ${mastery === "done" ? G.teal + "55" : "#e5e7eb"}`, borderRadius: 14, padding: "16px", background: mastery === "done" ? "#f0fdf4" : "#fff", display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease", cursor: "pointer" }}
+                      onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 6px 20px rgba(37,99,235,0.14)"; e.currentTarget.style.borderColor = "#2563eb66"; e.currentTarget.style.transform = "translateY(-2px)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.borderColor = mastery === "done" ? G.teal + "55" : "#e5e7eb"; e.currentTarget.style.transform = "none"; }}
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
                         <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", lineHeight: 1.45, flex: 1 }}>{t.name}</div>
@@ -5887,15 +5887,23 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                         {t.summary || "（AI 未给出摘要）"}
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 10, color: "#7c3aed", background: "#ede9fe", padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>🤖 AI 生成</span>
+                        <span style={{ fontSize: 10, color: G.tealDark, background: G.tealLight, padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>📖 AI 讲解</span>
                         {t.chapter && <span style={{ fontSize: 10, color: G.blue, background: G.blueLight, padding: "2px 7px", borderRadius: 20, fontWeight: 600 }}>{t.chapter}</span>}
                         {t.generated_by && <ProvenanceBadge provider={t.generated_by} model={t.ai_model || null} size="sm" />}
                       </div>
-                      <div style={{ display: "flex", gap: 7, marginTop: 2 }}>
+                      <div style={{ display: "flex", gap: 7, marginTop: 2 }} onClick={e => e.stopPropagation()}>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            // 按资料 + topic 出题：跳到该资料的专属题池
+                            openTopic(t, selectedMaterial, { chapterNum: t.chapter || selectedMaterial?.chapter || "专题", aiTopicData: t });
+                          }}
+                          style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
+                        >
+                          📖 查看内容
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
                             if (typeof setQuizIntent === "function") {
                               setQuizIntent({ source: "ai_topic", materialId: selectedMaterialId, topicName: t.name, count: 5 });
                             }
@@ -5903,9 +5911,9 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                               setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || ""));
                             }
                           }}
-                          style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
+                          style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 600, background: "#f0f9ff", color: G.blue, border: `1.5px solid ${G.blue}33`, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
                         >
-                          ✏️ 按此知识点做题
+                          ✏️ 练习题目
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); markTopicMastery(t, mastery === "done" ? "todo" : "done"); }}
