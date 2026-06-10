@@ -3613,6 +3613,28 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
       root.scrollTo({ top, behavior: "smooth" });
     } catch {}
   };
+  const tocItems = useMemo(() => {
+    if (isLectureMode) {
+      return [
+        { id: "tm-s1", label: "§1 知识点" },
+        { id: "tm-s2", label: "§2 重点性质" },
+        { id: "tm-s3", label: "§3 公式总结" },
+        { id: "tm-s4", label: "§4 解题步骤" },
+        { id: "tm-s5", label: "§5 例题分析" },
+        { id: "tm-s6", label: "§6 记忆方法" },
+        { id: "tm-practice", label: "§7 随堂练习" },
+      ];
+    }
+    const items = [];
+    if (content?.intro) items.push({ id: "tm-c1", label: "§1 核心概念" });
+    if (content?.formulas?.length) items.push({ id: "tm-c2", label: "§2 关键公式" });
+    if (content?.steps?.length) items.push({ id: "tm-c3", label: "§3 解题步骤" });
+    if (content && vizKey && VIZ_MAP[vizKey]) items.push({ id: "tm-c4", label: "§4 可视化" });
+    if (content?.note) items.push({ id: "tm-c5", label: "§5 重点提示" });
+    if (content?.examples?.length) items.push({ id: "tm-c6", label: "§6 典型例题" });
+    if (relatedQs.length > 0) items.push({ id: "tm-practice", label: "§7 随堂练习" });
+    return items;
+  }, [isLectureMode, content, vizKey, relatedQs.length]);
 
   const relatedQs = useMemo(() => {
     if (!chapterStr) return [];
@@ -3628,7 +3650,23 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,20,40,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300, padding: "1rem" }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "#f5f3ff", borderRadius: 20, maxWidth: 980, width: "100%", maxHeight: "90vh", overflow: "hidden", boxShadow: "0 32px 80px rgba(0,0,0,0.3)" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#f5f3ff", borderRadius: 20, maxWidth: 980, width: "100%", maxHeight: "90vh", overflow: "visible", boxShadow: "0 32px 80px rgba(0,0,0,0.3)", position: "relative" }}>
+        {tocItems.length > 0 && (
+          <div style={{ position: "absolute", left: -168, top: 104, width: 156, background: "#ffffff", border: "1px solid #ddd6fe", borderRadius: 12, boxShadow: "0 10px 24px rgba(76,29,149,0.18)", padding: "10px 8px", zIndex: 30 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#7c3aed", letterSpacing: "0.08em", marginBottom: 8, padding: "0 6px" }}>目录</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {tocItems.map((it) => (
+                <button
+                  key={it.id}
+                  onClick={() => scrollToSection(it.id)}
+                  style={{ textAlign: "left", fontSize: 12, color: "#5b21b6", background: "#faf5ff", border: "1px solid #ede9fe", borderRadius: 8, padding: "6px 8px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}
+                >
+                  {it.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ══ Header ══ */}
         <div style={{ position: "sticky", top: 0, zIndex: 20, background: `linear-gradient(135deg, ${lectureTheme.primary}, ${lectureTheme.secondary})`, color: "#fff", borderRadius: "20px 20px 0 0" }}>
@@ -3658,23 +3696,6 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
             <>
               {!content && aiLectureBlocks && (
                 <>
-                  <section id="tm-s0" style={{ marginBottom: 14, background: "#fff", border: "1px solid #ddd6fe", borderRadius: 12, padding: "12px 14px", boxShadow: "0 2px 8px rgba(124,58,237,0.08)" }}>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: "#6d28d9", marginBottom: 8 }}>📋 目录</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                      {[
-                        ["tm-s1", "§1 知识点"],
-                        ["tm-s2", "§2 重点性质"],
-                        ["tm-s3", "§3 公式总结"],
-                        ["tm-s4", "§4 解题步骤"],
-                        ["tm-s5", "§5 例题分析"],
-                        ["tm-s6", "§6 记忆方法"],
-                      ].map(([id, label]) => (
-                        <button key={id} onClick={() => scrollToSection(id)} style={{ textAlign: "left", fontSize: 12.5, color: "#5b21b6", background: "#fff", border: "1px solid #ddd6fe", borderRadius: 8, padding: "7px 10px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </section>
                   <section style={{ marginBottom: 20 }}>
                     <div id="tm-s1" style={{ padding: "12px 14px", borderRadius: 10, background: lectureTheme.tipBg, borderLeft: `4px solid ${lectureTheme.tipBorder}`, marginBottom: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#2563eb", letterSpacing: "0.08em", marginBottom: 4 }}>TIP · 知识点</div>
@@ -3708,7 +3729,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                 </>
               )}
               {/* §1 核心概念 */}
-              {content && <section style={{ marginBottom: 28 }}>
+              {content && <section id="tm-c1" style={{ marginBottom: 28 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                   <div style={{ width: 28, height: 28, borderRadius: 8, background: courseColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📖</div>
                   <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>核心概念</span>
@@ -3719,7 +3740,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
               </section>}
 
               {/* §2 关键公式 */}
-              {content && <section style={{ marginBottom: 28 }}>
+              {content && <section id="tm-c2" style={{ marginBottom: 28 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                   <div style={{ width: 28, height: 28, borderRadius: 8, background: G.purple, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📐</div>
                   <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>关键公式</span>
@@ -3740,6 +3761,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
               {/* §3 解题步骤 */}
               {content?.steps && (
                 <section style={{ marginBottom: 28 }}>
+                  <div id="tm-c3" />
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                     <div style={{ width: 28, height: 28, borderRadius: 8, background: G.blue, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🔢</div>
                     <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>解题步骤</span>
@@ -3758,6 +3780,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
               {/* §4 可视化 */}
               {content && vizKey && VIZ_MAP[vizKey] && (
                 <section style={{ marginBottom: 28 }}>
+                  <div id="tm-c4" />
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                     <div style={{ width: 28, height: 28, borderRadius: 8, background: G.amber, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🎨</div>
                     <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>可视化理解</span>
@@ -3770,7 +3793,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
 
               {/* §5 重要提示 */}
               {content?.note && (
-                <div style={{ marginBottom: 28, display: "flex", gap: 12, padding: "14px 18px", background: "#fffbeb", borderRadius: 12, border: "1px solid #fcd34d", alignItems: "flex-start" }}>
+                <div id="tm-c5" style={{ marginBottom: 28, display: "flex", gap: 12, padding: "14px 18px", background: "#fffbeb", borderRadius: 12, border: "1px solid #fcd34d", alignItems: "flex-start" }}>
                   <span style={{ fontSize: 18, flexShrink: 0, marginTop: 1 }}>⚡</span>
                   <div style={{ fontSize: 14, color: "#78350f", lineHeight: 1.8 }}><strong>重点提示：</strong>{content.note}</div>
                 </div>
@@ -3778,7 +3801,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
 
               {/* §6 例题讲解 */}
               {content?.examples?.length > 0 && (
-                <section style={{ marginBottom: 28 }}>
+                <section id="tm-c6" style={{ marginBottom: 28 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
                     <div style={{ width: 28, height: 28, borderRadius: 8, background: "#10b981", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>✏️</div>
                     <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>典型例题</span>
@@ -3822,7 +3845,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
 
           {/* ══ 相关练习题 ══ */}
           {relatedQs.length > 0 && (
-            <section style={{ marginTop: 8 }}>
+            <section id="tm-practice" style={{ marginTop: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
                 <div style={{ width: 28, height: 28, borderRadius: 8, background: G.blue, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📝</div>
                 <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>随堂练习</span>
