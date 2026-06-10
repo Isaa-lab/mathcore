@@ -1897,12 +1897,20 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
           if (data.provider) lastProvider = data.provider;
           if (data.model) lastModel = data.model;
           const tArr = Array.isArray(data.topics) ? data.topics : [];
-          for (const t of tArr) {
+          for (let topicIdx = 0; topicIdx < tArr.length; topicIdx++) {
+            const t = tArr[topicIdx];
             const key = String(t?.name || "").trim().toLowerCase();
             if (!key || seenTopicNames.has(key)) continue;
             seenTopicNames.add(key);
             // 把来源传到下游入库，行级别保留，方便对比模式
-            aggregatedTopics.push({ ...t, _provider: data.provider || null, _model: data.model || null });
+            aggregatedTopics.push({
+              ...t,
+              _provider: data.provider || null,
+              _model: data.model || null,
+              _chunkIndex: idx,
+              _topicIndex: topicIdx,
+              _seq: idx * 1000 + topicIdx,
+            });
           }
           const qArr = Array.isArray(data.questions) ? data.questions : [];
           aggregatedQuestions.push(...qArr.map(q => ({ ...q, _provider: data.provider || null, _model: data.model || null })));
@@ -2053,7 +2061,16 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
           // v3 来源字段
           generated_by: t._provider || lastProvider || null,
           ai_model: t._model || lastModel || null,
-          ai_meta: refine ? { refine: true } : null,
+          ai_meta: refine
+            ? {
+                refine: true,
+                extract_order: {
+                  chunk_index: Number.isFinite(t._chunkIndex) ? t._chunkIndex : null,
+                  topic_index: Number.isFinite(t._topicIndex) ? t._topicIndex : null,
+                  seq: Number.isFinite(t._seq) ? t._seq : null,
+                },
+              }
+            : null,
         }));
       if (topicRows.length > 0) {
         const isMissingColumn = (err) => /column .* does not exist|Could not find the .* column/i.test(err?.message || "");
@@ -5436,7 +5453,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     try {
       const tRes = await supabase
         .from("material_topics")
-        .select("id,material_id,name,summary,chapter,created_at,generated_by,ai_model")
+        .select("id,material_id,name,summary,chapter,created_at,generated_by,ai_model,ai_meta")
         .order("created_at", { ascending: false })
         .limit(800);
       setAiTopics(Array.isArray(tRes.data) ? tRes.data : []);
@@ -5591,7 +5608,18 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     : [];
 
   // AI-extracted topics from DB (for future use when AI extraction works)
-  const aiTopicsForMaterialAll = aiTopics.filter((t) => t.material_id === selectedMaterialId);
+  const aiTopicsForMaterialAll = aiTopics
+    .filter((t) => t.material_id === selectedMaterialId)
+    .sort((a, b) => {
+      const aSeq = Number(a?.ai_meta?.extract_order?.seq);
+      const bSeq = Number(b?.ai_meta?.extract_order?.seq);
+      const aHas = Number.isFinite(aSeq);
+      const bHas = Number.isFinite(bSeq);
+      if (aHas && bHas) return aSeq - bSeq; // 教材抽取顺序：从前到后
+      if (aHas) return -1;
+      if (bHas) return 1;
+      return String(a?.created_at || "").localeCompare(String(b?.created_at || ""));
+    });
   const aiTopicsForMaterial = aiTopicsForMaterialAll.filter((t) => {
     if (topicProviderFilter === "all") return true;
     if (topicProviderFilter === "manual") return !t.generated_by;
@@ -5599,6 +5627,21 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   });
 
   const totalTopicCount = courseTopics.length + aiTopicsForMaterial.length;
+  const aiGroupedByChapter = aiTopicsForMaterial.reduce((acc, t) => {
+    const key = String(t?.chapter || "未分章");
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(t);
+    return acc;
+  }, {});
+  const chapterOrder = Array.from(new Set((selectedMaterial?.course ? CHAPTERS.filter(ch => ch.course === selectedMaterial.course).map(ch => ch.num) : [])));
+  const orderedGroupKeys = Object.keys(aiGroupedByChapter).sort((a, b) => {
+    const ia = chapterOrder.indexOf(a);
+    const ib = chapterOrder.indexOf(b);
+    if (ia >= 0 && ib >= 0) return ia - ib;
+    if (ia >= 0) return -1;
+    if (ib >= 0) return 1;
+    return a.localeCompare(b, "zh-CN");
+  });
 
   return (
     <>
@@ -5715,8 +5758,19 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   当前筛选条件下暂无知识点。可切换“全部来源”查看，或点击「按当前方案重抽取」生成新结果。
                 </div>
               ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
-                {aiTopicsForMaterial.map(t => {
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                {orderedGroupKeys.map((groupKey, gIdx) => (
+                  <div key={groupKey} style={{ border: "1px solid #ede9fe", borderRadius: 14, padding: "12px 12px 10px", background: "#fff" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                      <div style={{ fontSize: 15.5, fontWeight: 900, color: "#4c1d95", letterSpacing: "0.01em" }}>
+                        {`第 ${gIdx + 1} 组 · ${groupKey}`}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "#7c3aed", fontWeight: 700 }}>
+                        {aiGroupedByChapter[groupKey]?.length || 0} 个知识点
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
+                {aiGroupedByChapter[groupKey].map(t => {
                   const mastery = topicMastery[t.id]?.status || "todo";
                   return (
                     <div
@@ -5765,6 +5819,9 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                     </div>
                   );
                 })}
+                    </div>
+                  </div>
+                ))}
               </div>
               )}
             </div>
