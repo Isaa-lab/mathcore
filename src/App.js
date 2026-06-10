@@ -3607,7 +3607,8 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
       const root = bodyRef.current;
       const el = root?.querySelector?.(`#${id}`);
       if (!root || !el) return;
-      const top = Math.max(0, el.offsetTop - 12);
+      // 目录跳转：把目标再向上抬一点，避免落点“偏低”。
+      const top = Math.max(0, el.offsetTop + 42);
       root.scrollTo({ top, behavior: "smooth" });
     } catch {}
   };
