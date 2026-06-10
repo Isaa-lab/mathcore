@@ -6120,7 +6120,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   });
   const [selectedTypes, setSelectedTypes] = useState([]);
   // 题目来源：课本习题 / AI 出题 / 上传求解
-  const [selectedOrigins, setSelectedOrigins] = useState([]);
+  const [selectedOrigins] = useState([]);
   // 「AI 来源」过滤：当选中具体 provider 时只出该 AI 生成的题；空数组 = 不过滤
   // 与 chapters / types 一样用"包含-否-空表示全集"的语义
   const [selectedSources, setSelectedSources] = useState([]);
@@ -6177,6 +6177,18 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [uploadSolveResult, setUploadSolveResult] = useState(null); // { finalAnswer, explanation, rawText, model }
   const [uploadSaveBusy, setUploadSaveBusy] = useState(false);
   const [uploadSaveMsg, setUploadSaveMsg] = useState("");
+  const [activeExerciseHub, setActiveExerciseHub] = useState("upload_solved");
+  const [textbookQuestionInput, setTextbookQuestionInput] = useState("");
+  const [textbookSolveBusy, setTextbookSolveBusy] = useState(false);
+  const [textbookSolveResult, setTextbookSolveResult] = useState(null);
+  const [textbookSaveBusy, setTextbookSaveBusy] = useState(false);
+  const [textbookSaveMsg, setTextbookSaveMsg] = useState("");
+  const [aiGenChapter, setAiGenChapter] = useState("");
+  const [aiGenType, setAiGenType] = useState("计算");
+  const [aiGenCount, setAiGenCount] = useState(5);
+  const [aiGenerateBusy, setAiGenerateBusy] = useState(false);
+  const [aiGeneratedDrafts, setAiGeneratedDrafts] = useState([]);
+  const [aiGenerateMsg, setAiGenerateMsg] = useState("");
   const autoGenTriedRef = useRef(false);
   const timerRef = useRef(null);
   const customPanelRef = useRef(null);
@@ -6185,10 +6197,18 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     const srcType = String(q?.ai_meta?.source_type || "").toLowerCase();
     const by = String(q?.generated_by || "").toLowerCase();
     const quote = String(q?.source_quote || "");
+    if (srcType === "textbook_exercise") return "textbook";
+    if (srcType === "ai_generated") return "ai_generated";
     if (srcType === "user_upload_solved" || by === "upload_solver") return "upload_solved";
     if (quote.includes("课本习题") || quote.includes("教材习题")) return "textbook";
     if (["groq", "gemini", "deepseek", "kimi", "anthropic", "custom", "server"].includes(by) || q?.ai_meta?.refine) return "ai_generated";
     return "textbook";
+  };
+
+  const isOwnUploadQuestion = (q, uid) => {
+    if (inferExerciseOrigin(q) !== "upload_solved") return true;
+    const owner = q?.created_by || q?.ai_meta?.owner_user_id || q?.ai_meta?.user_id || null;
+    return !owner || !uid || owner === uid;
   };
 
   const tryGenerateQuestionsForMaterial = async (mid) => {
@@ -6245,6 +6265,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         const normal = await supabase.from("questions").select("*");
         dbQs = normal.data || [];
       }
+      const uid = (await supabase.auth.getUser())?.data?.user?.id || null;
       let pool;
       if (effectiveMaterialId) {
         // Only questions from this material (no sample questions mixed in)
@@ -6271,6 +6292,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           }
         }
       }
+      pool = pool.filter((q) => isOwnUploadQuestion(q, uid));
       pool = pool.filter((q) => !isLowQualityQuestion(q));
       // 沙盒小测：再做一层"章节属于本教材 course"的软过滤，让题池贴合教材
       if (!effectiveMaterialId && sandboxCourse) {
@@ -6484,16 +6506,6 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     return pool;
   };
   const previewPool = buildPool(selectedChapters, selectedTypes, selectedSources, selectedOrigins);
-  const originCounts = useMemo(() => {
-    const out = { textbook: 0, ai_generated: 0, upload_solved: 0 };
-    for (const q of allQuestions) {
-      const k = inferExerciseOrigin(q);
-      if (k in out) out[k]++;
-    }
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allQuestions]);
-  const toggleOrigin = (key) => setSelectedOrigins(prev => prev.includes(key) ? prev.filter(x => x !== key) : [...prev, key]);
   // 当前题库里实际出现过的 AI 来源（用于决定 "AI 来源" 过滤器要露出哪几枚 chip）
   const availableSources = useMemo(() => {
     const set = new Set();
@@ -6512,11 +6524,11 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     const pool = buildPool(chapters, types, selectedSources, selectedOrigins);
     startWithPool(pool, count);
   };
-  const solveUploadedQuestion = async () => {
-    const qText = String(uploadQuestionInput || "").trim();
-    if (!qText || uploadSolveBusy) return;
-    setUploadSolveBusy(true);
-    setUploadSaveMsg("");
+  const solveExerciseQuestion = async ({ text, setBusy, setResult, setMsg, materialTitle = "上传题目求解" }) => {
+    const qText = String(text || "").trim();
+    if (!qText) return;
+    setBusy(true);
+    if (setMsg) setMsg("");
     try {
       const prompt = `请解答这道题，并用简体中文输出。\n\n请优先按这个结构给出：\n最终答案：...\n解析：...\n\n题目如下：\n${qText}`;
       const res = await fetch("/api/generate", {
@@ -6526,7 +6538,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
           mode: "socratic",
           question: prompt,
           conversationHistory: [],
-          materialTitle: "上传题目求解",
+          materialTitle,
           ...buildAIBody(),
         }),
       });
@@ -6535,36 +6547,65 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       const raw = String(data.answer || data.text || data.result || "").trim();
       const answerMatch = raw.match(/最终答案[:：]\s*([^\n]+)/);
       const explainMatch = raw.match(/解析[:：]\s*([\s\S]+)/);
-      setUploadSolveResult({
+      setResult({
         finalAnswer: answerMatch?.[1]?.trim() || "详见解析",
         explanation: explainMatch?.[1]?.trim() || raw,
         rawText: raw,
         model: data?.model || null,
       });
     } catch (e) {
-      setUploadSolveResult({ finalAnswer: "解答失败", explanation: String(e?.message || "未知错误"), rawText: "", model: null, isError: true });
+      setResult({ finalAnswer: "解答失败", explanation: String(e?.message || "未知错误"), rawText: "", model: null, isError: true });
     } finally {
-      setUploadSolveBusy(false);
+      setBusy(false);
     }
   };
-  const saveUploadedSolvedQuestion = async () => {
-    if (!uploadSolveResult || uploadSaveBusy) return;
-    setUploadSaveBusy(true);
-    setUploadSaveMsg("");
+  const solveUploadedQuestion = async () => {
+    if (uploadSolveBusy) return;
+    await solveExerciseQuestion({
+      text: uploadQuestionInput,
+      setBusy: setUploadSolveBusy,
+      setResult: setUploadSolveResult,
+      setMsg: setUploadSaveMsg,
+      materialTitle: "上传题目求解",
+    });
+  };
+  const solveTextbookQuestion = async () => {
+    if (textbookSolveBusy) return;
+    await solveExerciseQuestion({
+      text: textbookQuestionInput,
+      setBusy: setTextbookSolveBusy,
+      setResult: setTextbookSolveResult,
+      setMsg: setTextbookSaveMsg,
+      materialTitle: "课本习题答案生成",
+    });
+  };
+  const saveSolvedQuestion = async ({ text, result, sourceType, setBusy, setMsg, publicQuestion = false }) => {
+    if (!result) return;
+    setBusy(true);
+    setMsg("");
     try {
+      const uid = (await supabase.auth.getUser())?.data?.user?.id || null;
       const chapterCandidate = selectedChapters[0] || (Array.isArray(currentMaterial?.chapters) ? currentMaterial.chapters[0] : null) || `${currentMaterial?.course || "本资料"} Ch.1`;
+      const generatedBy = sourceType === "textbook_exercise" ? "textbook_solver" : "upload_solver";
       const baseRow = {
-        question: String(uploadQuestionInput || "").trim(),
+        question: String(text || "").trim(),
         options: null,
-        answer: uploadSolveResult.finalAnswer || "详见解析",
-        explanation: uploadSolveResult.explanation || uploadSolveResult.rawText || "",
+        answer: result.finalAnswer || "详见解析",
+        explanation: result.explanation || result.rawText || "",
         type: "填空题",
         chapter: chapterCandidate,
         course: currentMaterial?.course || "数学",
         material_id: effectiveMaterialId || currentMaterial?.id || null,
-        generated_by: "upload_solver",
-        ai_model: uploadSolveResult.model || null,
-        ai_meta: { source_type: "user_upload_solved", manual_upload: true },
+        generated_by: generatedBy,
+        ai_model: result.model || null,
+        created_by: publicQuestion ? null : uid,
+        ai_meta: {
+          source_type: sourceType,
+          owner: publicQuestion ? "public" : uid,
+          owner_user_id: publicQuestion ? null : uid,
+          manual_upload: sourceType === "user_upload_solved",
+          textbook_entry: sourceType === "textbook_exercise",
+        },
       };
       const strip = (r, cols) => {
         const out = { ...r };
@@ -6573,8 +6614,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       };
       const candidates = [
         baseRow,
-        strip(baseRow, ["generated_by", "ai_model", "ai_meta"]),
-        strip(baseRow, ["generated_by", "ai_model", "ai_meta", "material_id"]),
+        strip(baseRow, ["created_by"]),
+        strip(baseRow, ["generated_by", "ai_model", "ai_meta", "created_by"]),
+        strip(baseRow, ["generated_by", "ai_model", "ai_meta", "material_id", "created_by"]),
       ];
       let inserted = false;
       let lastErr = null;
@@ -6586,14 +6628,130 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       if (!inserted) throw new Error(lastErr?.message || "写入题库失败");
       const localRow = {
         ...baseRow,
-        id: `upload_${Date.now()}`,
+        id: `${sourceType}_${Date.now()}`,
       };
       setAllQuestions((prev) => [localRow, ...prev]);
-      setUploadSaveMsg("✅ 已保存到题库（来源：上传求解）");
+      setMsg(sourceType === "textbook_exercise" ? "✅ 已保存到课本习题库" : "✅ 已保存到我的上传题库");
     } catch (e) {
-      setUploadSaveMsg(`❌ 保存失败：${e?.message || "未知错误"}`);
+      setMsg(`❌ 保存失败：${e?.message || "未知错误"}`);
     } finally {
-      setUploadSaveBusy(false);
+      setBusy(false);
+    }
+  };
+  const saveUploadedSolvedQuestion = async () => {
+    if (!uploadSolveResult || uploadSaveBusy) return;
+    await saveSolvedQuestion({
+      text: uploadQuestionInput,
+      result: uploadSolveResult,
+      sourceType: "user_upload_solved",
+      setBusy: setUploadSaveBusy,
+      setMsg: setUploadSaveMsg,
+      publicQuestion: false,
+    });
+  };
+  const saveTextbookSolvedQuestion = async () => {
+    if (!textbookSolveResult || textbookSaveBusy) return;
+    await saveSolvedQuestion({
+      text: textbookQuestionInput,
+      result: textbookSolveResult,
+      sourceType: "textbook_exercise",
+      setBusy: setTextbookSaveBusy,
+      setMsg: setTextbookSaveMsg,
+      publicQuestion: true,
+    });
+  };
+  const parseAIQuestionDrafts = (raw) => {
+    const text = String(raw || "").trim();
+    const jsonText = text.match(/```json\s*([\s\S]*?)```/i)?.[1]
+      || text.match(/```\s*([\s\S]*?)```/)?.[1]
+      || text.match(/\[[\s\S]*\]/)?.[0]
+      || text;
+    try {
+      const parsed = JSON.parse(jsonText);
+      const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.questions) ? parsed.questions : []);
+      return arr.map((q, idx) => ({
+        question: String(q.question || q.title || q.prompt || "").trim(),
+        answer: String(q.answer || q.finalAnswer || "详见解析").trim(),
+        explanation: String(q.explanation || q.solution || q.analysis || "").trim(),
+        type: q.type || "简答题",
+        chapter: q.chapter || aiGenChapter || selectedChapters[0] || `${currentMaterial?.course || "数学"} Ch.1`,
+        _idx: idx,
+      })).filter(q => q.question);
+    } catch {
+      return [];
+    }
+  };
+  const generateAIExerciseQuestions = async () => {
+    if (aiGenerateBusy) return;
+    setAiGenerateBusy(true);
+    setAiGenerateMsg("");
+    setAiGeneratedDrafts([]);
+    try {
+      const chapter = aiGenChapter || selectedChapters[0] || currentMaterial?.chapter || `${currentMaterial?.course || "数学"} Ch.1`;
+      const prompt = `请生成 ${aiGenCount} 道数学练习题，用于题库保存。\n要求：\n1. 章节：${chapter}\n2. 题型能力：${aiGenType}\n3. 每题必须有题目、最终答案、完整解析。\n4. 只输出 JSON 数组，不要 Markdown，不要额外解释。\n\nJSON 格式：\n[\n  { "chapter": "${chapter}", "type": "简答题", "question": "...", "answer": "...", "explanation": "..." }\n]`;
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "socratic",
+          question: prompt,
+          conversationHistory: [],
+          materialTitle: "AI 出题",
+          ...buildAIBody(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data?.message || data?.error || `HTTP ${res.status}`);
+      const raw = String(data.answer || data.text || data.result || "").trim();
+      const drafts = parseAIQuestionDrafts(raw);
+      if (drafts.length === 0) throw new Error("AI 返回格式无法解析，请重试一次");
+      setAiGeneratedDrafts(drafts.map(d => ({ ...d, ai_model: data?.model || null })));
+      setAiGenerateMsg(`✅ 已生成 ${drafts.length} 道题，确认后可保存到 AI 题库`);
+    } catch (e) {
+      setAiGenerateMsg(`❌ 生成失败：${e?.message || "未知错误"}`);
+    } finally {
+      setAiGenerateBusy(false);
+    }
+  };
+  const saveAIGeneratedQuestions = async () => {
+    if (aiGeneratedDrafts.length === 0 || aiGenerateBusy) return;
+    setAiGenerateBusy(true);
+    setAiGenerateMsg("");
+    try {
+      const rows = aiGeneratedDrafts.map((q) => ({
+        question: q.question,
+        options: null,
+        answer: q.answer || "详见解析",
+        explanation: q.explanation || "",
+        type: ["单选题", "判断题", "填空题", "简答题"].includes(q.type) ? q.type : "简答题",
+        chapter: q.chapter || aiGenChapter || selectedChapters[0] || `${currentMaterial?.course || "数学"} Ch.1`,
+        course: currentMaterial?.course || "数学",
+        material_id: effectiveMaterialId || currentMaterial?.id || null,
+        generated_by: "server",
+        ai_model: q.ai_model || null,
+        ai_meta: { source_type: "ai_generated", owner: "public", generated_from_quiz_hub: true, ability: aiGenType },
+      }));
+      const candidates = [
+        rows,
+        rows.map(({ generated_by, ai_model, ai_meta, ...r }) => r),
+        rows.map(({ generated_by, ai_model, ai_meta, material_id, ...r }) => r),
+      ];
+      let ok = false;
+      let lastErr = null;
+      for (const batch of candidates) {
+        const ret = await supabase.from("questions").insert(batch);
+        if (!ret.error) { ok = true; break; }
+        lastErr = ret.error;
+      }
+      if (!ok) throw new Error(lastErr?.message || "保存 AI 题失败");
+      const localRows = rows.map((r, i) => ({ ...r, id: `ai_generated_${Date.now()}_${i}` }));
+      setAllQuestions((prev) => [...localRows, ...prev]);
+      setAiGeneratedDrafts([]);
+      setAiGenerateMsg(`✅ 已保存 ${rows.length} 道题到 AI 题库`);
+    } catch (e) {
+      setAiGenerateMsg(`❌ 保存失败：${e?.message || "未知错误"}`);
+    } finally {
+      setAiGenerateBusy(false);
     }
   };
   // 新：直接用已经筛好的题池开始。支持强制开启计时模式（考试/模拟题）
@@ -7136,7 +7294,9 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
     // 覆盖章节数
     const coveredChapters = new Set(customPool.slice(0, effectiveCount).map(q => q.chapter).filter(Boolean));
-    const sourceOnlyPool = buildPool(customChapters, [], selectedSources, selectedOrigins);
+    const textbookPool = allQuestions.filter(q => inferExerciseOrigin(q) === "textbook");
+    const aiQuestionPool = allQuestions.filter(q => inferExerciseOrigin(q) === "ai_generated");
+    const uploadQuestionPool = allQuestions.filter(q => inferExerciseOrigin(q) === "upload_solved");
 
     // 推荐卡片（有学习数据时才出现）
     const hasHistory = Object.keys(sessionAnswers).length > 0;
@@ -7268,82 +7428,105 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       <div style={{ padding: "0 0 16px", maxWidth: 960, margin: "0 auto" }}>
         <PageHeader title="题库练习" subtitle={effectiveMaterialTitle ? `${effectiveMaterialTitle} · 基于资料` : "你今天想练什么？"} onBack={() => setPage("首页")} />
 
-        {/* ══ 习题库来源与上传求解（固定可见，不再藏在自定义里） ══ */}
+        {/* ══ 三个独立题库入口 ══ */}
         <SectionCard style={{ padding: "1.15rem 1.25rem", marginBottom: 16, border: "1px solid #DBEAFE", background: "#F8FBFF" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 900, color: "#0F172A", marginBottom: 3 }}>习题库来源</div>
-              <div style={{ fontSize: 12.5, color: "#64748B" }}>课本习题、AI 出题、上传题目求解都在这里管理</div>
-            </div>
-            <button
-              onClick={() => setExpandedCustom(true)}
-              style={{ padding: "7px 12px", borderRadius: 9, border: "1.5px solid #BFDBFE", background: "#fff", color: "#1D4ED8", fontSize: 12.5, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}
-            >
-              打开完整筛选
-            </button>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 16, fontWeight: 900, color: "#0F172A", marginBottom: 3 }}>题库练习</div>
+            <div style={{ fontSize: 12.5, color: "#64748B" }}>三种题分开管理：课本习题和 AI 出题是公共题库，上传求解是当前用户私有题库。</div>
           </div>
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12, marginBottom: 14 }}>
             {[
-              { id: "textbook", label: "📘 课本习题", color: "#1D4ED8", bg: "#EFF6FF", count: originCounts.textbook },
-              { id: "ai_generated", label: "🤖 AI 出题", color: "#7C3AED", bg: "#F5F3FF", count: originCounts.ai_generated },
-              { id: "upload_solved", label: "📤 上传求解", color: "#047857", bg: "#ECFDF5", count: originCounts.upload_solved },
-            ].map((o) => {
-              const active = selectedOrigins.includes(o.id);
+              { id: "textbook", icon: "📘", title: "课本习题", desc: "管理员录入题目，AI 生成答案", count: textbookPool.length, action: "录入题目", color: "#1D4ED8", bg: "#EFF6FF" },
+              { id: "ai_generated", icon: "🤖", title: "AI 出题", desc: "AI 生成题目和解析，保存为公共题库", count: aiQuestionPool.length, action: "生成题目", color: "#7C3AED", bg: "#F5F3FF" },
+              { id: "upload_solved", icon: "📤", title: "上传求解", desc: "用户粘贴题目，AI 解答后存入我的题库", count: uploadQuestionPool.length, action: "上传题目", color: "#047857", bg: "#ECFDF5" },
+            ].map((hub) => {
+              const active = activeExerciseHub === hub.id;
+              const pool = { textbook: textbookPool, ai_generated: aiQuestionPool, upload_solved: uploadQuestionPool }[hub.id] || [];
               return (
                 <button
-                  key={o.id}
-                  onClick={() => toggleOrigin(o.id)}
-                  style={{ padding: "8px 13px", borderRadius: 999, border: `1.5px solid ${active ? o.color : "#E2E8F0"}`, background: active ? o.bg : "#fff", color: active ? o.color : "#475569", fontFamily: "inherit", fontSize: 12.5, fontWeight: 800, cursor: "pointer", display: "inline-flex", gap: 6, alignItems: "center" }}
+                  key={hub.id}
+                  onClick={() => setActiveExerciseHub(hub.id)}
+                  style={{ textAlign: "left", padding: 16, borderRadius: 16, border: `1.5px solid ${active ? hub.color : "#E2E8F0"}`, background: active ? hub.bg : "#fff", cursor: "pointer", fontFamily: "inherit", boxShadow: active ? "0 10px 24px rgba(15,23,42,0.08)" : "none" }}
                 >
-                  {o.label}<span style={{ color: "#94A3B8", fontWeight: 600 }}>· {o.count}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                    <span style={{ fontSize: 24 }}>{hub.icon}</span>
+                    <span style={{ fontSize: 15, fontWeight: 900, color: "#0F172A" }}>{hub.title}</span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: "#64748B", lineHeight: 1.5, minHeight: 38 }}>{hub.desc}</div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: hub.color }}>{hub.id === "upload_solved" ? "我的" : "共"} {pool.length} 题</span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: active ? "#fff" : hub.color, background: active ? hub.color : "#fff", border: `1px solid ${hub.color}55`, borderRadius: 999, padding: "4px 9px" }}>{hub.action}</span>
+                  </div>
                 </button>
               );
             })}
-            <button
-              onClick={() => startWithPool(sourceOnlyPool, Math.min(quizCount || 5, sourceOnlyPool.length || 0))}
-              disabled={sourceOnlyPool.length === 0}
-              style={{ padding: "8px 13px", borderRadius: 999, border: "none", background: sourceOnlyPool.length === 0 ? "#CBD5E1" : "#2563EB", color: "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 800, cursor: sourceOnlyPool.length === 0 ? "not-allowed" : "pointer" }}
-            >
-              按当前来源开始练习 · {sourceOnlyPool.length}
-            </button>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "stretch" }}>
-            <textarea
-              value={uploadQuestionInput}
-              onChange={(e) => setUploadQuestionInput(e.target.value)}
-              placeholder="粘贴课本习题 / 作业题，AI 会解出答案和解析..."
-              style={{ width: "100%", minHeight: 74, resize: "vertical", border: "1px solid #DBEAFE", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", background: "#fff" }}
-            />
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 120 }}>
-              <button
-                onClick={solveUploadedQuestion}
-                disabled={uploadSolveBusy || !String(uploadQuestionInput || "").trim()}
-                style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: "none", background: uploadSolveBusy ? "#CBD5E1" : "#2563EB", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: uploadSolveBusy ? "wait" : "pointer", fontFamily: "inherit" }}
-              >
-                {uploadSolveBusy ? "解答中…" : "AI 解答"}
-              </button>
-              <button
-                onClick={saveUploadedSolvedQuestion}
-                disabled={!uploadSolveResult || !!uploadSolveResult?.isError || uploadSaveBusy}
-                style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: "1.5px solid #10B98155", background: "#ECFDF5", color: "#047857", fontSize: 12.5, fontWeight: 800, cursor: (!uploadSolveResult || uploadSaveBusy) ? "not-allowed" : "pointer", fontFamily: "inherit" }}
-              >
-                {uploadSaveBusy ? "保存中…" : "保存题库"}
-              </button>
-            </div>
+          <div style={{ border: "1px solid #DBEAFE", borderRadius: 14, background: "#fff", padding: 14 }}>
+            {activeExerciseHub === "textbook" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 900, color: "#0F172A" }}>录入课本习题</div>
+                    <div style={{ fontSize: 12, color: "#64748B" }}>你只粘贴题目，AI 生成答案和解析，保存后所有用户可练。</div>
+                  </div>
+                  <button onClick={() => startWithPool(textbookPool, Math.min(quizCount || 5, textbookPool.length || 0))} disabled={textbookPool.length === 0} style={{ padding: "8px 12px", borderRadius: 10, border: "none", background: textbookPool.length ? "#1D4ED8" : "#CBD5E1", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: textbookPool.length ? "pointer" : "not-allowed", fontFamily: "inherit" }}>开始练习课本题</button>
+                </div>
+                <textarea value={textbookQuestionInput} onChange={(e) => setTextbookQuestionInput(e.target.value)} placeholder="粘贴课本习题题干..." style={{ width: "100%", minHeight: 82, resize: "vertical", border: "1px solid #DBEAFE", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }} />
+                <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                  <button onClick={solveTextbookQuestion} disabled={textbookSolveBusy || !String(textbookQuestionInput || "").trim()} style={{ padding: "8px 12px", borderRadius: 10, border: "none", background: textbookSolveBusy ? "#CBD5E1" : "#2563EB", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: textbookSolveBusy ? "wait" : "pointer", fontFamily: "inherit" }}>{textbookSolveBusy ? "生成中…" : "AI 生成答案"}</button>
+                  <button onClick={saveTextbookSolvedQuestion} disabled={!textbookSolveResult || !!textbookSolveResult?.isError || textbookSaveBusy} style={{ padding: "8px 12px", borderRadius: 10, border: "1.5px solid #1D4ED855", background: "#EFF6FF", color: "#1D4ED8", fontSize: 12.5, fontWeight: 800, cursor: (!textbookSolveResult || textbookSaveBusy) ? "not-allowed" : "pointer", fontFamily: "inherit" }}>{textbookSaveBusy ? "保存中…" : "保存到课本库"}</button>
+                </div>
+                {textbookSolveResult && <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: textbookSolveResult.isError ? "#FEF2F2" : "#F8FAFC", border: `1px solid ${textbookSolveResult.isError ? "#FECACA" : "#DBEAFE"}` }}><div style={{ fontSize: 12.5, fontWeight: 800, color: textbookSolveResult.isError ? "#B91C1C" : "#0F172A", marginBottom: 6 }}>{textbookSolveResult.isError ? "生成失败" : `最终答案：${textbookSolveResult.finalAnswer}`}</div><div style={{ fontSize: 12.5, color: "#475569", lineHeight: 1.7 }}><MathText text={textbookSolveResult.explanation || ""} /></div></div>}
+                {textbookSaveMsg && <div style={{ marginTop: 8, fontSize: 12.5, color: textbookSaveMsg.startsWith("✅") ? "#166534" : "#b91c1c", fontWeight: 800 }}>{textbookSaveMsg}</div>}
+              </div>
+            )}
+
+            {activeExerciseHub === "ai_generated" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 900, color: "#0F172A" }}>让 AI 出新题</div>
+                    <div style={{ fontSize: 12, color: "#64748B" }}>生成后保存到公共 AI 题库，所有用户可反复练。</div>
+                  </div>
+                  <button onClick={() => startWithPool(aiQuestionPool, Math.min(quizCount || 5, aiQuestionPool.length || 0))} disabled={aiQuestionPool.length === 0} style={{ padding: "8px 12px", borderRadius: 10, border: "none", background: aiQuestionPool.length ? "#7C3AED" : "#CBD5E1", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: aiQuestionPool.length ? "pointer" : "not-allowed", fontFamily: "inherit" }}>开始练习 AI 题</button>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 140px 120px", gap: 8, marginBottom: 8 }}>
+                  <input value={aiGenChapter} onChange={(e) => setAiGenChapter(e.target.value)} placeholder={selectedChapters[0] || "章节，例如 Ch.1 矩阵"} style={{ border: "1px solid #E2E8F0", borderRadius: 10, padding: "9px 10px", fontFamily: "inherit", fontSize: 13 }} />
+                  <select value={aiGenType} onChange={(e) => setAiGenType(e.target.value)} style={{ border: "1px solid #E2E8F0", borderRadius: 10, padding: "9px 10px", fontFamily: "inherit", fontSize: 13 }}><option>概念</option><option>计算</option><option>证明</option><option>应用</option></select>
+                  <select value={aiGenCount} onChange={(e) => setAiGenCount(Number(e.target.value))} style={{ border: "1px solid #E2E8F0", borderRadius: 10, padding: "9px 10px", fontFamily: "inherit", fontSize: 13 }}><option value={3}>3 题</option><option value={5}>5 题</option><option value={10}>10 题</option></select>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button onClick={generateAIExerciseQuestions} disabled={aiGenerateBusy} style={{ padding: "8px 12px", borderRadius: 10, border: "none", background: aiGenerateBusy ? "#CBD5E1" : "#7C3AED", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: aiGenerateBusy ? "wait" : "pointer", fontFamily: "inherit" }}>{aiGenerateBusy ? "生成中…" : "生成题目"}</button>
+                  <button onClick={saveAIGeneratedQuestions} disabled={aiGeneratedDrafts.length === 0 || aiGenerateBusy} style={{ padding: "8px 12px", borderRadius: 10, border: "1.5px solid #7C3AED55", background: "#F5F3FF", color: "#6D28D9", fontSize: 12.5, fontWeight: 800, cursor: (aiGeneratedDrafts.length === 0 || aiGenerateBusy) ? "not-allowed" : "pointer", fontFamily: "inherit" }}>保存到 AI 题库</button>
+                </div>
+                {aiGenerateMsg && <div style={{ marginTop: 8, fontSize: 12.5, color: aiGenerateMsg.startsWith("✅") ? "#166534" : "#b91c1c", fontWeight: 800 }}>{aiGenerateMsg}</div>}
+                {aiGeneratedDrafts.length > 0 && <div style={{ marginTop: 10, display: "grid", gap: 8 }}>{aiGeneratedDrafts.slice(0, 3).map((q) => <div key={q._idx} style={{ padding: "9px 10px", border: "1px solid #E9D5FF", background: "#FAF5FF", borderRadius: 10 }}><div style={{ fontSize: 12.5, fontWeight: 800, color: "#3B0764" }}>{q.question}</div><div style={{ fontSize: 12, color: "#6B21A8", marginTop: 4 }}>答案：{q.answer}</div></div>)}</div>}
+              </div>
+            )}
+
+            {activeExerciseHub === "upload_solved" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10, alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 900, color: "#0F172A" }}>上传我的题目</div>
+                    <div style={{ fontSize: 12, color: "#64748B" }}>AI 解答后保存到我的私有题库，别人看不到。</div>
+                  </div>
+                  <button onClick={() => startWithPool(uploadQuestionPool, Math.min(quizCount || 5, uploadQuestionPool.length || 0))} disabled={uploadQuestionPool.length === 0} style={{ padding: "8px 12px", borderRadius: 10, border: "none", background: uploadQuestionPool.length ? "#047857" : "#CBD5E1", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: uploadQuestionPool.length ? "pointer" : "not-allowed", fontFamily: "inherit" }}>练我的上传题</button>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "stretch" }}>
+                  <textarea value={uploadQuestionInput} onChange={(e) => setUploadQuestionInput(e.target.value)} placeholder="粘贴作业题 / 课外题，AI 会解出答案和解析..." style={{ width: "100%", minHeight: 82, resize: "vertical", border: "1px solid #D1FAE5", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box" }} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 118 }}>
+                    <button onClick={solveUploadedQuestion} disabled={uploadSolveBusy || !String(uploadQuestionInput || "").trim()} style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: "none", background: uploadSolveBusy ? "#CBD5E1" : "#047857", color: "#fff", fontSize: 12.5, fontWeight: 800, cursor: uploadSolveBusy ? "wait" : "pointer", fontFamily: "inherit" }}>{uploadSolveBusy ? "解答中…" : "AI 解答"}</button>
+                    <button onClick={saveUploadedSolvedQuestion} disabled={!uploadSolveResult || !!uploadSolveResult?.isError || uploadSaveBusy} style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: "1.5px solid #10B98155", background: "#ECFDF5", color: "#047857", fontSize: 12.5, fontWeight: 800, cursor: (!uploadSolveResult || uploadSaveBusy) ? "not-allowed" : "pointer", fontFamily: "inherit" }}>{uploadSaveBusy ? "保存中…" : "存入我的题库"}</button>
+                  </div>
+                </div>
+                {uploadSolveResult && <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: uploadSolveResult.isError ? "#FEF2F2" : "#F8FAFC", border: `1px solid ${uploadSolveResult.isError ? "#FECACA" : "#D1FAE5"}` }}><div style={{ fontSize: 12.5, fontWeight: 800, color: uploadSolveResult.isError ? "#B91C1C" : "#0F172A", marginBottom: 6 }}>{uploadSolveResult.isError ? "解答失败" : `最终答案：${uploadSolveResult.finalAnswer}`}</div><div style={{ fontSize: 12.5, color: "#475569", lineHeight: 1.7 }}><MathText text={uploadSolveResult.explanation || ""} /></div></div>}
+                {uploadSaveMsg && <div style={{ marginTop: 8, fontSize: 12.5, color: uploadSaveMsg.startsWith("✅") ? "#166534" : "#b91c1c", fontWeight: 800 }}>{uploadSaveMsg}</div>}
+              </div>
+            )}
           </div>
-          {uploadSolveResult && (
-            <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: uploadSolveResult.isError ? "#FEF2F2" : "#FFFFFF", border: `1px solid ${uploadSolveResult.isError ? "#FECACA" : "#DBEAFE"}` }}>
-              <div style={{ fontSize: 12.5, fontWeight: 800, color: uploadSolveResult.isError ? "#B91C1C" : "#0F172A", marginBottom: 6 }}>
-                {uploadSolveResult.isError ? "解答失败" : `最终答案：${uploadSolveResult.finalAnswer}`}
-              </div>
-              <div style={{ fontSize: 12.5, color: "#475569", lineHeight: 1.7 }}>
-                <MathText text={uploadSolveResult.explanation || ""} />
-              </div>
-            </div>
-          )}
-          {uploadSaveMsg && <div style={{ marginTop: 8, fontSize: 12.5, color: uploadSaveMsg.startsWith("✅") ? "#166534" : "#b91c1c", fontWeight: 800 }}>{uploadSaveMsg}</div>}
         </SectionCard>
 
         {/* ══ 数据驱动的推荐条（仅有历史数据时） ══ */}
@@ -7537,79 +7720,6 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                 </div>
               </>
             )}
-
-            {/* Step 3.6 · 题目来源 */}
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 3.6 · 题目来源（可多选）</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-              {[
-                { id: "textbook", label: "📘 课本习题", color: "#1D4ED8", bg: "#EFF6FF", count: originCounts.textbook },
-                { id: "ai_generated", label: "🤖 AI 出题", color: "#7C3AED", bg: "#F5F3FF", count: originCounts.ai_generated },
-                { id: "upload_solved", label: "📤 上传求解", color: "#047857", bg: "#ECFDF5", count: originCounts.upload_solved },
-              ].map((o) => {
-                const active = selectedOrigins.includes(o.id);
-                return (
-                  <button
-                    key={o.id}
-                    onClick={() => toggleOrigin(o.id)}
-                    style={{
-                      padding: "7px 12px",
-                      borderRadius: 999,
-                      border: `1.5px solid ${active ? o.color : "#E2E8F0"}`,
-                      background: active ? o.bg : "#fff",
-                      color: active ? o.color : "#475569",
-                      fontFamily: "inherit",
-                      fontSize: 12.5,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      gap: 6,
-                      alignItems: "center",
-                    }}
-                  >
-                    <span>{o.label}</span>
-                    <span style={{ color: "#94A3B8", fontWeight: 600 }}>· {o.count}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Step 3.7 · 上传题目求解 */}
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 3.7 · 上传题目让 AI 解答</div>
-            <div style={{ border: "1px solid #E2E8F0", borderRadius: 12, background: "#FAFBFD", padding: "12px 12px 10px", marginBottom: 18 }}>
-              <textarea
-                value={uploadQuestionInput}
-                onChange={(e) => setUploadQuestionInput(e.target.value)}
-                placeholder="粘贴一道课本题或作业题，点击「AI 解答」..."
-                style={{ width: "100%", minHeight: 90, resize: "vertical", border: "1px solid #E2E8F0", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontFamily: "inherit", boxSizing: "border-box", background: "#fff" }}
-              />
-              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                <button
-                  onClick={solveUploadedQuestion}
-                  disabled={uploadSolveBusy || !String(uploadQuestionInput || "").trim()}
-                  style={{ padding: "7px 12px", borderRadius: 9, border: "none", background: uploadSolveBusy ? "#CBD5E1" : "#2563EB", color: "#fff", fontSize: 12.5, fontWeight: 700, cursor: uploadSolveBusy ? "wait" : "pointer", fontFamily: "inherit" }}
-                >
-                  {uploadSolveBusy ? "AI 解答中…" : "AI 解答"}
-                </button>
-                <button
-                  onClick={saveUploadedSolvedQuestion}
-                  disabled={!uploadSolveResult || !!uploadSolveResult?.isError || uploadSaveBusy}
-                  style={{ padding: "7px 12px", borderRadius: 9, border: "1.5px solid #10B98155", background: "#ECFDF5", color: "#047857", fontSize: 12.5, fontWeight: 700, cursor: (!uploadSolveResult || uploadSaveBusy) ? "not-allowed" : "pointer", fontFamily: "inherit" }}
-                >
-                  {uploadSaveBusy ? "保存中…" : "保存到题库"}
-                </button>
-              </div>
-              {uploadSolveResult && (
-                <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 10, background: uploadSolveResult.isError ? "#FEF2F2" : "#FFFFFF", border: `1px solid ${uploadSolveResult.isError ? "#FECACA" : "#E2E8F0"}` }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: uploadSolveResult.isError ? "#B91C1C" : "#0F172A", marginBottom: 6 }}>
-                    {uploadSolveResult.isError ? "解答失败" : `最终答案：${uploadSolveResult.finalAnswer}`}
-                  </div>
-                  <div style={{ fontSize: 12.5, color: "#475569", lineHeight: 1.7 }}>
-                    <MathText text={uploadSolveResult.explanation || ""} />
-                  </div>
-                </div>
-              )}
-              {uploadSaveMsg && <div style={{ marginTop: 8, fontSize: 12.5, color: uploadSaveMsg.startsWith("✅") ? "#166534" : "#b91c1c", fontWeight: 700 }}>{uploadSaveMsg}</div>}
-            </div>
 
             {/* Step 4 · 题量档位 */}
             <div style={{ fontSize: 12, fontWeight: 700, color: "#64748B", letterSpacing: "0.08em", marginBottom: 8 }}>STEP 4 · 练多少题？</div>
