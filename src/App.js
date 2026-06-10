@@ -1730,7 +1730,11 @@ const findChunkRefContext = (chunk, refDefs) => {
 
 // refine 默认 true：自 v3 起所有上传走细化模式，知识点/题型一步到位
 // 如有性能 / token 顾虑，调用方可显式传 refine=false 走快速通道
-const processMaterialWithAI = async ({ material, file, genCount = 10, refine = true, ...rest }) => {
+const processMaterialWithAI = async ({ material, file, genCount = 10, refine = true, onProgress = null, ...rest }) => {
+  const reportProgress = (pct, detail) => {
+    try { if (typeof onProgress === "function") onProgress({ pct: Math.max(0, Math.min(100, Math.round(pct))), detail: detail || "" }); } catch {}
+  };
+  reportProgress(3, "准备抽取任务…");
   const materialId = material?.id;
   if (!materialId) return { topics: [], questions: [], insertedCount: 0, materialLinked: false };
 
@@ -1743,6 +1747,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
 
   if (file) {
     try {
+      reportProgress(8, "正在读取教材文本…");
       await ensurePdfJs();
       const buf = await file.arrayBuffer();
       const pdf = await window.pdfjsLib.getDocument({ data: buf }).promise;
@@ -1754,7 +1759,10 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
 
       // First pass: collect all page texts to detect running headers/footers
       const rawPageTexts = [];
+      const pageTotal = Math.max(1, endPage - startPage + 1);
       for (let i = startPage; i <= endPage; i++) {
+        const pageIdx = i - startPage + 1;
+        reportProgress(8 + (pageIdx / pageTotal) * 10, `正在读取教材文本（${pageIdx}/${pageTotal} 页）…`);
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
         const items = (content.items || [])
@@ -1808,6 +1816,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
       rawText = rawText.replace(/\n{3,}/g, "\n\n");
 
       text = normalizeMaterialText(rawText);
+      reportProgress(18, "教材文本读取完成");
     } catch (e) {
       console.error("PDF extraction error:", e.message);
     }
@@ -1820,7 +1829,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
       if (r.ok) {
         const blob = await r.blob();
         const f2 = new File([blob], material.file_name || "m.pdf", { type: "application/pdf" });
-        const sub = await processMaterialWithAI({ material, file: f2, genCount, refine });
+        const sub = await processMaterialWithAI({ material, file: f2, genCount, refine, onProgress });
         return sub;
       }
     } catch (e) {}
@@ -1836,6 +1845,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
   //   - 长文档切 2~4 个 chunk，每块出 ceil(genCount / chunks) 题
   //   - 每块自动注入它引用到的编号定义，解决"方程(1)"这类悬挂引用
   if (hasText) {
+    reportProgress(22, "开始 AI 抽取…");
     const aiCfg = getAIConfig();
     const fullText = text.slice(0, 24000); // 上限保护，避免极端长文挤爆
     const refDefs = extractReferenceDefinitions(fullText);
@@ -1851,6 +1861,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
     let lastModel = null;
 
     for (let idx = 0; idx < chunks.length; idx++) {
+      reportProgress(22 + (idx / Math.max(1, chunks.length)) * 48, `AI 抽取中（${idx + 1}/${chunks.length}）…`);
       const chunk = chunks[idx];
       const refs = findChunkRefContext(chunk, refDefs);
       // 每块最多要 perChunk 题；最后一块兜底把剩余额度拉回来
@@ -1911,6 +1922,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
 
     topics = aggregatedTopics;
     questions = aggregatedQuestions.slice(0, genCount);
+    reportProgress(74, "AI 抽取完成，正在整理结果…");
   }
 
   // Step 4: Fallback sentence-based questions — ONLY when API failed for non-quota reasons
@@ -1952,6 +1964,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
   // Record concrete DB errors so UploadPage can show actionable feedback (RLS, schema, etc.).
   const dbErrors = { questions: null, topics: null };
   if (!apiQuotaExceeded && questions.length > 0) {
+    reportProgress(78, "正在写入题目到数据库…");
     // 垃圾题过滤：AI 偶尔会生成元学习题 / 学习方法判断题 / 占位模板，拦截在入库前
     const filteredQuestions = questions.filter(q => !isLowQualityQuestion({
       question: q.question,
@@ -2022,6 +2035,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
   //   Table missing / RLS mis-config / dup-run are all tolerated (silent fallback).
   let topicsLinked = 0;
   if (!apiQuotaExceeded && topics.length > 0) {
+    reportProgress(84, "写入知识点到数据库…");
     try {
       const topicRows = topics
         .filter(t => t && t.name && String(t.name).trim())
@@ -2056,9 +2070,10 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
         ];
         let okError = null;
         for (const candidate of tryRows) {
-          const { error: et } = await supabase.from("material_topics").insert(candidate);
+        const { error: et } = await supabase.from("material_topics").insert(candidate);
           if (!et) {
             topicsLinked = candidate.length;
+          reportProgress(92, "知识点入库完成，正在同步关联…");
             try {
               window.dispatchEvent(new CustomEvent("mc:material-topics-updated", {
                 detail: { materialId, count: candidate.length },
@@ -2080,6 +2095,7 @@ const processMaterialWithAI = async ({ material, file, genCount = 10, refine = t
       dbErrors.topics = e?.message || String(e);
     }
   }
+  reportProgress(100, "抽取完成");
 
   // Build diagnostic info for the UI
   const textLen = text.trim().length;
@@ -5395,17 +5411,19 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const [reextracting, setReextracting] = useState(false);
   const [reextractMsg, setReextractMsg] = useState("");
   const [aiProvider, setAiProvider] = useState(() => getAIConfig().provider || "server");
-  const EXTRACT_MODEL_PRESETS = [
-    { label: "自动（推荐）", value: "" },
-    { label: "Gemini 2.0 Flash", value: "gemini-2.0-flash" },
-    { label: "Gemini 3 Flash Preview", value: "[L]gemini-3-flash-preview" },
-    { label: "Gemini 2.5 Pro", value: "[L]gemini-2.5-pro" },
-    { label: "Groq Llama 3.3 70B", value: "llama-3.3-70b-versatile" },
-    { label: "DeepSeek Chat", value: "deepseek-chat" },
-    { label: "Kimi 8K", value: "moonshot-v1-8k" },
-  ];
+  const [extractProgress, setExtractProgress] = useState({ pct: 0, detail: "", etaSec: null, startedAt: 0 });
   const [extractModel, setExtractModel] = useState(() => localStorage.getItem("mc_ai_extract_model") || "");
   const [topicProviderFilter, setTopicProviderFilter] = useState(() => localStorage.getItem("mc_topic_provider_filter") || "all");
+  const EXTRACT_PLAN_OPTIONS = [
+    { label: "平台内置自动", provider: "server", model: "" },
+    { label: "Gemini · 2.0 Flash", provider: "gemini", model: "gemini-2.0-flash" },
+    { label: "Gemini · 3 Flash Preview", provider: "gemini", model: "[L]gemini-3-flash-preview" },
+    { label: "Gemini · 2.5 Pro", provider: "gemini", model: "[L]gemini-2.5-pro" },
+    { label: "Groq · Llama 3.3 70B", provider: "groq", model: "llama-3.3-70b-versatile" },
+    { label: "DeepSeek · Chat", provider: "deepseek", model: "deepseek-chat" },
+    { label: "Kimi · 8K", provider: "kimi", model: "moonshot-v1-8k" },
+  ];
+  const currentPlanValue = `${aiProvider || "server"}::${extractModel || ""}`;
   const selectedMaterialId = currentMaterial?.id || (materials[0]?.id || null);
 
   const reloadKnowledge = useCallback(async () => {
@@ -5511,6 +5529,8 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
     if (!selectedMaterialId || reextracting) return;
     setReextracting(true);
     setReextractMsg("");
+    const startedAt = Date.now();
+    setExtractProgress({ pct: 2, detail: "准备中…", etaSec: null, startedAt });
     try {
       const matRes = await supabase
         .from("materials")
@@ -5526,6 +5546,20 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
         genCount: 12,
         refine: true,
         actorName: "知识点重抽取",
+        onProgress: (p) => {
+          setExtractProgress((prev) => {
+            const pct = Math.max(0, Math.min(100, Number(p?.pct || 0)));
+            const detail = p?.detail || "";
+            const baseStart = prev.startedAt || startedAt;
+            const elapsedSec = Math.max(1, Math.round((Date.now() - baseStart) / 1000));
+            let etaSec = null;
+            if (pct >= 6 && pct < 100) {
+              const remainPct = 100 - pct;
+              etaSec = Math.max(1, Math.round((elapsedSec * remainPct) / pct));
+            }
+            return { pct, detail, etaSec, startedAt: baseStart };
+          });
+        },
       });
       const linked = Number(result?.topicsLinked || 0);
       const providerName = AI_PROVIDER_META[getAIConfig().provider]?.name || "当前 AI";
@@ -5536,6 +5570,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
       setReextractMsg(`❌ 重抽取失败：${e?.message || "未知错误"}`);
     } finally {
       setReextracting(false);
+      setExtractProgress((prev) => ({ ...prev, pct: 100, detail: prev.detail || "完成", etaSec: 0 }));
       setTimeout(() => setReextractMsg(""), 7000);
     }
   };
@@ -5592,40 +5627,6 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-              <select
-                value={aiProvider}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setAiProvider(next);
-                  setActiveAIProvider(next);
-                }}
-                style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid #dbeafe", background: "#eff6ff", color: "#1d4ed8", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}
-                title="知识点抽取用 AI 提供商"
-              >
-                {AI_PROVIDER_ORDER.map((pid) => (
-                  <option key={pid} value={pid}>{AI_PROVIDER_META[pid]?.name || pid}</option>
-                ))}
-              </select>
-              <select
-                value={extractModel}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setExtractModel(next);
-                  try {
-                    if (next) localStorage.setItem("mc_ai_extract_model", next);
-                    else localStorage.removeItem("mc_ai_extract_model");
-                  } catch {}
-                }}
-                style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid #ddd6fe", background: "#faf5ff", color: "#5b21b6", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}
-                title="AI 抽取模型"
-              >
-                {EXTRACT_MODEL_PRESETS.map((opt) => (
-                  <option key={opt.label} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              <Btn size="sm" variant="primary" onClick={reextractTopicsWithCurrentAI} disabled={!selectedMaterialId || reextracting}>
-                {reextracting ? "重抽取中…" : "按当前AI重抽取"}
-              </Btn>
               <Btn size="sm" onClick={() => reloadKnowledge()}>刷新</Btn>
               <Btn size="sm" onClick={() => setPage("上传资料")}>上传新资料</Btn>
               <Btn size="sm" variant="primary" onClick={() => { if (!selectedMaterial) return; setPage("quiz_material_" + selectedMaterial.id + "_" + encodeURIComponent(selectedMaterial.title || "")); }} disabled={!selectedMaterial}>
@@ -5640,13 +5641,41 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           )}
 
           {/* ── AI extracted topics (material_topics) for this material ── */}
-          {aiTopicsForMaterial.length > 0 && (
+          {selectedMaterial && (
             <div style={{ marginBottom: 28 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                 <span style={{ background: "linear-gradient(135deg,#7c3aed,#a855f7)", color: "#fff", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 800, letterSpacing: "0.06em" }}>🤖 AI 抽取</span>
                 <span style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>本资料 AI 提取的核心知识点</span>
                 <span style={{ fontSize: 12, color: "#9ca3af" }}>{aiTopicsForMaterial.length} / {aiTopicsForMaterialAll.length} 个</span>
                 <div style={{ flex: 1, height: 1, background: "#f3f4f6" }} />
+                <select
+                  value={currentPlanValue}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const [provider, model] = String(v).split("::");
+                    setAiProvider(provider || "server");
+                    setActiveAIProvider(provider || "server");
+                    const m = model || "";
+                    setExtractModel(m);
+                    try {
+                      if (m) localStorage.setItem("mc_ai_extract_model", m);
+                      else localStorage.removeItem("mc_ai_extract_model");
+                    } catch {}
+                  }}
+                  style={{ padding: "5px 8px", borderRadius: 8, border: "1px solid #ddd6fe", background: "#faf5ff", color: "#5b21b6", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}
+                  title="AI 抽取方案"
+                >
+                  {EXTRACT_PLAN_OPTIONS.map((opt) => (
+                    <option key={`${opt.provider}:${opt.model || "auto"}`} value={`${opt.provider}::${opt.model || ""}`}>{opt.label}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={reextractTopicsWithCurrentAI}
+                  disabled={!selectedMaterialId || reextracting}
+                  style={{ padding: "6px 10px", borderRadius: 8, border: "none", background: reextracting ? "#cbd5e1" : "#7c3aed", color: "#fff", fontSize: 11.5, fontWeight: 700, cursor: reextracting ? "wait" : "pointer", fontFamily: "inherit" }}
+                >
+                  {reextracting ? "抽取中…" : "按当前方案重抽取"}
+                </button>
                 <select
                   value={topicProviderFilter}
                   onChange={(e) => {
@@ -5667,9 +5696,25 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   <option value="manual">未标注</option>
                 </select>
               </div>
+              {reextracting && (
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ height: 7, borderRadius: 999, background: "#ede9fe", overflow: "hidden" }}>
+                    <div style={{ width: `${Math.max(2, Math.min(100, extractProgress.pct || 0))}%`, height: "100%", background: "linear-gradient(90deg,#8b5cf6,#6366f1)", transition: "width .28s ease" }} />
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: 11.5, color: "#64748B" }}>
+                    {extractProgress.detail || "抽取中…"} · {Math.max(0, Math.min(100, extractProgress.pct || 0))}%
+                    {Number.isFinite(extractProgress.etaSec) && extractProgress.etaSec > 0 ? ` · 预计剩余 ${extractProgress.etaSec} 秒` : ""}
+                  </div>
+                </div>
+              )}
               <div style={{ marginBottom: 10, fontSize: 11.5, color: "#64748B" }}>
                 当前抽取方案：<span style={{ fontWeight: 700, color: "#334155" }}>{currentPlanLabel}</span>。点击「按当前AI重抽取」后，本次新结果会按该方案写入并保留。
               </div>
+              {aiTopicsForMaterial.length === 0 ? (
+                <div style={{ padding: "18px 14px", border: "1px dashed #E2E8F0", borderRadius: 12, color: "#64748B", fontSize: 13 }}>
+                  当前筛选条件下暂无知识点。可切换“全部来源”查看，或点击「按当前方案重抽取」生成新结果。
+                </div>
+              ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
                 {aiTopicsForMaterial.map(t => {
                   const mastery = topicMastery[t.id]?.status || "todo";
@@ -5721,6 +5766,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   );
                 })}
               </div>
+              )}
             </div>
           )}
 
