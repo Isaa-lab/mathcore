@@ -5628,14 +5628,31 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   });
 
   const totalTopicCount = courseTopics.length + aiTopicsForMaterial.length;
-  const aiGroupedByChapter = aiTopicsForMaterial.reduce((acc, t) => {
+  const baseAiGroups = aiTopicsForMaterial.reduce((acc, t) => {
     const key = String(t?.chapter || "未分章");
     if (!acc[key]) acc[key] = [];
     acc[key].push(t);
     return acc;
   }, {});
+  let aiGroupedByChapter = { ...baseAiGroups };
+  // 兜底：如果所有知识点几乎都落在同一章且数量很多，则按学习顺序切成多个“学习单元”，避免看起来没有分门别类
+  if (Object.keys(aiGroupedByChapter).length <= 1 && aiTopicsForMaterial.length >= 10) {
+    const fallback = {};
+    const batchSize = 8;
+    aiTopicsForMaterial.forEach((t, idx) => {
+      const unit = Math.floor(idx / batchSize) + 1;
+      const key = `第${unit}单元`;
+      if (!fallback[key]) fallback[key] = [];
+      fallback[key].push(t);
+    });
+    aiGroupedByChapter = fallback;
+  }
   const chapterOrder = Array.from(new Set((selectedMaterial?.course ? CHAPTERS.filter(ch => ch.course === selectedMaterial.course).map(ch => ch.num) : [])));
   const chapterLabelOf = (groupKey) => {
+    if (/^第\d+单元$/.test(String(groupKey || ""))) {
+      const n = String(groupKey).match(/\d+/)?.[0] || "1";
+      return `${groupKey} / Unit ${n}`;
+    }
     const m = String(groupKey || "").match(/(\d+(?:\.\d+)?)/);
     if (!m) return String(groupKey || "未分章");
     const n = m[1];
@@ -5780,12 +5797,34 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                 </div>
               ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid #ede9fe", borderRadius: 12, padding: "10px 12px", background: "#faf5ff" }}>
+                  <div style={{ fontSize: 20, fontWeight: 900, color: "#4c1d95" }}>知识点目录（按学习顺序分组）</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={() => {
+                        const next = {};
+                        orderedGroupKeys.forEach((k) => { next[k] = false; });
+                        setCollapsedAiChapters(next);
+                      }}
+                      style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #c4b5fd", background: "#fff", color: "#5b21b6", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                    >
+                      全部展开
+                    </button>
+                    <button
+                      onClick={() => {
+                        const next = {};
+                        orderedGroupKeys.forEach((k) => { next[k] = true; });
+                        setCollapsedAiChapters(next);
+                      }}
+                      style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #c4b5fd", background: "#fff", color: "#5b21b6", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                    >
+                      全部折叠
+                    </button>
+                  </div>
+                </div>
                 {orderedGroupKeys.map((groupKey, gIdx) => (
                   <div key={groupKey} style={{ border: "1px solid #ede9fe", borderRadius: 14, padding: "12px 12px 10px", background: "#fff" }}>
-                    <div
-                      onClick={() => setCollapsedAiChapters((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }))}
-                      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: collapsedAiChapters[groupKey] ? 2 : 10, cursor: "pointer", userSelect: "none" }}
-                    >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: collapsedAiChapters[groupKey] ? 2 : 10, userSelect: "none" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <span style={{ fontSize: 18, color: "#6d28d9", lineHeight: 1 }}>{collapsedAiChapters[groupKey] ? "▸" : "▾"}</span>
                         <div style={{ fontSize: 24, fontWeight: 900, color: "#4c1d95", letterSpacing: "0.01em", lineHeight: 1.15 }}>
@@ -5795,6 +5834,14 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                       <div style={{ fontSize: 11.5, color: "#7c3aed", fontWeight: 700 }}>
                         {`学习顺序 ${gIdx + 1} · ${aiGroupedByChapter[groupKey]?.length || 0} 个知识点`}
                       </div>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+                      <button
+                        onClick={() => setCollapsedAiChapters((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }))}
+                        style={{ padding: "5px 9px", borderRadius: 8, border: "1px solid #c4b5fd", background: "#fff", color: "#6d28d9", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}
+                      >
+                        {collapsedAiChapters[groupKey] ? "展开本章" : "折叠本章"}
+                      </button>
                     </div>
                     <div style={{ fontSize: 12, color: "#8b5cf6", fontWeight: 700, marginBottom: collapsedAiChapters[groupKey] ? 0 : 10, marginLeft: 30 }}>
                       原章节标记：{groupKey}
