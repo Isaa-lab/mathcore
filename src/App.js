@@ -5648,14 +5648,25 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
   const chapterOrder = Array.from(new Set((selectedMaterial?.course ? CHAPTERS.filter(ch => ch.course === selectedMaterial.course).map(ch => ch.num) : [])));
   const categoryLabelOf = (groupKey) => {
     const map = {
-      "基础概念": "基础概念 / Core Concepts",
-      "核心定理": "核心定理 / Key Theorems",
-      "计算方法": "计算方法 / Methods",
-      "典型题型": "典型题型 / Problem Types",
-      "易错与技巧": "易错与技巧 / Pitfalls & Tips",
-      "综合应用": "综合应用 / Applications",
+      "基础概念": "基础概念",
+      "核心定理": "核心定理",
+      "计算方法": "计算方法",
+      "典型题型": "典型题型",
+      "易错与技巧": "易错与技巧",
+      "综合应用": "综合应用",
     };
-    return map[groupKey] || `${groupKey} / Category`;
+    return map[groupKey] || groupKey;
+  };
+  const categoryPillOf = (groupKey) => {
+    const map = {
+      "基础概念": "概念",
+      "核心定理": "定理",
+      "计算方法": "方法",
+      "典型题型": "题型",
+      "易错与技巧": "技巧",
+      "综合应用": "应用",
+    };
+    return map[groupKey] || "分类";
   };
   const categorySeqOf = (groupKey) => {
     const arr = aiGroupedByCategory[groupKey] || [];
@@ -5796,17 +5807,17 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   当前筛选条件下暂无知识点。可切换“全部来源”查看，或点击「按当前方案重抽取」生成新结果。
                 </div>
               ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid #ede9fe", borderRadius: 12, padding: "10px 12px", background: "#faf5ff" }}>
-                  <div style={{ fontSize: 20, fontWeight: 900, color: "#4c1d95" }}>知识点目录（按知识类别分组）</div>
-                  <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: -4 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: "#475569", letterSpacing: "0.02em" }}>按知识类别整理</div>
+                  <div style={{ display: "flex", gap: 6 }}>
                     <button
                       onClick={() => {
                         const next = {};
                         orderedGroupKeys.forEach((k) => { next[k] = false; });
                         setCollapsedAiChapters(next);
                       }}
-                      style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #c4b5fd", background: "#fff", color: "#5b21b6", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                      style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#fff", color: "#64748B", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
                     >
                       全部展开
                     </button>
@@ -5816,37 +5827,44 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                         orderedGroupKeys.forEach((k) => { next[k] = true; });
                         setCollapsedAiChapters(next);
                       }}
-                      style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #c4b5fd", background: "#fff", color: "#5b21b6", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                      style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#fff", color: "#64748B", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
                     >
                       全部折叠
                     </button>
                   </div>
                 </div>
                 {orderedGroupKeys.map((groupKey, gIdx) => (
-                  <div key={groupKey} style={{ border: "1px solid #ede9fe", borderRadius: 14, padding: "12px 12px 10px", background: "#fff" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: collapsedAiChapters[groupKey] ? 2 : 10, userSelect: "none" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <span style={{ fontSize: 18, color: "#6d28d9", lineHeight: 1 }}>{collapsedAiChapters[groupKey] ? "▸" : "▾"}</span>
-                        <div style={{ fontSize: 24, fontWeight: 900, color: "#4c1d95", letterSpacing: "0.01em", lineHeight: 1.15 }}>
-                          {categoryLabelOf(groupKey)}
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 11.5, color: "#7c3aed", fontWeight: 700 }}>
-                        {`分类序号 ${gIdx + 1} · ${aiGroupedByCategory[groupKey]?.length || 0} 个知识点`}
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+                  <div key={groupKey} style={{ background: "#fff" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: collapsedAiChapters[groupKey] ? 0 : 12 }}>
                       <button
                         onClick={() => setCollapsedAiChapters((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }))}
-                        style={{ padding: "5px 9px", borderRadius: 8, border: "1px solid #c4b5fd", background: "#fff", color: "#6d28d9", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: "inherit" }}
+                        aria-label={collapsedAiChapters[groupKey] ? "展开分类" : "折叠分类"}
+                        style={{ border: "none", background: "transparent", color: "#64748B", fontSize: 13, lineHeight: 1, padding: 0, cursor: "pointer" }}
                       >
-                        {collapsedAiChapters[groupKey] ? "展开本类" : "折叠本类"}
+                        {collapsedAiChapters[groupKey] ? "▸" : "▾"}
+                      </button>
+                      <span style={{ background: "#2563eb", color: "#fff", borderRadius: 8, padding: "3px 8px", fontSize: 11, fontWeight: 800, letterSpacing: "0.04em", whiteSpace: "nowrap" }}>
+                        {categoryPillOf(groupKey)}
+                      </span>
+                      <div style={{ fontSize: 14.5, fontWeight: 800, color: "#334155", lineHeight: 1.2, whiteSpace: "nowrap" }}>
+                          {categoryLabelOf(groupKey)}
+                      </div>
+                      <span style={{ fontSize: 12, color: "#94A3B8", whiteSpace: "nowrap" }}>
+                        {aiGroupedByCategory[groupKey]?.length || 0} 个知识点
+                      </span>
+                      <div style={{ flex: 1, height: 1, background: "#F1F5F9" }} />
+                      <button
+                        onClick={() => setCollapsedAiChapters((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }))}
+                        style={{ padding: "4px 8px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#fff", color: "#64748B", fontSize: 11.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                      >
+                        {collapsedAiChapters[groupKey] ? "展开" : "折叠"}
                       </button>
                     </div>
-                    <div style={{ fontSize: 12, color: "#8b5cf6", fontWeight: 700, marginBottom: collapsedAiChapters[groupKey] ? 0 : 10, marginLeft: 30 }}>
-                      分类标签：{groupKey}
-                    </div>
-                    {!collapsedAiChapters[groupKey] && (
+                    {collapsedAiChapters[groupKey] ? (
+                      <div style={{ marginLeft: 31, marginBottom: 2, fontSize: 12, color: "#94A3B8" }}>
+                        已收起 {aiGroupedByCategory[groupKey]?.length || 0} 个知识点
+                      </div>
+                    ) : (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(258px, 1fr))", gap: 12 }}>
                 {aiGroupedByCategory[groupKey].map(t => {
                   const mastery = topicMastery[t.id]?.status || "todo";
