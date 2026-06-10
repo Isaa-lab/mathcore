@@ -3591,7 +3591,7 @@ const KNOWLEDGE_CONTENT = {
 };
 
 // ── Topic Modal ───────────────────────────────────────────────────────────────
-function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, course, aiTopicData = null }) {
+function TopicModal({ topic, onClose, setPage, setChapterFilter, setQuizIntent, chapterNum, course, aiTopicData = null }) {
   const content = KNOWLEDGE_CONTENT[topic];
   const vizKey = content?.viz;
   const chapterStr = (course && course !== "数值分析") ? `${course} ${chapterNum}` : chapterNum;
@@ -3651,6 +3651,20 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
     if (matched.length > 0) return matched.slice(0, 3);
     return ALL_QUESTIONS.filter(q => q.chapter && chapterNum && q.chapter.includes(chapterNum)).slice(0, 3);
   }, [chapterStr, chapterNum]);
+  const startTopicPractice = () => {
+    if (typeof setQuizIntent === "function") {
+      setQuizIntent({
+        source: aiTopicData ? "ai_topic" : "knowledge_point",
+        chapter: chapterStr || chapterNum || null,
+        topicName: topic,
+        materialId: aiTopicData?.material_id || null,
+        count: 5,
+      });
+    }
+    if (setChapterFilter && chapterStr) setChapterFilter(chapterStr);
+    onClose();
+    if (setPage) setPage("题库练习");
+  };
 
   const tocItems = useMemo(() => {
     if (isLectureMode) {
@@ -3731,11 +3745,11 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                   <section style={{ marginBottom: 20 }}>
                     <div id="tm-s1" style={{ padding: "14px 16px", borderRadius: 10, background: lectureTheme.tipBg, borderLeft: `3px solid ${lectureTheme.tipBorder}`, marginBottom: 10, border: "1px solid #e2e8f0" }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#2563eb", letterSpacing: "0.08em", marginBottom: 4 }}>TIP · 知识点</div>
-                      <div style={{ fontSize: 14, color: "#1e3a8a", lineHeight: 1.8 }}>{aiLectureBlocks.tip}</div>
+                      <div style={{ fontSize: 14, color: "#1e3a8a", lineHeight: 1.8 }}><MathText text={aiLectureBlocks.tip} /></div>
                     </div>
                     <div id="tm-s2" style={{ padding: "14px 16px", borderRadius: 10, background: lectureTheme.keyBg, borderLeft: `3px solid ${lectureTheme.keyBorder}`, marginBottom: 10, border: "1px solid #e2e8f0" }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#16a34a", letterSpacing: "0.08em", marginBottom: 4 }}>KEY · 重点性质</div>
-                      <div style={{ fontSize: 14, color: "#14532d", lineHeight: 1.8 }}>{aiLectureBlocks.key}</div>
+                      <div style={{ fontSize: 14, color: "#14532d", lineHeight: 1.8 }}><MathText text={aiLectureBlocks.key} /></div>
                     </div>
                     <div id="tm-s3" style={{ padding: "14px 16px", borderRadius: 10, background: lectureTheme.formulaBg, borderLeft: `3px solid ${lectureTheme.formulaBorder}`, marginBottom: 10, border: "1px solid #e2e8f0" }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#6d28d9", letterSpacing: "0.08em", marginBottom: 4 }}>FORMULA · 公式总结</div>
@@ -3745,17 +3759,17 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#475569", letterSpacing: "0.08em", marginBottom: 6 }}>STEP · 解题步骤</div>
                       <ol style={{ margin: 0, paddingLeft: 18 }}>
                         {(aiLectureBlocks.step.length > 0 ? aiLectureBlocks.step : ["识别题型与已知条件", "写出核心定义或公式", "代入并检查边界/条件"]).map((s, i) => (
-                          <li key={i} style={{ fontSize: 14, color: "#334155", lineHeight: 1.8, marginBottom: 2 }}>{s}</li>
+                          <li key={i} style={{ fontSize: 14, color: "#334155", lineHeight: 1.8, marginBottom: 2 }}><MathText text={s} /></li>
                         ))}
                       </ol>
                     </div>
                     <div id="tm-s5" style={{ padding: "14px 16px", borderRadius: 10, background: lectureTheme.exBg, borderLeft: `3px solid ${lectureTheme.exBorder}`, marginBottom: 10, border: "1px solid #e2e8f0" }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#c2410c", letterSpacing: "0.08em", marginBottom: 4 }}>EXAMPLE · 例题分析</div>
-                      <div style={{ fontSize: 14, color: "#7c2d12", lineHeight: 1.8 }}>{aiLectureBlocks.example}</div>
+                      <div style={{ fontSize: 14, color: "#7c2d12", lineHeight: 1.8 }}><MathText text={aiLectureBlocks.example} /></div>
                     </div>
                     <div id="tm-s6" style={{ padding: "14px 16px", borderRadius: 10, background: lectureTheme.memBg, borderLeft: `3px solid ${lectureTheme.memBorder}`, marginBottom: 8, border: "1px solid #e2e8f0" }}>
                       <div style={{ fontSize: 11, fontWeight: 800, color: "#9333ea", letterSpacing: "0.08em", marginBottom: 4 }}>MEMORY · 记忆方法</div>
-                      <div style={{ fontSize: 14, color: "#581c87", lineHeight: 1.8 }}>{aiLectureBlocks.memory}</div>
+                      <div style={{ fontSize: 14, color: "#581c87", lineHeight: 1.8 }}><MathText text={aiLectureBlocks.memory} /></div>
                     </div>
                   </section>
                 </>
@@ -3767,7 +3781,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                   <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>核心概念</span>
                 </div>
                 <div style={{ fontSize: 15, color: "#374151", lineHeight: 1.9, padding: "16px 20px", background: "#f8fafc", borderRadius: 12, borderLeft: `4px solid ${courseColor}` }}>
-                  {content.intro}
+                  <MathText text={content.intro} />
                 </div>
               </section>}
 
@@ -3882,6 +3896,15 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                 <div style={{ width: 28, height: 28, borderRadius: 8, background: G.blue, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>📝</div>
                 <span style={{ fontSize: 15, fontWeight: 700, color: "#0f172a" }}>随堂练习</span>
                 <span style={{ fontSize: 12, color: "#9ca3af" }}>· {chapterStr}</span>
+                <div style={{ flex: 1 }} />
+                {setPage && setQuizIntent && (
+                  <button
+                    onClick={startTopicPractice}
+                    style={{ padding: "6px 10px", borderRadius: 8, border: `1.5px solid ${G.blue}33`, background: "#f0f9ff", color: G.blue, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                  >
+                    开始本知识点练习 →
+                  </button>
+                )}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               {relatedQs.map((q, qi) => {
@@ -3894,7 +3917,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                         <span style={{ background: "#e2e8f0", color: "#334155", padding: "2px 8px", borderRadius: 20 }}>Q{qi+1}</span>
                         <span style={{ color: "#9ca3af" }}>{q.type}</span>
                       </div>
-                      <div style={{ fontSize: 14, color: "#111827", lineHeight: 1.75, fontWeight: 500 }}>{q.question}</div>
+                      <div style={{ fontSize: 14, color: "#111827", lineHeight: 1.75, fontWeight: 500 }}><MathText text={q.question} /></div>
                     </div>
                     {opts && (
                       <div style={{ padding: "10px 18px 14px", background: "#fff", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 24px" }}>
@@ -3903,7 +3926,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                           return (
                             <div key={oi} style={{ fontSize: 13.5, display: "flex", gap: 6, alignItems: "flex-start", color: isCorrect ? G.tealDark : "#4b5563", fontWeight: isCorrect ? 700 : 400, background: isCorrect ? G.tealLight : "transparent", padding: isCorrect ? "4px 8px" : "4px 0", borderRadius: isCorrect ? 8 : 0 }}>
                               <span style={{ flexShrink: 0, fontWeight: 800 }}>{letters[oi]}.</span>
-                              <span>{opt}{isCorrect ? " ✓" : ""}</span>
+                              <span><MathText text={String(opt || "")} />{isCorrect ? " ✓" : ""}</span>
                             </div>
                           );
                         })}
@@ -3920,7 +3943,7 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
                           <summary style={{ cursor: "pointer", color: "#334155", fontWeight: 700, fontSize: 12.5, background: "#f1f5f9", display: "inline-block", borderRadius: 6, padding: "4px 10px", border: "1px solid #e2e8f0" }}>查看解答</summary>
                           <div style={{ marginTop: 10, fontSize: 13, color: "#6b7280", lineHeight: 1.75, display: "flex", gap: 8, alignItems: "flex-start", background: "#f9fafb", borderRadius: 8, padding: "10px 12px" }}>
                             <span style={{ color: G.amber, flexShrink: 0 }}>💡</span>
-                            <span>{q.explanation}</span>
+                            <span><MathText text={q.explanation} /></span>
                           </div>
                         </details>
                       </div>
@@ -3936,9 +3959,9 @@ function TopicModal({ topic, onClose, setPage, setChapterFilter, chapterNum, cou
         {/* ══ Footer ══ */}
         <div style={{ padding: "1rem 1.6rem", borderTop: "1px solid #f3f4f6", display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center", background: "#fafafa", borderRadius: "0 0 20px 20px" }}>
           {setPage && setChapterFilter && chapterStr && (
-            <button onClick={() => { setChapterFilter(chapterStr); onClose(); setPage("题库练习"); }}
+            <button onClick={startTopicPractice}
               style={{ padding: "9px 18px", background: G.blueLight, color: G.blue, border: `1.5px solid ${G.blue}44`, borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
-              ✏️ 进入题库练习 →
+              ✏️ 练习这个知识点 →
             </button>
           )}
           <button onClick={onClose} style={{ padding: "9px 22px", background: courseColor, color: "#fff", border: "none", borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
@@ -5703,6 +5726,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
           onClose={() => { setSelectedTopic(null); setSelectedTopicMeta(null); }}
           setPage={routeSetPage}
           setChapterFilter={setChapterFilter}
+          setQuizIntent={setQuizIntent}
           chapterNum={selectedTopicMeta?.chapterNum}
           course={selectedTopicMeta?.course}
           aiTopicData={selectedTopicMeta?.aiTopicData || null}
@@ -5874,7 +5898,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                   return (
                     <div
                       key={t.id}
-                      onClick={() => openTopic(t, selectedMaterial, { chapterNum: t.chapter || selectedMaterial?.chapter || "专题", aiTopicData: t })}
+                      onClick={() => openTopic(t, selectedMaterial, { chapterNum: groupKey || t.chapter || selectedMaterial?.chapter || "专题", aiTopicData: t })}
                       style={{ border: `1.5px solid ${mastery === "done" ? G.teal + "55" : "#e5e7eb"}`, borderRadius: 14, padding: "16px", background: mastery === "done" ? "#f0fdf4" : "#fff", display: "flex", flexDirection: "column", gap: 10, transition: "all 0.15s ease", cursor: "pointer" }}
                       onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 6px 20px rgba(37,99,235,0.14)"; e.currentTarget.style.borderColor = "#2563eb66"; e.currentTarget.style.transform = "translateY(-2px)"; }}
                       onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.borderColor = mastery === "done" ? G.teal + "55" : "#e5e7eb"; e.currentTarget.style.transform = "none"; }}
@@ -5895,7 +5919,7 @@ function KnowledgePage({ setPage, setChapterFilter, setQuizIntent, switchStudyTa
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            openTopic(t, selectedMaterial, { chapterNum: t.chapter || selectedMaterial?.chapter || "专题", aiTopicData: t });
+                            openTopic(t, selectedMaterial, { chapterNum: groupKey || t.chapter || selectedMaterial?.chapter || "专题", aiTopicData: t });
                           }}
                           style={{ flex: 1, padding: "7px 0", fontSize: 12, fontWeight: 700, background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
                         >
@@ -6371,7 +6395,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     if (quizMode) return; // 已经在做题中
     if (!allQuestions || allQuestions.length === 0) return;
     autoStartFiredRef.current = true;
-    const { chapter, count, topicName } = autoStartIntent;
+    const { chapter, count, topicName, materialId: intentMaterialId } = autoStartIntent;
     const parseOf = (c) => QUIZ_parseChapter(c) || null;
     const targetParsed = parseOf(chapter);
     // 先按 chapter 过滤
@@ -6382,11 +6406,19 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
       if (targetParsed && qp && qp.num === targetParsed.num && qp.course === targetParsed.course) return true;
       return false;
     });
-    // 按 topicName 再过滤（在题干/解析里出现 topic 名）
+    if (intentMaterialId) {
+      const sameMaterial = pool.filter(q => String(q.material_id || q.materialId || "") === String(intentMaterialId));
+      if (sameMaterial.length >= 1) pool = sameMaterial;
+    }
+    // 按 topicName 再过滤（优先 knowledge_points，其次题干/解析里出现 topic 名）
     if (topicName) {
       const key = String(topicName).toLowerCase();
       const narrowed = pool.filter(q => {
-        const s = (String(q.question || "") + " " + String(q.explanation || "")).toLowerCase();
+        const points = Array.isArray(q.knowledge_points) ? q.knowledge_points
+          : Array.isArray(q.knowledgePoints) ? q.knowledgePoints
+          : [];
+        const pointText = points.map(x => String(x || "")).join(" ").toLowerCase();
+        const s = (pointText + " " + String(q.question || "") + " " + String(q.explanation || "")).toLowerCase();
         return s.includes(key);
       });
       if (narrowed.length >= 1) pool = narrowed;
@@ -12591,10 +12623,21 @@ function rescueQuizMath(input) {
   }).join("");
 }
 
+function normalizeMathTextInput(value) {
+  return String(value || "")
+    // AI/JSON 有时会把美元定界符转义成 \$...\$，这里恢复成 KaTeX 可识别的 $...$
+    .replace(/\\\$/g, "$")
+    .replace(/\\\(/g, "$")
+    .replace(/\\\)/g, "$")
+    .replace(/\\\[/g, "$$")
+    .replace(/\\\]/g, "$$");
+}
+
 function MathText({ text }) {
   if (!text) return <span />;
   const interactiveParams = useMathStore((s) => s.interactiveParams);
   const setInteractiveParam = useMathStore((s) => s.setInteractiveParam);
+  text = normalizeMathTextInput(text);
   // 前置抢救：先把裸公式补成 $...$ 再走常规渲染
   text = rescueQuizMath(text);
   // Extract [CHART:{...}] blocks tracking bracket depth to handle nested arrays
