@@ -7,6 +7,9 @@ import QuizPageView from "./pages/QuizPage";
 import MaterialChatPageView, { DynamicVizCard, normalizeVizIntent, repairVizJson } from "./pages/MaterialChatPage";
 import ConceptGraphCard from "./components/ConceptGraphCard";
 import InteractiveMathChart from "./components/InteractiveMathChart";
+import TextbookBank from "./components/TextbookBank";
+import AiGenerate from "./components/AiGenerate";
+import UploadSolve from "./components/UploadSolve";
 import StudyWorkspace from "./layouts/StudyWorkspace";
 import SprintWorkspace from "./layouts/SprintWorkspace";
 import { isEditableFocused } from "./utils/keyboard";
@@ -6224,6 +6227,8 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [textbookSolveResult, setTextbookSolveResult] = useState(null);
   const [textbookSaveBusy, setTextbookSaveBusy] = useState(false);
   const [textbookSaveMsg, setTextbookSaveMsg] = useState("");
+  const [formalBankTab, setFormalBankTab] = useState("textbook");
+  const [quizUserId, setQuizUserId] = useState(null);
   const [aiGenChapter, setAiGenChapter] = useState("");
   const [aiGenType, setAiGenType] = useState("计算");
   const [aiGenDifficulty, setAiGenDifficulty] = useState("基础");
@@ -6291,6 +6296,19 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     localStorage.setItem("mc_quiz_bookmarks", JSON.stringify(next));
     setBookmarkTick((v) => v + 1);
   };
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const uid = (await supabase.auth.getUser())?.data?.user?.id || null;
+        if (alive) setQuizUserId(uid);
+      } catch {
+        if (alive) setQuizUserId(null);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const isOwnUploadQuestion = (q, uid) => {
     if (inferExerciseOrigin(q) !== "upload_solved") return true;
@@ -6900,6 +6918,28 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     setScore(0); setWrongList([]); setFinished(false); setTimer(0);
     setAnswerRecords({}); setRevealedAnswer(false); setAIContextPrompt("");
     sessionStartRef.current = Date.now();
+  };
+
+  const startPracticeFromQuestionIds = async (ids = []) => {
+    const cleanIds = [...new Set((ids || []).filter(Boolean))];
+    if (cleanIds.length === 0) return;
+    const { data, error } = await supabase
+      .from("questions")
+      .select("*")
+      .in("id", cleanIds);
+    if (error || !Array.isArray(data) || data.length === 0) {
+      notifyUser(`题目读取失败：${error?.message || "未找到题目"}`);
+      return;
+    }
+    const order = new Map(cleanIds.map((id, idx) => [id, idx]));
+    const pool = data
+      .map((row) => ({
+        ...row,
+        subQuestions: row.sub_questions || row.subQuestions || [],
+        answerStatus: row.answer_status || row.answerStatus || "pending",
+      }))
+      .sort((a, b) => (order.get(a.id) ?? 9999) - (order.get(b.id) ?? 9999));
+    startWithPool(pool, pool.length);
   };
 
   const q = displayQ[current];
@@ -7735,6 +7775,60 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
     return (
       <div style={{ padding: "0 0 16px", maxWidth: 960, margin: "0 auto" }}>
         <PageHeader title="题库练习" subtitle={effectiveMaterialTitle ? `${effectiveMaterialTitle} · 基于资料` : "你今天想练什么？"} onBack={() => setPage("首页")} />
+
+        {!effectiveMaterialId && (
+          <SectionCard style={{ padding: "1.15rem 1.25rem", marginBottom: 16, border: "1px solid #E0E7FF", background: "#FFFFFF" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 900, color: "#0F172A", marginBottom: 3 }}>正式题库入口</div>
+                <div style={{ fontSize: 12.5, color: "#64748B" }}>已接 Supabase：课本题读取 questions 表，收藏/状态写 attempts 表，AI 请求走 /api/generate。</div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[
+                  ["textbook", "课本习题"],
+                  ["ai", "AI 出题"],
+                  ["upload", "上传求解"],
+                ].map(([id, label]) => (
+                  <button
+                    key={id}
+                    onClick={() => setFormalBankTab(id)}
+                    style={{
+                      padding: "8px 13px",
+                      borderRadius: 999,
+                      border: `1.5px solid ${formalBankTab === id ? "#4338CA" : "#E2E8F0"}`,
+                      background: formalBankTab === id ? "#EEF0FF" : "#fff",
+                      color: formalBankTab === id ? "#3730A3" : "#475569",
+                      fontSize: 12.5,
+                      fontWeight: 900,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {formalBankTab === "textbook" && (
+              <TextbookBank
+                supabase={supabase}
+                userId={quizUserId}
+                onPractice={startPracticeFromQuestionIds}
+              />
+            )}
+            {formalBankTab === "ai" && (
+              <AiGenerate
+                supabase={supabase}
+                userId={quizUserId}
+                onSaved={() => notifyUser("AI 题已保存，切回课本/列表页可继续练习。")}
+              />
+            )}
+            {formalBankTab === "upload" && (
+              <UploadSolve supabase={supabase} userId={quizUserId} />
+            )}
+          </SectionCard>
+        )}
 
         {/* ══ 三个独立题库入口 ══ */}
         <SectionCard style={{ padding: "1.15rem 1.25rem", marginBottom: 16, border: "1px solid #DBEAFE", background: "#F8FBFF" }}>

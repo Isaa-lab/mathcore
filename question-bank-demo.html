@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MathCore · 课本习题库演示</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+  <style>
+    :root{
+      --ink:#0f1220;--ink-soft:#3a3f55;--mut:#6b7184;--faint:#9aa0b4;
+      --line:#e7e8ef;--line-soft:#f0f1f6;--bg:#f6f7fb;--card:#fff;
+      --brand:#4338ca;--brand-soft:#eef0ff;--brand-ink:#3730a3;
+      --amber:#d97706;--amber-soft:#fef3e2;--emerald:#047857;--emerald-soft:#e7f6ef;
+      --rose:#be123c;--rose-soft:#fdeaef;--slate:#475569;--slate-soft:#eef1f5;
+      --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+      --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    }
+    *{box-sizing:border-box} html,body{margin:0}
+    body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+    .wrap{max-width:1180px;margin:0 auto;padding:0 20px}
+    header.sys{position:sticky;top:0;z-index:30;background:rgba(246,247,251,.86);backdrop-filter:saturate(140%) blur(8px);border-bottom:1px solid var(--line)}
+    .sys-row{display:flex;align-items:center;gap:16px;padding:14px 0}
+    .logo{font-family:var(--mono);font-weight:600;font-size:13px;letter-spacing:.12em;display:flex;align-items:center;gap:9px}
+    .dot{width:8px;height:8px;border-radius:2px;background:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+    .sep{color:var(--faint)}
+    .readouts{margin-left:auto;display:flex;gap:22px;font-family:var(--mono);font-size:11px;color:var(--mut)}
+    .readouts b{display:block;font-size:16px;color:var(--ink);font-weight:600;margin-top:2px}
+    .loadbtn{font-family:var(--mono);font-size:11px;letter-spacing:.04em;border:1px solid var(--line);background:var(--card);color:var(--ink-soft);padding:8px 12px;border-radius:8px;cursor:pointer}
+    .loadbtn:hover{border-color:var(--brand);color:var(--brand)}
+    .titleblk{padding:30px 0 16px}
+    .titleblk h1{margin:0;font-size:30px;letter-spacing:-.02em;font-weight:680}
+    .titleblk p{margin:7px 0 0;color:var(--mut);font-size:14px}
+    .src{font-family:var(--mono);font-size:12px;color:var(--brand-ink);background:var(--brand-soft);padding:2px 8px;border-radius:5px;display:inline-block;margin-top:10px}
+    .grid{display:grid;grid-template-columns:230px 1fr;gap:22px;padding-bottom:120px;align-items:start}
+    @media(max-width:820px){.grid{grid-template-columns:1fr}.rail{position:static!important}}
+    .rail{position:sticky;top:74px}
+    .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+    .ey{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;margin:0 0 11px}
+    .search{width:100%;border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit;font-size:13px;outline:none}
+    .search:focus{border-color:var(--brand)}
+    .chips{display:flex;flex-wrap:wrap;gap:6px}
+    .chip{font-family:var(--mono);font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--ink-soft);padding:5px 9px;border-radius:7px;cursor:pointer;user-select:none}
+    .chip:hover{border-color:var(--brand)} .chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+    .star-toggle{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-soft);cursor:pointer;user-select:none}
+    .star-toggle input{accent-color:var(--brand);width:15px;height:15px}
+    .drop{border:1.5px dashed var(--line);border-radius:14px;padding:18px;text-align:center;color:var(--mut);font-size:13px;margin-bottom:14px}
+    .drop.hot{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-ink)}
+    .meta-line{display:flex;align-items:baseline;gap:10px;margin:2px 0 14px;font-family:var(--mono);font-size:12px;color:var(--mut)}
+    .meta-line b{color:var(--ink);font-size:13px}
+    .qcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:12px;transition:.15s}
+    .qcard:hover{border-color:#d7d9e6;box-shadow:0 6px 22px -16px rgba(20,22,40,.35)}
+    .qcard.sel{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand)}
+    .qtop{display:flex;align-items:center;gap:9px;margin-bottom:10px;flex-wrap:wrap}
+    .qnum{font-family:var(--mono);font-size:12px;color:var(--faint);min-width:34px}
+    .tag{font-family:var(--mono);font-size:11px;letter-spacing:.02em;padding:2px 8px;border-radius:6px;font-weight:500}
+    .t-ch{background:var(--slate-soft);color:var(--slate)} .t-type{background:var(--brand-soft);color:var(--brand-ink)}
+    .t-d-基础{background:var(--emerald-soft);color:var(--emerald)} .t-d-进阶{background:var(--amber-soft);color:var(--amber)} .t-d-挑战{background:var(--rose-soft);color:var(--rose)}
+    .t-s-未做{background:var(--slate-soft);color:var(--slate)} .t-s-做对{background:var(--emerald-soft);color:var(--emerald)} .t-s-做错{background:var(--rose-soft);color:var(--rose)}
+    .star{margin-left:auto;cursor:pointer;color:var(--faint);font-size:17px;line-height:1;background:none;border:none;padding:4px}
+    .star:hover,.star.on{color:var(--amber)}
+    .qstem{font-size:15px;color:var(--ink);margin:2px 0 0}
+    .subs{margin:11px 0 0;display:grid;gap:7px}
+    .sub{display:flex;gap:9px;align-items:flex-start;font-size:14px;padding:7px 11px;background:var(--line-soft);border-radius:8px;overflow-x:auto}
+    .sub .lab{font-family:var(--mono);font-size:12px;color:var(--brand);font-weight:600;flex-shrink:0;padding-top:2px}
+    .qactions{display:flex;gap:8px;margin-top:13px;align-items:center}
+    .btn{font-size:13px;border-radius:8px;padding:7px 13px;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink-soft);font-family:inherit}
+    .btn:hover{border-color:var(--brand);color:var(--brand)} .btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+    .ans{margin-top:11px;padding:13px 15px;background:#fbfbfe;border:1px dashed var(--line);border-radius:10px;font-size:14px;color:var(--ink-soft);white-space:pre-wrap}
+    .ans-h{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--faint);text-transform:uppercase;margin-bottom:7px}
+    .thm{margin-top:9px;display:flex;flex-wrap:wrap;gap:6px}.tg{font-family:var(--mono);font-size:11px;background:var(--brand-soft);color:var(--brand-ink);padding:2px 7px;border-radius:5px}
+    .pending{color:var(--faint);font-style:italic;font-size:13px}
+    .sel-check{width:16px;height:16px;accent-color:var(--brand);cursor:pointer;flex-shrink:0}
+    .actionbar{position:fixed;left:0;right:0;bottom:0;z-index:40;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-top:1px solid var(--line)}
+    .actionbar .inner{max-width:1180px;margin:0 auto;padding:13px 20px;display:flex;align-items:center;gap:14px}
+    .cnt{font-family:var(--mono);font-size:13px;color:var(--mut)} .cnt b{color:var(--ink)} .spacer{flex:1}
+    .empty{text-align:center;color:var(--mut);padding:60px 20px;font-size:14px}.big{font-size:15px;color:var(--ink-soft);margin-bottom:6px}
+    .katex{font-size:1.02em}
+  </style>
+</head>
+<body>
+  <header class="sys">
+    <div class="wrap sys-row">
+      <span class="logo"><span class="dot"></span>MATHCORE <span class="sep">/</span> 题库</span>
+      <div class="readouts">
+        <span>题目<b id="r-total">-</b></span>
+        <span>当前筛选<b id="r-shown">-</b></span>
+        <span>已选<b id="r-sel">0</b></span>
+      </div>
+      <label class="loadbtn">载入 questions.json
+        <input id="file" type="file" accept=".json" hidden>
+      </label>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="titleblk">
+      <h1>课本习题库</h1>
+      <p>Linear Algebra with Applications · Steven J. Leon · 9th</p>
+      <span class="src">source: textbook · 公共题库</span>
+    </div>
+
+    <div class="grid">
+      <aside class="rail">
+        <div class="panel"><p class="ey">搜索</p><input class="search" id="q" placeholder="搜索题目关键词..."></div>
+        <div class="panel"><p class="ey">章节</p><div class="chips" id="f-ch"></div></div>
+        <div class="panel"><p class="ey">题型</p><div class="chips" id="f-type"></div></div>
+        <div class="panel"><p class="ey">难度</p><div class="chips" id="f-diff"></div></div>
+        <div class="panel">
+          <p class="ey">状态</p><div class="chips" id="f-stat"></div>
+          <label class="star-toggle" style="margin-top:12px"><input type="checkbox" id="f-star"> 只看收藏</label>
+        </div>
+      </aside>
+
+      <main>
+        <div class="drop" id="drop">把你的 <b>questions.json</b> 拖到这里即可载入完整题库（当前显示内置样例）</div>
+        <div class="meta-line" id="meta"></div>
+        <div id="list"></div>
+      </main>
+    </div>
+  </div>
+
+  <div class="actionbar">
+    <div class="inner">
+      <span class="cnt">已选 <b id="a-sel">0</b> 题</span>
+      <span class="spacer"></span>
+      <button class="btn" id="a-clear">清空</button>
+      <button class="btn" id="a-all">全选当前</button>
+      <button class="btn primary" id="a-go">开始练习 -></button>
+    </div>
+  </div>
+
+  <script>
+    const SAMPLE={total:8,questions:[
+      {id:"tb_0001",chapter:"Ch.1",chapterTitle:"矩阵与线性方程组",type:"计算",difficulty:"基础",number:"1",question:"Use back substitution to solve each of the following systems of equations:",subQuestions:["(a) x_1 - 3x_2 = 2, 2x_2 = 6","(b) x_1 + x_2 + x_3 = 8, 2x_2 + x_3 = 5, 3x_3 = 9","(c) x_1 + 2x_2 + 2x_3 + x_4 = 5, 3x_2 + x_3 - 2x_4 = 1, -x_3 + 2x_4 = -1, 4x_4 = 4"],answer:"",answerStatus:"pending",status:"未做",starred:false},
+      {id:"tb_0002",chapter:"Ch.1",chapterTitle:"矩阵与线性方程组",type:"计算",difficulty:"基础",number:"2",question:"Write out the coefficient matrix for each of the systems in Exercise 1.",subQuestions:[],answer:"",answerStatus:"pending",status:"未做",starred:false},
+      {id:"tb_0003",chapter:"Ch.1",chapterTitle:"矩阵与线性方程组",type:"概念",difficulty:"基础",number:"3",question:"In each of the following systems, interpret each equation as a line in the plane. Graph the lines and determine geometrically the number of solutions.",subQuestions:["(a) x_1 + x_2 = 4, x_1 - x_2 = 2","(b) x_1 + 2x_2 = 4, -2x_1 - 4x_2 = 4","(c) 2x_1 - x_2 = 3, -4x_1 + 2x_2 = -6"],answer:"",answerStatus:"pending",status:"做对",starred:true},
+      {id:"tb_0005",chapter:"Ch.1",chapterTitle:"矩阵与线性方程组",type:"计算",difficulty:"基础",number:"5",question:"Write out the system of equations that corresponds to each of the following augmented matrices:",subQuestions:["(a) \\left[\\begin{array}{cc|c} 3 & 2 & 8 \\\\ 1 & 5 & 7 \\end{array}\\right]","(b) \\left[\\begin{array}{ccc|c} 5 & -2 & 1 & 3 \\\\ 2 & 3 & -4 & 0 \\end{array}\\right]"],answer:"",answerStatus:"pending",status:"未做",starred:false},
+      {id:"tb_0006",chapter:"Ch.1",chapterTitle:"矩阵与线性方程组",type:"计算",difficulty:"进阶",number:"6",question:"Solve each of the following systems.",subQuestions:["(c) 4x_1 + 3x_2 = 4, \\frac{2}{3}x_1 + 4x_2 = 3","(g) \\frac{1}{3}x_1 + \\frac{2}{3}x_2 + 2x_3 = -1, x_1 + 2x_2 + \\frac{3}{2}x_3 = \\frac{3}{2}"],answer:"(c) 用高斯消元法。由第一式消去 x_1，解得 x_1 = \\frac{4}{5}, x_2 = \\frac{8}{15}。",answerStatus:"generated",theorems:["高斯消元法","回代法"],confidence:"high",status:"做错",starred:false},
+      {id:"tb_0101",chapter:"Ch.3",chapterTitle:"向量空间",type:"证明",difficulty:"进阶",number:"1",question:"Determine whether the following sets form subspaces of R^2.",subQuestions:["(a) \\{(x_1,x_2)^T \\mid x_1+x_2=0\\}","(b) \\{(x_1,x_2)^T \\mid x_1x_2=0\\}"],answer:"",answerStatus:"pending",status:"未做",starred:false},
+      {id:"tb_0201",chapter:"Ch.6",chapterTitle:"特征值",type:"计算",difficulty:"进阶",number:"1",question:"Find the eigenvalues and eigenvectors of the matrix.",subQuestions:["A=\\begin{bmatrix}2&1\\\\1&2\\end{bmatrix}"],answer:"",answerStatus:"pending",status:"未做",starred:false},
+      {id:"tb_0301",chapter:"Ch.7",chapterTitle:"数值线性代数",type:"应用",difficulty:"挑战",number:"1",question:"Use an iterative method to approximate the solution.",subQuestions:[],answer:"",answerStatus:"pending",status:"未做",starred:false}
+    ]};
+
+    let DB=[],OPEN=new Set(),SEL=new Set();
+    const F={ch:new Set(),type:new Set(),diff:new Set(),stat:new Set(),star:false,q:""};
+
+    function escapeHtml(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));}
+    function math(s){try{return katex.renderToString(String(s),{throwOnError:false,displayMode:false});}catch{return escapeHtml(s);}}
+    function load(data){DB=(data.questions||[]).map(q=>({status:q.status||"未做",starred:!!q.starred,...q}));OPEN.clear();SEL.clear();buildFilters();render();}
+    function uniq(key){return [...new Set(DB.map(q=>q[key]).filter(Boolean))];}
+    function chipRow(host,vals,set,sort){const el=document.getElementById(host);el.innerHTML="";let arr=vals.slice();if(sort)arr.sort();arr.forEach(v=>{const c=document.createElement("span");c.className="chip";c.textContent=v;c.onclick=()=>{set.has(v)?set.delete(v):set.add(v);c.classList.toggle("on");render();};el.appendChild(c);});}
+    function buildFilters(){chipRow("f-ch",uniq("chapter"),F.ch,true);chipRow("f-type",["概念","计算","证明","应用"].filter(t=>uniq("type").includes(t)),F.type,false);chipRow("f-diff",["基础","进阶","挑战"],F.diff,false);chipRow("f-stat",["未做","做对","做错"],F.stat,false);}
+    function match(q){if(F.ch.size&&!F.ch.has(q.chapter))return false;if(F.type.size&&!F.type.has(q.type))return false;if(F.diff.size&&!F.diff.has(q.difficulty))return false;if(F.stat.size&&!F.stat.has(q.status))return false;if(F.star&&!q.starred)return false;if(F.q){const s=(q.question+" "+(q.subQuestions||[]).join(" ")).toLowerCase();if(!s.includes(F.q.toLowerCase()))return false;}return true;}
+    function renderSub(s){const m=String(s).match(/^\s*\(([a-z])\)\s*([\s\S]*)$/i);if(m)return `<span class="lab">(${m[1]})</span><span>${math(m[2])}</span>`;return `<span>${math(s)}</span>`;}
+    function card(q){const open=OPEN.has(q.id),sel=SEL.has(q.id);const subs=(q.subQuestions||[]).map(s=>`<div class="sub">${renderSub(s)}</div>`).join("");let ans="";
+      if(open){if(q.answerStatus==="generated"&&q.answer){const thm=(q.theorems||[]).map(t=>`<span class="tg">${escapeHtml(t)}</span>`).join("");ans=`<div class="ans"><div class="ans-h">解析 ${q.confidence==="low"?"· 待核对":""}</div>${escapeHtml(q.answer).replace(/\n/g,"<br>")}${thm?`<div class="thm">${thm}</div>`:""}</div>`;}else{ans=`<div class="ans"><span class="pending">答案尚未生成（运行 generate_answers.py 后填充）</span></div>`;}}
+      return `<div class="qcard ${sel?"sel":""}"><div class="qtop"><input type="checkbox" class="sel-check" data-sel="${q.id}" ${sel?"checked":""}><span class="qnum">#${escapeHtml(q.number||"-")}</span><span class="tag t-ch">${escapeHtml(q.chapter)}</span><span class="tag t-type">${escapeHtml(q.type)}</span><span class="tag t-d-${escapeHtml(q.difficulty)}">${escapeHtml(q.difficulty)}</span><span class="tag t-s-${escapeHtml(q.status)}">${escapeHtml(q.status)}</span><button class="star ${q.starred?"on":""}" data-star="${q.id}">${q.starred?"★":"☆"}</button></div><div class="qstem">${escapeHtml(q.question)}</div>${subs?`<div class="subs">${subs}</div>`:""}<div class="qactions"><button class="btn primary" data-practice="${q.id}">练这道</button><button class="btn" data-toggle="${q.id}">${open?"收起答案":"查看答案"}</button></div>${ans}</div>`;
+    }
+    function render(){const rows=DB.filter(match);document.getElementById("list").innerHTML=rows.length?rows.map(card).join(""):`<div class="empty"><div class="big">没有符合条件的题目</div>调整筛选条件，或清除部分标签</div>`;const chs=[...new Set(rows.map(r=>r.chapter))].length;document.getElementById("meta").innerHTML=DB.length?`<b>${rows.length}</b> 题 · 覆盖 ${chs} 章 · 共 ${DB.length} 题`:"";document.getElementById("r-total").textContent=DB.length||"-";document.getElementById("r-shown").textContent=rows.length||"-";document.getElementById("r-sel").textContent=SEL.size;document.getElementById("a-sel").textContent=SEL.size;bind();}
+    function bind(){document.querySelectorAll("[data-toggle]").forEach(b=>b.onclick=()=>{const id=b.dataset.toggle;OPEN.has(id)?OPEN.delete(id):OPEN.add(id);render();});document.querySelectorAll("[data-star]").forEach(b=>b.onclick=()=>{const q=DB.find(x=>x.id===b.dataset.star);q.starred=!q.starred;render();});document.querySelectorAll("[data-sel]").forEach(b=>b.onchange=()=>{const id=b.dataset.sel;b.checked?SEL.add(id):SEL.delete(id);render();});document.querySelectorAll("[data-practice]").forEach(b=>b.onclick=()=>alert("进入练习："+b.dataset.practice+"\\n演示占位，接 React 练习页即可"));}
+    document.getElementById("q").oninput=e=>{F.q=e.target.value;render();};document.getElementById("f-star").onchange=e=>{F.star=e.target.checked;render();};document.getElementById("a-clear").onclick=()=>{SEL.clear();render();};document.getElementById("a-all").onclick=()=>{DB.filter(match).forEach(q=>SEL.add(q.id));render();};document.getElementById("a-go").onclick=()=>SEL.size?alert("开始练习 "+SEL.size+" 题\\n演示占位，接你的练习页即可"):alert("先选几道题");
+    function readFile(file){const r=new FileReader();r.onload=()=>{try{load(JSON.parse(r.result));document.getElementById("drop").style.display="none";}catch(e){alert("解析失败："+e.message);}};r.readAsText(file);}
+    document.getElementById("file").onchange=e=>e.target.files[0]&&readFile(e.target.files[0]);
+    const drop=document.getElementById("drop");["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("hot");}));["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("hot");}));drop.addEventListener("drop",e=>e.dataTransfer.files[0]&&readFile(e.dataTransfer.files[0]));window.addEventListener("dragover",e=>e.preventDefault());window.addEventListener("drop",e=>e.preventDefault());
+    window.addEventListener("load",()=>load(SAMPLE));
+  </script>
+</body>
+</html>
