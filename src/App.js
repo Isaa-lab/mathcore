@@ -730,11 +730,114 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched, onLogout }) {
 
   const freshCfg = getAIConfig(); // 每次渲染取最新
   void tick;
+  const isProviderReady = (pid) => pid === "server" || !!freshCfg.allKeys[pid] || !!platformProviders[pid];
+  const recommendedProviders = ["server"];
+  const directProviders = AI_PROVIDER_ORDER.filter((pid) => pid !== "server" && isProviderReady(pid));
+  const keyProviders = AI_PROVIDER_ORDER.filter((pid) => pid !== "server" && !isProviderReady(pid));
+  const renderProviderRow = (pid, compact = false) => {
+    const meta = AI_PROVIDER_META[pid];
+    const isActive = freshCfg.provider === pid;
+    const hasUserKey = pid === "server" ? false : !!(freshCfg.allKeys[pid]);
+    const platformReady = pid === "server" ? true : !!(platformProviders[pid]);
+    const canOneClick = hasUserKey || platformReady;
+    const isExpanded = expanded === pid;
+    const flashed = savedPing === pid;
+    const statusText = isActive
+      ? "使用中"
+      : pid === "server"
+        ? "推荐"
+        : hasUserKey
+          ? "已连接"
+          : platformReady
+            ? "平台可用"
+            : "需要 Key";
+    const statusColor = isActive ? "#6D28D9" : hasUserKey ? "#059669" : platformReady ? "#1D4ED8" : "#9CA3AF";
+    const statusBg = isActive ? "#EDE9FE" : hasUserKey ? "#ECFDF5" : platformReady ? "#EFF6FF" : "#F9FAFB";
+    return (
+      <div key={pid} style={{ margin: compact ? "2px 0" : "3px 0" }}>
+        <div
+          onClick={() => {
+            if (isExpanded) return;
+            if (canOneClick) activate(pid);
+            else expand(pid);
+          }}
+          style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: compact ? "8px 10px" : "10px 12px", borderRadius: 12,
+            cursor: isExpanded ? "default" : "pointer",
+            background: flashed ? "#ECFDF5" : (isActive ? "#F5F3FF" : "#fff"),
+            border: isActive ? "1.5px solid #DDD6FE" : "1px solid #E5E7EB",
+            transition: "background 0.15s, border-color 0.15s, transform 0.15s",
+          }}
+          onMouseEnter={(e) => { if (!isActive && !isExpanded) { e.currentTarget.style.background = "#F9FAFB"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
+          onMouseLeave={(e) => { if (!isActive && !isExpanded && !flashed) { e.currentTarget.style.background = "#fff"; e.currentTarget.style.transform = "translateY(0)"; } }}
+        >
+          <ProviderAvatar providerId={pid} size={compact ? 26 : 30} showRing={isActive} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#111827", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              {pid === "server" ? "平台内置" : meta.name}
+              {pid === "server" && <span style={{ fontSize: 9, fontWeight: 800, background: "#10B981", color: "#fff", padding: "1px 6px", borderRadius: 999 }}>推荐</span>}
+              {pid !== "server" && platformReady && !hasUserKey && <span style={{ fontSize: 9, fontWeight: 800, background: "#DBEAFE", color: "#1D4ED8", padding: "1px 6px", borderRadius: 999 }}>平台 Key</span>}
+            </div>
+            <div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>
+              {pid === "server" ? "无需配置，默认走平台 Groq，最适合普通用户" : meta.desc}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            <span style={{ fontSize: 10.5, fontWeight: 800, color: statusColor, background: statusBg, padding: "3px 8px", borderRadius: 999 }}>{statusText}</span>
+            {pid !== "server" && (hasUserKey || platformReady) && (
+              <button
+                onClick={(e) => { e.stopPropagation(); expand(pid); }}
+                title={hasUserKey ? "更换 Key" : "使用自己的 Key"}
+                style={{ border: "none", background: "transparent", color: "#9CA3AF", cursor: "pointer", fontSize: 12, padding: 2 }}
+              >{hasUserKey ? "✏️" : "+"}</button>
+            )}
+          </div>
+        </div>
+        {isExpanded && pid !== "server" && (
+          <div style={{ padding: "8px 10px 10px", background: "#F9FAFB", borderRadius: 10, border: "1px solid #E5E7EB", marginTop: 5 }}>
+            {pid === "custom" && (
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#4B5563", marginBottom: 4 }}>接口 Base URL</div>
+                <input
+                  value={inputUrl}
+                  onChange={(e) => setInputUrl(e.target.value)}
+                  placeholder="https://your-api.com/v1"
+                  style={{ width: "100%", padding: "7px 9px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, fontFamily: "inherit", boxSizing: "border-box" }}
+                />
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#4B5563" }}>API Key</div>
+              {meta.link && <a href={meta.link} target="_blank" rel="noreferrer" style={{ fontSize: 10.5, color: "#6366F1", textDecoration: "none" }}>获取 Key →</a>}
+            </div>
+            <div style={{ position: "relative" }}>
+              <input
+                type={showKey ? "text" : "password"}
+                value={inputKey}
+                onChange={(e) => setInputKey(e.target.value)}
+                placeholder={meta.placeholder || "sk-..."}
+                onKeyDown={(e) => { if (e.key === "Enter") saveInput(); }}
+                style={{ width: "100%", padding: "7px 32px 7px 9px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, fontFamily: "inherit", boxSizing: "border-box" }}
+              />
+              <button onClick={() => setShowKey(v => !v)} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 13, padding: 0 }}>{showKey ? "隐藏" : "显示"}</button>
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
+              {hasUserKey && <button onClick={() => { clearKey(pid); setExpanded(null); }} style={{ fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, color: "#6B7280", cursor: "pointer", fontFamily: "inherit" }}>清除</button>}
+              <button onClick={() => setExpanded(null)} style={{ fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, color: "#6B7280", cursor: "pointer", fontFamily: "inherit" }}>取消</button>
+              <button onClick={saveInput} disabled={!inputKey.trim()} style={{ fontSize: 11, padding: "5px 12px", background: inputKey.trim() ? "#10B981" : "#D1D5DB", border: "none", borderRadius: 6, color: "#fff", cursor: inputKey.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontWeight: 700 }}>保存并切换</button>
+            </div>
+            <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 6 }}>Key 仅保存在本地浏览器。</div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div ref={popRef} style={{
       position: "absolute", top: 48, right: 0,
-      width: 340, maxHeight: "min(560px, calc(100vh - 80px))", overflow: "auto",
+      width: 380, maxHeight: "min(620px, calc(100vh - 80px))", overflow: "auto",
       background: "#FFFFFF", borderRadius: 14,
       boxShadow: "0 10px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.05)",
       border: "1px solid #E5E7EB",
@@ -761,119 +864,35 @@ function ProviderSwitcherPopover({ profile, onClose, onSwitched, onLogout }) {
         </div>
       </div>
 
-      <div style={{ padding: "4px 10px", fontSize: 11, color: "#9CA3AF", fontWeight: 600, letterSpacing: 0.3 }}>AI 引擎</div>
-
-      {/* Provider list */}
-      {AI_PROVIDER_ORDER.map((pid) => {
-        const meta = AI_PROVIDER_META[pid];
-        const isActive = freshCfg.provider === pid;
-        const hasUserKey = pid === "server" ? false : !!(freshCfg.allKeys[pid]);
-        // 平台已配置了该 provider 的 server Key？→ 用户不用填自己的 Key 也能用
-        const platformReady = pid === "server" ? true : !!(platformProviders[pid]);
-        // 能直接切换 = 有用户 key OR 平台已提供
-        const canOneClick = hasUserKey || platformReady;
-        const isExpanded = expanded === pid;
-        const flashed = savedPing === pid;
-        return (
-          <div key={pid} style={{ margin: "2px 8px" }}>
-            <div
-              onClick={() => {
-                if (isExpanded) return;
-                if (canOneClick) activate(pid);
-                else expand(pid);
-              }}
-              style={{
-                display: "flex", alignItems: "center", gap: 10,
-                padding: "8px 10px", borderRadius: 10,
-                cursor: isExpanded ? "default" : "pointer",
-                background: flashed ? "#ECFDF5" : (isActive ? "#F5F3FF" : "transparent"),
-                border: isActive ? "1px solid #DDD6FE" : "1px solid transparent",
-                transition: "background 0.15s, border-color 0.15s",
-              }}
-              onMouseEnter={(e) => { if (!isActive && !isExpanded) e.currentTarget.style.background = "#F9FAFB"; }}
-              onMouseLeave={(e) => { if (!isActive && !isExpanded && !flashed) e.currentTarget.style.background = "transparent"; }}
-            >
-              <ProviderAvatar providerId={pid} size={28} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  {meta.name}
-                  {meta.recommended && <span style={{ fontSize: 9, fontWeight: 700, background: "#10B981", color: "#FFFFFF", padding: "1px 6px", borderRadius: 4 }}>推荐</span>}
-                  {pid !== "server" && platformReady && !hasUserKey && (
-                    <span style={{ fontSize: 9, fontWeight: 700, background: "#DBEAFE", color: "#1D4ED8", padding: "1px 6px", borderRadius: 4 }} title="平台已配置此 AI 的 Key，用户点一下就能用">平台免费</span>
-                  )}
-                </div>
-                <div style={{ fontSize: 11, color: "#6B7280", marginTop: 1 }}>{meta.desc}</div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                {isActive ? (
-                  <span style={{ fontSize: 10.5, fontWeight: 700, color: "#6D28D9", background: "#EDE9FE", padding: "2px 7px", borderRadius: 999 }}>使用中</span>
-                ) : hasUserKey ? (
-                  <span style={{ fontSize: 10.5, color: "#059669", fontWeight: 600 }}>已连接</span>
-                ) : platformReady && pid !== "server" ? (
-                  <span style={{ fontSize: 10.5, color: "#1D4ED8", fontWeight: 600 }}>点击即用</span>
-                ) : (
-                  <span style={{ fontSize: 10.5, color: "#9CA3AF" }}>需填 Key</span>
-                )}
-                {pid !== "server" && hasUserKey && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); expand(pid); }}
-                    title="更换 Key"
-                    style={{ border: "none", background: "transparent", color: "#6B7280", cursor: "pointer", fontSize: 12, padding: 2 }}
-                  >✏️</button>
-                )}
-                {pid !== "server" && !hasUserKey && platformReady && (
-                  <button
-                    onClick={(e) => { e.stopPropagation(); expand(pid); }}
-                    title="想用自己的 Key 替代平台 Key？点这里"
-                    style={{ border: "none", background: "transparent", color: "#9CA3AF", cursor: "pointer", fontSize: 11, padding: 2 }}
-                  >+</button>
-                )}
-              </div>
+      <div style={{ padding: "10px 14px 4px" }}>
+        <div style={{ padding: "10px 12px", borderRadius: 14, background: "#F8FAFC", border: "1px solid #E5E7EB", marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: "#64748B", fontWeight: 800, letterSpacing: "0.06em", marginBottom: 4 }}>当前 AI 方案</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <ProviderAvatar providerId={freshCfg.provider} size={28} showRing />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 900, color: "#0F172A" }}>{AI_PROVIDER_META[freshCfg.provider]?.name || "未选择"}</div>
+              <div style={{ fontSize: 11.5, color: "#64748B" }}>{freshCfg.provider === "server" ? "推荐给普通用户：不用填 Key，直接可用" : (freshCfg.key ? "正在使用你本地保存的 Key" : "正在使用平台可用配置")}</div>
             </div>
-            {/* 内嵌 Key 输入 */}
-            {isExpanded && pid !== "server" && (
-              <div style={{ padding: "8px 10px 10px", margin: "0 2px", background: "#F9FAFB", borderRadius: 10, border: "1px solid #E5E7EB", marginTop: 4 }}>
-                {pid === "custom" && (
-                  <div style={{ marginBottom: 8 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "#4B5563", marginBottom: 4 }}>接口 Base URL</div>
-                    <input
-                      value={inputUrl}
-                      onChange={(e) => setInputUrl(e.target.value)}
-                      placeholder="https://your-api.com/v1"
-                      style={{ width: "100%", padding: "7px 9px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, fontFamily: "inherit", boxSizing: "border-box" }}
-                    />
-                  </div>
-                )}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "#4B5563" }}>API Key</div>
-                  {meta.link && (
-                    <a href={meta.link} target="_blank" rel="noreferrer" style={{ fontSize: 10.5, color: "#6366F1", textDecoration: "none" }}>免费获取 →</a>
-                  )}
-                </div>
-                <div style={{ position: "relative" }}>
-                  <input
-                    type={showKey ? "text" : "password"}
-                    value={inputKey}
-                    onChange={(e) => setInputKey(e.target.value)}
-                    placeholder={meta.placeholder || "sk-..."}
-                    onKeyDown={(e) => { if (e.key === "Enter") saveInput(); }}
-                    style={{ width: "100%", padding: "7px 32px 7px 9px", fontSize: 12, border: "1px solid #D1D5DB", borderRadius: 7, fontFamily: "inherit", boxSizing: "border-box" }}
-                  />
-                  <button onClick={() => setShowKey(v => !v)} style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 13, padding: 0 }}>{showKey ? "🙈" : "👁"}</button>
-                </div>
-                <div style={{ display: "flex", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
-                  {hasUserKey && (
-                    <button onClick={() => { clearKey(pid); setExpanded(null); }} style={{ fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, color: "#6B7280", cursor: "pointer", fontFamily: "inherit" }}>清除</button>
-                  )}
-                  <button onClick={() => setExpanded(null)} style={{ fontSize: 11, padding: "5px 10px", background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, color: "#6B7280", cursor: "pointer", fontFamily: "inherit" }}>取消</button>
-                  <button onClick={saveInput} disabled={!inputKey.trim()} style={{ fontSize: 11, padding: "5px 12px", background: inputKey.trim() ? "#10B981" : "#D1D5DB", border: "none", borderRadius: 6, color: "#fff", cursor: inputKey.trim() ? "pointer" : "not-allowed", fontFamily: "inherit", fontWeight: 600 }}>保存并切换</button>
-                </div>
-                <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 6 }}>Key 仅保存在你本地浏览器，不上传服务器。</div>
-              </div>
-            )}
           </div>
-        );
-      })}
+        </div>
+
+        <div style={{ fontSize: 11, color: "#64748B", fontWeight: 900, letterSpacing: "0.08em", margin: "8px 2px 6px" }}>推荐使用</div>
+        {recommendedProviders.map((pid) => renderProviderRow(pid))}
+
+        {directProviders.length > 0 && (
+          <>
+            <div style={{ fontSize: 11, color: "#64748B", fontWeight: 900, letterSpacing: "0.08em", margin: "14px 2px 6px" }}>可直接切换</div>
+            {directProviders.map((pid) => renderProviderRow(pid, true))}
+          </>
+        )}
+
+        {keyProviders.length > 0 && (
+          <>
+            <div style={{ fontSize: 11, color: "#64748B", fontWeight: 900, letterSpacing: "0.08em", margin: "14px 2px 6px" }}>使用自己的 Key</div>
+            {keyProviders.map((pid) => renderProviderRow(pid, true))}
+          </>
+        )}
+      </div>
 
       {/* Footer */}
       <div style={{ borderTop: "1px solid #F3F4F6", marginTop: 8, paddingTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
