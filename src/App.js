@@ -6152,7 +6152,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   const [quizCount, setQuizCount] = useState(10);
   const [timerOn, setTimerOn] = useState(!!isSprint);
   // 新版设置界面状态
-  const [expandedCustom, setExpandedCustom] = useState(true);      // 默认展开，习题来源/上传求解入口不能藏起来
+  const [expandedCustom, setExpandedCustom] = useState(false);     // 自定义筛选默认收起，题库首页先展示三类入口
   const [subjectFocus, setSubjectFocus] = useState(null);          // 当前选中学科（用于层级章节选择）
   const [selectedAbilities, setSelectedAbilities] = useState([]);  // 能力维度筛选
   const [selectedStatuses, setSelectedStatuses] = useState([]);    // 掌握状态筛选
@@ -7262,6 +7262,12 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
   };
 
   const handleNext = () => {
+    const explanationOnly = q && isTextQuestion(q) && (parseQuestionOptions(q.options)?.length || 0) === 0;
+    if (explanationOnly && !answerRecords[current]) {
+      setAnswerRecords(prev => ({ ...prev, [current]: { selectedIdx: null, correct: true, revealed: !!revealedAnswer } }));
+      setScore(s => s + 1);
+      if (onAnswer && q) onAnswer(q.id || q.question, true, q.chapter || "Unknown", q);
+    }
     if (current >= displayQ.length - 1) {
       setFinished(true);
       // Record study time
@@ -8435,6 +8441,7 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
 
   // ── Quiz screen (modular view) ──
   const normalizedOptions = opts || (q.type === "判断题" ? ["正确", "错误"] : []);
+  const isExplanationOnlyQuestion = isTextQuestion(q) && normalizedOptions.length === 0;
   // 双语辅助文本（中主英辅）：若题目带英文版则并排展示
   const optsEn = q?.options_en
     ? (typeof q.options_en === "string" ? (() => { try { return JSON.parse(q.options_en); } catch { return null; } })() : q.options_en)
@@ -8673,6 +8680,27 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
         revealed={revealedAnswer}
       />
 
+      {isExplanationOnlyQuestion && (
+        <details open={revealedAnswer} style={{ marginTop: 14, borderRadius: 16, border: "1px solid #DBEAFE", background: "#F8FBFF", overflow: "hidden" }}>
+          <summary
+            onClick={(e) => {
+              e.preventDefault();
+              setRevealedAnswer((v) => !v);
+            }}
+            style={{ cursor: "pointer", listStyle: "none", padding: "14px 18px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 14, fontWeight: 900, color: "#1D4ED8" }}
+          >
+            <span>AI 解析 / 参考答案</span>
+            <span style={{ fontSize: 12, color: "#64748B", fontWeight: 700 }}>{revealedAnswer ? "收起 ▲" : "展开 ▼"}</span>
+          </summary>
+          {revealedAnswer && (
+            <div style={{ padding: "0 18px 16px", color: "#334155", fontSize: 14, lineHeight: 1.8 }}>
+              {q.answer && <div style={{ fontWeight: 800, color: "#0F172A", marginBottom: 8 }}>参考答案：{q.answer}</div>}
+              <MathText text={String(q.explanation || q.answer || "暂无解析")} />
+            </div>
+          )}
+        </details>
+      )}
+
       {/* 未提交：底部操作栏 —— 语义分组（导航在左，主/辅操作在右） */}
       {!answered && (
         <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -8689,9 +8717,15 @@ function QuizPage({ setPage, initialQuestion = null, chapterFilter = null, setCh
                 }
               } catch {}
             }}>★ 标记</Btn>
-            <Btn variant="primary" onClick={handleSubmit} disabled={(!isTextQuestion(q) && selected === null) || (isTextQuestion(q) && !answerText.trim())}>
-              提交答案
-            </Btn>
+            {isExplanationOnlyQuestion ? (
+              <Btn variant="primary" onClick={handleNext}>
+                {current >= displayQ.length - 1 ? "完成小测 →" : "下一题 →"}
+              </Btn>
+            ) : (
+              <Btn variant="primary" onClick={handleSubmit} disabled={(!isTextQuestion(q) && selected === null) || (isTextQuestion(q) && !answerText.trim())}>
+                提交答案
+              </Btn>
+            )}
           </div>
         </div>
       )}
