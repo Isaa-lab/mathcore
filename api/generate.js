@@ -89,8 +89,8 @@ async function runHandler(req, res) {
     (__platformSlotProv === pid && __platformSlotKey && __platformSlotKey.trim().length > 8)
       ? __platformSlotKey : null;
   const GEMINI_KEY    = process.env.GEMINI_KEY    || __fromPlatformSlot("gemini");
-  // 兼容国内 OpenAI 兼容网关上的 Gemini key 命名（用户当前在 Vercel 使用 Gemini2_0）。
-  const GEMINI_OAI_KEY = process.env.Gemini2_0 || process.env.GEMINI2_0 || process.env.GEMINI_2_0 || "";
+  // 兼容国内 OpenAI 兼容网关上的 Gemini key 命名（Vercel 环境变量大小写敏感）。
+  const GEMINI_OAI_KEY = process.env.gemini2_0 || process.env.Gemini2_0 || process.env.GEMINI2_0 || process.env.GEMINI_2_0 || "";
   const GEMINI_OAI_BASE = String(process.env.GEMINI_OPENAI_BASE_URL || "https://bboluo.com/v1").trim().replace(/\/$/, "");
   const GEMINI_OAI_MODELS = String(process.env.GEMINI_OPENAI_MODELS || "gemini-2.0-flash,[L]gemini-3-flash-preview,[L]gemini-2.5-pro")
     .split(",")
