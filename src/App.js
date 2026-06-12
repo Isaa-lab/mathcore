@@ -11,7 +11,6 @@ import TextbookBank from "./components/TextbookBank";
 import AiGenerate from "./components/AiGenerate";
 import UploadSolve from "./components/UploadSolve";
 import MistakeWorkbench from "./components/MistakeWorkbench";
-import StudyWorkspace from "./layouts/StudyWorkspace";
 import SprintWorkspace from "./layouts/SprintWorkspace";
 import { isEditableFocused } from "./utils/keyboard";
 import { detectVizIntent, logVizIntent } from "./utils/vizIntent";
@@ -16546,7 +16545,7 @@ export default function App() {
       // 预览 PDF 用：file_data 是 Supabase Storage 的 publicUrl
       file_data: mat.file_data || null,
     });
-    setStudyTab("知识点");
+    setStudyTab("工作台");
   }, []);
   const exitMaterial = useCallback(() => {
     setCurrentMaterial(null);
@@ -17009,21 +17008,58 @@ export default function App() {
                       </div>
                     </motion.div>
                   ) : (
-                  <motion.div key={`sandbox-${currentMaterial.id}`} style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
-                    <StudyWorkspace
-                      renderTab={renderStudyTab}
-                      activeTab={studyTab}
-                      setActiveTab={setStudyTab}
-                      currentMaterial={currentMaterial}
-                      onExit={exitMaterial}
-                      onPreviewPdf={() => setSandboxPreviewing(true)}
-                      onReanalyze={reanalyzeCurrentMaterial}
-                      reanalyzing={sandboxReanalyzing}
-                      onCompareAI={() => setCompareModalOpen(true)}
-                      comparing={compareModalOpen}
-                      providerLabel={getProviderTheme(activeProvider).label}
-                    />
-                    {/* 细化分析进度提示 —— toast 风格 */}
+                  <motion.div
+                    key={`sandbox-${currentMaterial.id}`}
+                    style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    transition={{ duration: 0.25 }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 24px", borderBottom: "1px solid #e7e8ef", background: "#fff" }}>
+                      <button onClick={exitMaterial}
+                        style={{ border: "1px solid #e7e8ef", background: "#fff", borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>
+                        ← 教材画廊
+                      </button>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>{currentMaterial.title || "线性代数"}</div>
+                      <button onClick={() => setSandboxPreviewing(true)}
+                        style={{ marginLeft: "auto", border: "1px solid #e7e8ef", background: "#fff", borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>
+                        📖 查看 PDF
+                      </button>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, padding: "12px 24px 0", background: "#FAFAFC" }}>
+                      {[
+                        { key: "工作台", label: "📝 错题工作台" },
+                        { key: "知识点", label: "📚 知识点" },
+                        { key: "错题本", label: "❌ 错题本" },
+                      ].map((t) => {
+                        const on = (studyTab || "工作台") === t.key;
+                        return (
+                          <button key={t.key} onClick={() => setStudyTab(t.key)}
+                            style={{
+                              border: on ? "1px solid #4338ca" : "1px solid #e7e8ef",
+                              background: on ? "#4338ca" : "#fff",
+                              color: on ? "#fff" : "#3a3f55",
+                              borderRadius: 9, padding: "8px 15px", cursor: "pointer",
+                              fontSize: 13, fontWeight: 600, transition: "0.12s", fontFamily: "inherit",
+                            }}>
+                            {t.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div style={{ flex: 1, overflow: "auto", padding: "16px 24px" }}>
+                      {(studyTab || "工作台") === "工作台" ? (
+                        <MistakeWorkbench
+                          supabase={supabase}
+                          userId={session?.user?.id}
+                          existingNotes={{}}
+                        />
+                      ) : (
+                        renderStudyTab(studyTab)
+                      )}
+                    </div>
+
                     {sandboxReanalyzeMsg && (
                       <div style={{ position: "fixed", top: 80, right: 20, zIndex: 9998, padding: "12px 18px", borderRadius: 12, background: "#0F172A", color: "#fff", fontSize: 13, fontWeight: 600, boxShadow: "0 12px 32px rgba(0,0,0,0.25)", maxWidth: 380, lineHeight: 1.6 }}>
                         {sandboxReanalyzeMsg}
