@@ -62,12 +62,15 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
 
   return (
     <div className="kp">
-      {points.length > 1 && (
-        <div className="kp-tabs">
-          {points.map((point) => (
-            <span key={point} className={"kp-tab" + (active === point ? " on" : "")} onClick={() => setActive(point)}>{point}</span>
-          ))}
-        </div>
+      {points.length > 0 && (
+        <>
+          <p className="kp-ey" style={{ marginBottom: 8 }}>这道题考的知识点 · 点击查看</p>
+          <div className="kp-tabs">
+            {points.map((point) => (
+              <span key={point} className={"kp-tab" + (active === point ? " on" : "")} onClick={() => setActive(point)}>{point}</span>
+            ))}
+          </div>
+        </>
       )}
       {loading && <div className="kp-loading">正在整理「{active}」的讲解...</div>}
       {data && !loading && (

@@ -11,8 +11,14 @@ async function callVision(dataURI, promptText, { json = true } = {}) {
   return json ? parseLooseJSON(content) : content;
 }
 
-export async function extractPaper(dataURI) {
+export async function extractPaper(dataURI, layout = "together") {
+  const layoutHint = layout === "separate"
+    ? "这份卷子的【题目和答案是分开的】：可能题目在前面/上方，学生手写答案在后面/下方或另一区域。请按题号把题目和对应答案配对，不要把答案错配到相邻题。"
+    : "这份卷子的【题目和答案在一起】：每道题下方或旁边通常就是学生的手写答案。";
+
   const prompt = `你是数学卷子批改助手。仔细看这张卷子图片，提取每道题的信息。
+
+${layoutHint}
 
 要提取：
 1. 题号 number

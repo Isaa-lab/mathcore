@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import MathText from "../lib/MathText";
 import { generateVariant, tutorReply } from "../lib/workbenchAI";
+import { callGenerate } from "../lib/aiClient";
 
 const CSS = `
 .tc{--ink:#0f1220;--mut:#6b7184;--faint:#9aa0b4;--line:#e7e8ef;--soft:#f0f1f6;--brand:#4338ca;--emerald:#047857;--emerald-soft:#e7f6ef;color:var(--ink);height:100%;display:flex;flex-direction:column}
@@ -84,8 +85,66 @@ export default function TutorChat({ item }) {
     }
   };
 
+  const sendFree = async () => {
+    if (!input.trim() || busy) return;
+    const userText = input.trim();
+    setInput("");
+    const next = [...msgs, { role: "user", content: userText }];
+    setMsgs(next);
+    setBusy(true);
+    try {
+      const system = "你是耐心的线性代数私教，用简洁、引导式的方式回答学生关于线性代数的问题。公式用 $...$ 包裹。";
+      const reply = await callGenerate(
+        [{ role: "user", content: system }, ...msgs, { role: "user", content: userText }],
+        { json: false, materialTitle: "通用线性代数辅导" }
+      );
+      setMsgs([...next, { role: "assistant", content: reply }]);
+    } catch {
+      setMsgs([...next, { role: "assistant", content: "回复失败，请重试。" }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!item) {
-    return <div className="tc"><div className="tc-empty">点击左边一道错题<br />我会一对一帮你讲懂它</div></div>;
+    return (
+      <div className="tc">
+        <div className="tc-head">
+          <div className="t">AI 辅导</div>
+          <div className="s">随便问我线性代数问题，或点左边错题做针对性讲解</div>
+        </div>
+        <div className="tc-msgs">
+          {msgs.length === 0 && (
+            <div className="tc-msg tc-ai">
+              <MathText text={'你好！我是你的线性代数私教。可以直接问我，比如“行列式怎么算”，也可以点左边错题，我来一对一帮你讲懂。'} />
+            </div>
+          )}
+          {msgs.map((msg, index) => (
+            <div key={index} className={"tc-msg " + (msg.role === "user" ? "tc-user" : "tc-ai")}>
+              <MathText text={msg.content} />
+            </div>
+          ))}
+          {busy && <div className="tc-typing">AI 正在思考...</div>}
+          <div ref={endRef} />
+        </div>
+        <div className="tc-input">
+          <textarea
+            className="tc-ta"
+            rows={1}
+            placeholder="问我任何线性代数问题..."
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                sendFree();
+              }
+            }}
+          />
+          <button className="tc-send" onClick={sendFree} disabled={busy || !input.trim()}>发送</button>
+        </div>
+      </div>
+    );
   }
 
   return (

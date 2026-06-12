@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import MathText from "../lib/MathText";
 import { makeWorkbenchApi } from "../lib/workbenchApi";
 import { extractPaper, gradeItem } from "../lib/workbenchAI";
@@ -19,6 +19,7 @@ const CSS = `
 .pp-edit{width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px;margin-top:4px;outline:none}.pp-edit:focus{border-color:var(--brand)}
 .pp-actions{display:flex;gap:6px;margin-top:9px}.pp-btn{font-size:12px;border:1px solid var(--line);background:#fff;color:#3a3f55;border-radius:7px;padding:5px 10px;cursor:pointer;font-family:inherit}.pp-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}.pp-btn.mini{padding:3px 8px;font-size:11px}
 .pp-empty{text-align:center;color:var(--faint);padding:30px 14px;font-size:13px;line-height:1.7}.pp-flip{margin-left:auto;font-family:ui-monospace,monospace;font-size:11px;color:var(--brand);cursor:pointer;background:none;border:none}
+.pp-layout-pick{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:10px}.pp-lp-label{font-size:12px;color:var(--mut)}.pp-lp-opt{font-size:12px;border:1px solid var(--line);background:#fff;color:#3a3f55;border-radius:7px;padding:5px 10px;cursor:pointer;transition:.12s;user-select:none}.pp-lp-opt:hover{border-color:var(--brand)}.pp-lp-opt.on{background:var(--brand);border-color:var(--brand);color:#fff}
 `;
 
 function useCSS() {
@@ -40,6 +41,8 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
   const [paperId, setPaperId] = useState(null);
   const [editing, setEditing] = useState(null);
   const [draft, setDraft] = useState("");
+  const [paperLayout, setPaperLayout] = useState("together");
+  const fileInputRef = useRef(null);
 
   const handleFiles = useCallback(async (files) => {
     if (!files?.length) return;
@@ -66,7 +69,7 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
       for (const path of urls) {
         const uri = await wb.imageToDataURI(path);
         if (!uri) continue;
-        extracted = extracted.concat(await extractPaper(uri));
+        extracted = extracted.concat(await extractPaper(uri, paperLayout));
       }
       if (!extracted.length) {
         setStatus("没识别出题目，换张清晰的图试试");
@@ -89,7 +92,7 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
     } catch (error) {
       setStatus("出错：" + (error.message || error));
     }
-  }, [userId, wb]);
+  }, [userId, wb, paperLayout]);
 
   const saveAnswer = async (item) => {
     const updated = await wb.updateItem(item.id, { student_answer: draft, reviewed: true });
@@ -134,18 +137,55 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
 
   const needGrade = items.length > 0 && items.some((item) => item.is_correct === null);
 
+  const onDragOver = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setHot(true);
+  };
+  const onDragLeave = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setHot(false);
+  };
+  const onDrop = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setHot(false);
+    if (event.dataTransfer?.files?.length) handleFiles(event.dataTransfer.files);
+  };
+
   return (
     <div className="pp">
-      <label
+      <div className="pp-layout-pick">
+        <span className="pp-lp-label">这份卷子是：</span>
+        {[
+          { key: "together", label: "题目+答案在一起" },
+          { key: "separate", label: "题目和答案分开" },
+        ].map((option) => (
+          <span
+            key={option.key}
+            className={"pp-lp-opt" + (paperLayout === option.key ? " on" : "")}
+            onClick={() => setPaperLayout(option.key)}
+          >
+            {option.label}
+          </span>
+        ))}
+      </div>
+
+      <div
         className={"pp-drop" + (hot ? " hot" : "")}
-        onDragOver={(event) => { event.preventDefault(); setHot(true); }}
-        onDragLeave={() => setHot(false)}
-        onDrop={(event) => { event.preventDefault(); setHot(false); handleFiles(event.dataTransfer.files); }}
+        onDragOver={onDragOver}
+        onDragEnter={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        onClick={() => fileInputRef.current?.click()}
+        role="button"
+        tabIndex={0}
       >
         点击或拖入卷子 <b>图片</b><br />
         <span style={{ fontSize: 12 }}>题目打印、答案手写都可以</span>
-        <input type="file" accept="image/*,.pdf" multiple hidden onChange={(event) => handleFiles(event.target.files)} />
-      </label>
+      </div>
+      <input ref={fileInputRef} type="file" accept="image/*,.pdf" multiple hidden onChange={(event) => handleFiles(event.target.files)} />
       {status && <div className="pp-status">{status}</div>}
       {needGrade && <button className="pp-btn primary" style={{ marginTop: 8 }} onClick={gradeAll}>全部批改（判对错 + 分析）</button>}
       <div className="pp-list">
