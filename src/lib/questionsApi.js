@@ -26,6 +26,12 @@ function saveLocalBookmarks(set) {
   localStorage.setItem(BOOKMARK_KEY, JSON.stringify([...set]));
 }
 
+function mapDbQuestionType(value) {
+  const type = String(value || "").trim();
+  if (["单选题", "判断题", "填空题", "简答题"].includes(type)) return type;
+  return "简答题";
+}
+
 export function makeQuestionsApi(supabase) {
   async function loadUserMeta(userId) {
     const meta = { result: {}, starred: {} };
@@ -138,6 +144,7 @@ export function makeQuestionsApi(supabase) {
   async function insertQuestions(rows) {
     const candidates = rows.map((row) => ({
       ...row,
+      type: mapDbQuestionType(row.type),
       options: row.options && row.options.length ? row.options : null,
       answer_status: row.answer_status || row.answerStatus || (row.answer ? "generated" : "pending"),
     }));

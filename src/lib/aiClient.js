@@ -71,44 +71,86 @@ async function postGenerate(question, { materialTitle = "题库 AI", conversatio
   return extractText(data).trim();
 }
 
+export async function callGenerate(input, { json = false, materialTitle = "题库 AI", signal } = {}) {
+  if (Array.isArray(input)) {
+    const hasVision = input.some((m) => Array.isArray(m?.content) && m.content.some((p) => p?.type === "image_url"));
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "tutor",
+        materialTitle,
+        messages: input,
+        stream: false,
+        ...(hasVision ? { userProvider: "gemini" } : getUserAIConfig()),
+      }),
+      signal,
+    });
+    const text = await res.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch {}
+    if (!res.ok || data.error) {
+      throw new Error(data.error || data.message || `HTTP ${res.status}: ${text.slice(0, 200)}`);
+    }
+    const content = extractText(data).trim();
+    return json ? parseLooseJSON(content) : content;
+  }
+  const content = await postGenerate(String(input || ""), { materialTitle, signal });
+  return json ? parseLooseJSON(content) : content;
+}
+
 export async function generateQuestions({ chapter, chapterTitle, types, difficulty, count }) {
-  const prompt = `请生成 ${count} 道高质量线性代数练习题。
+  const prompt = `请严格生成【正好 ${count} 道】高质量线性代数练习题，一道都不能少。
 
 章节：${chapter} ${chapterTitle || ""}
 题型范围：${types.join("、")}
 难度：${difficulty}
 
-要求：
-1. 每题必须是该章节真实知识点的练习题，不要套话、不要超纲
-2. 数学公式用 LaTeX 表示
-3. 概念/选择题可以给 options；计算/证明题 options 留空数组
-4. 每题给出参考答案 answer 和简要解析 explanation
-5. 只输出 JSON，不要 Markdown，不要额外解释
+硬性要求：
+1. questions 数组长度必须正好是 ${count}，不足 ${count} 道视为失败
+2. 每题必须是该章节真实知识点的练习题，不要套话、不要超纲、不要重复
+3. 公式必须用 $...$ 包裹的 LaTeX：行内如 $x_1 + x_2 = 3$；矩阵如 $\\begin{bmatrix}1 & 2 \\\\ 3 & 4\\end{bmatrix}$；分数如 $\\frac{a}{b}$
+4. 概念/选择题可以给 options；计算/证明题 options 留空数组
+5. 每题给出参考答案 answer 和简要解析 explanation
+6. 只输出 JSON，不要 Markdown，不要额外解释
 
 JSON 格式：
-{"questions":[{"question":"题干","type":"计算","difficulty":"${difficulty}","options":[],"answer":"参考答案","explanation":"解析"}]}`;
+{"questions":[{"question":"题干含$公式$","type":"计算","difficulty":"${difficulty}","options":[],"answer":"参考答案","explanation":"解析"}]}`;
 
   const raw = await postGenerate(prompt, { materialTitle: "AI 出题" });
   const data = parseLooseJSON(raw);
-  const arr = Array.isArray(data) ? data : data?.questions;
-  return Array.isArray(arr) ? arr.filter((q) => q?.question) : [];
+  let arr = (Array.isArray(data) ? data : data?.questions || []).filter((q) => q?.question);
+
+  if (arr.length > 0 && arr.length < count) {
+    const need = count - arr.length;
+    const supplementRaw = await postGenerate(
+      `${prompt}\n\n刚才只生成了 ${arr.length} 道，请再补 ${need} 道不同题目。只输出 JSON，questions 数组长度必须正好是 ${need}。`,
+      { materialTitle: "AI 出题补题" }
+    );
+    const supplement = parseLooseJSON(supplementRaw);
+    const more = (Array.isArray(supplement) ? supplement : supplement?.questions || []).filter((q) => q?.question);
+    arr = arr.concat(more);
+  }
+
+  return arr.slice(0, count);
 }
 
 export async function solveUploaded(questionText) {
-  const prompt = `你是线性代数老师。请解答下面这道题，给出详细分步解析。
+  const prompt = `你是线性代数老师。请完整解答下面这道题，给出详细分步解析，不要省略步骤。
 
 【题目】
 ${questionText}
 
-【要求】
-1. 解题思路 → 分步计算 → 最终答案
-2. 写出用到的定理/方法名称
-3. 公式用 LaTeX
-4. 判断章节(Ch.1~Ch.7)、题型(概念/计算/证明/应用)、难度(基础/进阶/挑战)
-5. 只输出 JSON，不要 Markdown，不要额外解释
+【硬性要求】
+1. answer 字段必须包含完整解题过程：解题思路 → 每一步计算（逐步写出，不能跳步）→ 最终答案
+2. 不要只写“分步解析如下：”然后就结束，必须真正写出每一步内容
+3. 公式必须用 $...$ 包裹的 LaTeX，如 $\\det(A)=ad-bc$、$\\begin{bmatrix}1&2\\\\3&4\\end{bmatrix}$
+4. theorems 列出用到的定理/方法名称
+5. 判断章节(Ch.1~Ch.7)、题型(概念/计算/证明/应用)、难度(基础/进阶/挑战)
+6. 只输出 JSON，不要 Markdown，不要额外解释
 
 JSON 格式：
-{"chapter":"Ch.?","type":"计算","difficulty":"基础","answer":"分步解析","theorems":["定理1"],"explanation":"简要说明"}`;
+{"chapter":"Ch.?","type":"计算","difficulty":"基础","answer":"完整分步解析，每步都写清楚，公式用$包裹","theorems":["定理1"],"explanation":"一句话总结"}`;
 
   const raw = await postGenerate(prompt, { materialTitle: "上传题目求解" });
   return parseLooseJSON(raw);

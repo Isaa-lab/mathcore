@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import katex from "katex";
-import "katex/dist/katex.min.css";
 import { solveUploaded } from "../lib/aiClient";
 import { makeQuestionsApi } from "../lib/questionsApi";
+import MathText from "../lib/MathText";
 
 const CSS = `
 .us{--ink:#0f1220;--mut:#6b7184;--faint:#9aa0b4;--line:#e7e8ef;--soft:#f0f1f6;--card:#fff;--brand:#4338ca;--brand-soft:#eef0ff;--brand-ink:#3730a3;--emerald:#047857;--emerald-soft:#e7f6ef;--mono:ui-monospace,Menlo,Consolas,monospace;color:var(--ink)}
@@ -20,24 +19,6 @@ function useCSS() {
     style.textContent = CSS;
     document.head.appendChild(style);
   }, []);
-}
-
-function InlineMathText({ text }) {
-  const parts = String(text || "").split(/(\$[^$]+\$)/g);
-  return (
-    <>
-      {parts.map((part, index) => {
-        if (part.startsWith("$") && part.endsWith("$")) {
-          try {
-            return <span key={index} dangerouslySetInnerHTML={{ __html: katex.renderToString(part.slice(1, -1), { throwOnError: false }) }} />;
-          } catch {
-            return <span key={index}>{part}</span>;
-          }
-        }
-        return <span key={index}>{part}</span>;
-      })}
-    </>
-  );
 }
 
 export default function UploadSolve({ supabase, userId = null }) {
@@ -131,7 +112,7 @@ export default function UploadSolve({ supabase, userId = null }) {
           <div className="us-result">
             <div className="us-rh"><span className="us-rtag">{result.chapter || "Ch.?"}</span><span className="us-rtag">{result.type || "计算"}</span><span className="us-rtag">{result.difficulty || "基础"}</span></div>
             <div className="us-rbody">
-              <InlineMathText text={result.answer} />
+              <MathText text={result.answer} />
               {(result.theorems || []).length > 0 && <div className="us-thm">{result.theorems.map((t, i) => <span key={i} className="tg">{t}</span>)}</div>}
             </div>
           </div>

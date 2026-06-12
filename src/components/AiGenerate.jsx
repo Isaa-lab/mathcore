@@ -1,9 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import katex from "katex";
-import "katex/dist/katex.min.css";
 import { generateQuestions } from "../lib/aiClient";
 import { makeQuestionsApi } from "../lib/questionsApi";
+import MathText from "../lib/MathText";
 
 const CHAPTERS = [
   ["Ch.1", "矩阵与线性方程组"],
@@ -35,14 +34,6 @@ function useCSS() {
     style.textContent = CSS;
     document.head.appendChild(style);
   }, []);
-}
-
-function renderMath(text) {
-  try {
-    return <span dangerouslySetInnerHTML={{ __html: katex.renderToString(String(text || ""), { throwOnError: false }) }} />;
-  } catch {
-    return <span>{text}</span>;
-  }
 }
 
 export default function AiGenerate({ supabase, userId = null, onSaved }) {
@@ -132,9 +123,9 @@ export default function AiGenerate({ supabase, userId = null, onSaved }) {
           {preview.map((q) => (
             <motion.div key={q._key} initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="ag-q">
               <div className="ag-qh"><span className="ag-tag">{chapter}</span><span className="ag-tag">{q.type || "计算"}</span><span className="ag-tag">{q.difficulty || difficulty}</span></div>
-              <div className="ag-stem">{renderMath(q.question)}</div>
-              {(q.options || []).map((opt, i) => <div key={i} className="ag-opt">{renderMath(opt)}</div>)}
-              {q.answer && <div className="ag-ans">答案：{renderMath(q.answer)}</div>}
+              <div className="ag-stem"><MathText text={q.question} /></div>
+              {(q.options || []).map((opt, i) => <div key={i} className="ag-opt"><MathText text={opt} /></div>)}
+              {q.answer && <div className="ag-ans">答案：<MathText text={q.answer} /></div>}
             </motion.div>
           ))}
           <div className="ag-bar"><span className="sp" /><button className="ag-btn" onClick={() => setPreview([])}>丢弃</button><button className="ag-btn primary" onClick={doSave} disabled={saving}>{saving ? "保存中..." : `保存 ${preview.length} 题`}</button></div>

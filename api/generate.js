@@ -73,6 +73,7 @@ async function runHandler(req, res) {
     chapter, type, count,
     mode, question: chatQuestion, materialTitle, materialContext,
     conversationHistory,
+    messages: incomingMessages,
     questionContext, // { stem, options, correctAnswer, userSelection, isCorrect, misconception, knowledgePoints }
     vizIntent,       // { wantsViz: bool, reason: string } —— 前端已做关键词检测，后端据此分流 prompt
     dialogueMode,    // "socratic" | "exposition" —— 前端根据答题状态 + 用户意图推导
@@ -175,9 +176,13 @@ async function runHandler(req, res) {
   }
   
 
+  const hasIncomingMessages = Array.isArray(incomingMessages) && incomingMessages.length > 0;
+  const hasVisionMessages = hasIncomingMessages && incomingMessages.some((m) =>
+    Array.isArray(m?.content) && m.content.some((part) => part?.type === "image_url")
+  );
   const isSocraticMode = mode === "socratic" && chatQuestion;
   // socratic 走 chat 管线（流式对话、纯文本输出），不进入出题分支
-  const isChatMode = isSocraticMode || ((mode === "chat" || mode === "tutor") && chatQuestion);
+  const isChatMode = hasIncomingMessages || isSocraticMode || ((mode === "chat" || mode === "tutor") && chatQuestion);
 
   // —— 可视化开关（提升到外层：prompt 构建段和响应兜底段都要用） ——
   // 两个正向信号，取并：
@@ -627,7 +632,11 @@ ${vizProfile.extraConstraint ? "\n━━━ 本轮模型专属约束（必须遵
 
   // ── 构建 messages 数组（含历史） ────────────────────────────────────────────
   let messages;
-  if (isChatMode) {
+  if (hasIncomingMessages) {
+    messages = incomingMessages
+      .filter((m) => m && (m.role === "system" || m.role === "assistant" || m.role === "user"))
+      .map((m) => ({ role: m.role, content: m.content }));
+  } else if (isChatMode) {
     const sysMsg = { role: "system", content: systemPrompt };
     const histMsgs = Array.isArray(conversationHistory)
       ? conversationHistory.slice(-12).map(h => ({
@@ -762,8 +771,8 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     const t0 = Date.now();
     try {
       const body = isChatMode
-        ? { model, messages, temperature: 0.6, max_tokens: 1500 }
-        : { model, messages: [{ role: "user", content: prompt }], temperature: 0.5, max_tokens: 3000 };
+        ? { model, messages, temperature: 0.6, max_tokens: 4000 }
+        : { model, messages: [{ role: "user", content: prompt }], temperature: 0.5, max_tokens: 4000 };
       const r = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
@@ -818,7 +827,7 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: geminiContents,
-            generationConfig: { temperature: 0.6, maxOutputTokens: 1500 },
+            generationConfig: { temperature: 0.6, maxOutputTokens: 4000 },
           }),
         },
         budget
@@ -873,13 +882,13 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     }
     if (pid === "gemini") {
       // 优先官方 Gemini；失败后尝试 OpenAI 兼容网关（例如 bboluo）。
-      if (GEMINI_KEY && k === GEMINI_KEY) {
+      if (!hasVisionMessages && GEMINI_KEY && k === GEMINI_KEY) {
         const official = await callGeminiOfficial(k) || "";
         if (official) return official;
       }
       const compat = await callGeminiCompat(k, tagSrc) || "";
       if (compat) return compat;
-      return await callGeminiOfficial(k) || "";
+      return hasVisionMessages ? "" : (await callGeminiOfficial(k) || "");
     }
     if (pid === "custom") {
       const base = String(userCustomUrl || "").trim().replace(/\/$/, "");
@@ -921,7 +930,7 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
 
   // Priority 4: server Gemini
   if (!responseText && (GEMINI_KEY || GEMINI_OAI_KEY)) {
-    if (GEMINI_KEY) responseText = await callGeminiOfficial(GEMINI_KEY) || "";
+    if (!hasVisionMessages && GEMINI_KEY) responseText = await callGeminiOfficial(GEMINI_KEY) || "";
     if (!responseText && GEMINI_OAI_KEY) responseText = await callGeminiCompat(GEMINI_OAI_KEY, "server") || "";
   }
 
@@ -946,7 +955,7 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
           headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
         body: JSON.stringify({
           model: "claude-haiku-4-5-20251001",
-            max_tokens: 1500,
+            max_tokens: 4000,
             system: isChatMode ? systemPrompt : undefined,
             messages: anthropicMessages,
         }),

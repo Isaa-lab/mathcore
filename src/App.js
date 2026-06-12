@@ -10,6 +10,7 @@ import InteractiveMathChart from "./components/InteractiveMathChart";
 import TextbookBank from "./components/TextbookBank";
 import AiGenerate from "./components/AiGenerate";
 import UploadSolve from "./components/UploadSolve";
+import MistakeWorkbench from "./components/MistakeWorkbench";
 import StudyWorkspace from "./layouts/StudyWorkspace";
 import SprintWorkspace from "./layouts/SprintWorkspace";
 import { isEditableFocused } from "./utils/keyboard";
@@ -4832,8 +4833,8 @@ function TopNav({ page, setPage, profile, onLogout, onOpenGateway }) {
   const [showPwdModal, setShowPwdModal] = useState(false);
   const primaryLinks = ["首页", "资料库", "资料对话", "题库练习", "学习报告"];
   const secondaryLinks = profile?.role === "teacher"
-    ? ["知识点", "记忆卡片", "错题本", "技能树", "上传资料", "教师管理"]
-    : ["知识点", "记忆卡片", "错题本", "技能树", "上传资料"];
+    ? ["知识点", "记忆卡片", "错题本", "错题工作台", "技能树", "上传资料", "教师管理"]
+    : ["知识点", "记忆卡片", "错题本", "错题工作台", "技能树", "上传资料"];
   const isActive = (l) => page === l;
 
   return (
@@ -16874,6 +16875,7 @@ export default function App() {
   // 用户会觉得按钮"点不动"（实际上 page 变了但屏幕没变）。
   const isFullscreenPage =
     page === "错题本" ||
+    page === "错题工作台" ||
     page === "上传资料" ||
     page === "资料对话" ||
     page === "自适应测评" ||
@@ -16902,6 +16904,14 @@ export default function App() {
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} setChapterFilter={setChapterFilter} currentMaterial={currentMaterial} />;
     if (page === "技能树") return <TreeErrorBoundary><SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} /></TreeErrorBoundary>;
     if (page === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} setChapterFilter={setChapterFilter} />;
+    if (page === "错题工作台") {
+      return (
+        <div style={{ maxWidth: 1480, margin: "0 auto", padding: "0 0 18px" }}>
+          <PageHeader title="错题辅导工作台" subtitle="上传卷子，AI 提取手写答案、批改并联动一对一辅导和知识点讲解" onBack={() => handleSetPage("首页")} />
+          <MistakeWorkbench supabase={supabase} userId={session?.user?.id} existingNotes={{}} />
+        </div>
+      );
+    }
     if (page === "教师管理") return <TeacherPage setPage={handleSetPage} profile={profile} />;
     return null;
   };

@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import katex from "katex";
-import "katex/dist/katex.min.css";
 import { makeQuestionsApi } from "../lib/questionsApi";
+import MathText from "../lib/MathText";
 
 const CSS = `
 .tb-wrap{--ink:#0f1220;--mut:#6b7184;--faint:#9aa0b4;--line:#e7e8ef;--soft:#f0f1f6;--card:#fff;--brand:#4338ca;--brand-soft:#eef0ff;--brand-ink:#3730a3;--amber:#d97706;--amber-soft:#fef3e2;--emerald:#047857;--emerald-soft:#e7f6ef;--rose:#be123c;--rose-soft:#fdeaef;--slate:#475569;--slate-soft:#eef1f5;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:var(--ink);font-family:inherit}
@@ -37,22 +36,17 @@ function useInjectCSS() {
   }, []);
 }
 
-function renderKatex(tex) {
-  try { return katex.renderToString(String(tex || ""), { throwOnError: false, displayMode: false }); }
-  catch { return String(tex || ""); }
-}
-
 function SubQuestion({ text }) {
   const match = String(text).match(/^\s*\(([a-z])\)\s*([\s\S]*)$/i);
   if (match) {
     return (
       <div className="tb-sub">
         <span className="tb-lab">({match[1]})</span>
-        <span dangerouslySetInnerHTML={{ __html: renderKatex(match[2]) }} />
+        <span><MathText text={match[2]} /></span>
       </div>
     );
   }
-  return <div className="tb-sub"><span dangerouslySetInnerHTML={{ __html: renderKatex(text) }} /></div>;
+  return <div className="tb-sub"><span><MathText text={text} /></span></div>;
 }
 
 function Chip({ value, values, setValues }) {
@@ -162,7 +156,7 @@ export default function TextbookBank({ supabase, userId = null, onPractice }) {
                       <span className={`tb-tag tb-s-${q.status}`}>{q.status}</span>
                       <button className={`tb-star${q.starred ? " on" : ""}`} onClick={() => toggleStar(q)}>{q.starred ? "★" : "☆"}</button>
                     </div>
-                    <div className="tb-stem">{q.question}</div>
+                    <div className="tb-stem"><MathText text={q.question} /></div>
                     {(q.subQuestions || []).length > 0 && <div className="tb-subs">{q.subQuestions.map((s, i) => <SubQuestion key={i} text={s} />)}</div>}
                     <div className="tb-acts">
                       <button className="tb-btn primary" onClick={() => onPractice?.([q.id])}>练这道</button>
@@ -175,7 +169,7 @@ export default function TextbookBank({ supabase, userId = null, onPractice }) {
                             {q.answerStatus === "generated" && q.answer ? (
                               <>
                                 <div className="tb-ans-h">解析 {q.confidence === "low" ? "· 待核对" : ""}</div>
-                                <div>{String(q.answer).split("\n").map((line, idx) => <React.Fragment key={idx}>{line}<br /></React.Fragment>)}</div>
+                                <div><MathText text={q.answer} /></div>
                                 {(q.theorems || []).length > 0 && <div className="tb-thm">{q.theorems.map((t, i) => <span key={i} className="tg">{t}</span>)}</div>}
                               </>
                             ) : <span className="tb-pending">答案尚未生成</span>}
