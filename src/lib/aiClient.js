@@ -3,7 +3,7 @@
 
 function getUserAIConfig() {
   try {
-    const provider = localStorage.getItem("mc_ai_provider") || "gemini";
+    const provider = localStorage.getItem("mc_ai_provider") || "volcengine";
     const keys = JSON.parse(localStorage.getItem("mc_ai_keys") || "{}") || {};
     const legacyKey = localStorage.getItem("mc_ai_key") || "";
     return {
@@ -12,7 +12,7 @@ function getUserAIConfig() {
       userCustomUrl: localStorage.getItem("mc_ai_custom_url") || "",
     };
   } catch {
-    return { userProvider: "gemini", userKey: "", userCustomUrl: "" };
+    return { userProvider: "volcengine", userKey: "", userCustomUrl: "" };
   }
 }
 
@@ -74,13 +74,14 @@ async function postGenerate(question, { materialTitle = "题库 AI", conversatio
 export async function callGenerate(input, { json = false, materialTitle = "题库 AI", signal } = {}) {
   if (Array.isArray(input)) {
     const hasVision = input.some((m) => Array.isArray(m?.content) && m.content.some((p) => p?.type === "image_url"));
+    // 视觉请求优先走豆包（HUOSHAN_KEY），用户也可自备 volcengine key
     const visionConfig = () => {
       try {
         const keys = JSON.parse(localStorage.getItem("mc_ai_keys") || "{}") || {};
-        const geminiKey = keys.gemini || "";
-        return geminiKey ? { userProvider: "gemini", userKey: geminiKey } : { userProvider: "gemini" };
+        const vKey = keys.volcengine || keys.doubao || "";
+        return vKey ? { userProvider: "volcengine", userKey: vKey } : { userProvider: "volcengine" };
       } catch {
-        return { userProvider: "gemini" };
+        return { userProvider: "volcengine" };
       }
     };
     const res = await fetch("/api/generate", {
