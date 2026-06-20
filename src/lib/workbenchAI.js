@@ -49,9 +49,10 @@ export async function extractQuestionsFromText(textContent) {
 规则：
 - 跳过非题目内容（标题、姓名、页码、说明等）
 - 矩阵用 $\\begin{pmatrix}...\\end{pmatrix}$，行内公式用 $...$
-- 每个子题（(i)(ii)(iii) 或 (a)(b)(c)）作为独立 item，number 写成 "Q1(i)" 形式
+- 每个子题（(i)(ii)(iii) 或 (a)(b)(c)）作为独立 item，number 写成 "Q2(i)" 形式
+- 重要：如果子题 (ii)/(iii) 引用了 (i) 中定义的矩阵或符号，必须在该子题的 question 中保留那些定义，确保每个 item 独立可读
 
-只输出 JSON：
+只输出 JSON，不要多余文字：
 {"items":[{"number":"Q1","question":"完整题干$公式$"}]}
 
 试卷文字内容：
@@ -62,20 +63,39 @@ ${textContent.slice(0, 8000)}`;
 }
 
 // 解题模式：对单道题生成完整解答
+// 关键设计：{ json: false } 避免把长解答塞进 JSON 字符串（LaTeX 的 \ 和 {} 会破坏 JSON 解析）
+// 格式约定：AI 先输出完整解答，最后一行输出简短的元数据 JSON
 export async function solveQuestion(number, question) {
   const prompt = `你是线性代数老师。请完整解答下面这道题，给出详细分步解析。
 
 【题号】${number}
 【题目】${question}
 
-要求：
-1. solution：完整解题过程，逐步推导，关键步骤不能省略，公式用 $...$（块级公式用 $$...$$）
-2. knowledgePoints：考察的知识点（1-3 个，中文）
-3. chapter：最相关章节（Ch.1 行列式 / Ch.2 矩阵 / Ch.3 线性方程组 / Ch.4 向量空间 / Ch.5 特征值 / Ch.6 内积空间 / Ch.7 二次型）
+输出格式（严格遵守）：
+1. 先写完整解题过程（可以多段，不要放进 JSON）
+2. 最后一行单独输出元数据 JSON，不要加代码块围栏：
+{"knowledgePoints":["知识点1"],"chapter":"Ch.X"}
 
-只输出 JSON：
-{"solution":"完整分步解析","knowledgePoints":["最小二乘法","投影矩阵"],"chapter":"Ch.6"}`;
-  return await callGenerate([{ role: "user", content: prompt }], { json: true, materialTitle: "AI 解题" });
+解题过程要求：
+- 行内公式用 $...$，例：令 $\\lambda$ 为特征值
+- 块级公式单独一行用 $$...$$，例：$$\\det(A - \\lambda I) = 0$$
+- 矩阵写法：$\\begin{pmatrix}1 & 0\\\\0 & 1\\end{pmatrix}$
+- 每步都写清楚，推导不跳步
+- 章节：Ch.1 行列式 / Ch.2 矩阵 / Ch.3 线性方程组 / Ch.4 向量空间 / Ch.5 特征值 / Ch.6 内积空间 / Ch.7 二次型`;
+
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "AI 解题" });
+  if (!raw) return null;
+
+  // 从末尾找元数据 JSON（只有一层花括号，包含 knowledgePoints 字段）
+  const metaMatch = raw.match(/\{[^{}]*"knowledgePoints"[^{}]*\}\s*$/);
+  const meta = metaMatch ? (parseLooseJSON(metaMatch[0]) || {}) : {};
+  const solution = metaMatch ? raw.slice(0, metaMatch.index).trim() : raw.trim();
+
+  return {
+    solution: solution || raw.trim(),
+    knowledgePoints: meta.knowledgePoints || [],
+    chapter: meta.chapter || "",
+  };
 }
 
 export async function extractPaper(dataURI, layout = "together") {

@@ -73,7 +73,7 @@ const CSS = `
 .pp-badge{font-family:ui-monospace,monospace;font-size:11px;padding:2px 8px;border-radius:6px}
 .pp-b-correct{background:var(--emerald-soft);color:var(--emerald)}.pp-b-wrong{background:var(--rose-soft);color:var(--rose)}
 .pp-b-low{background:var(--amber-soft);color:var(--amber)}.pp-b-kp{background:var(--brand-soft);color:#3730a3}
-.pp-b-solving{background:#f0f1f6;color:var(--mut)}.pp-b-solved{background:var(--emerald-soft);color:var(--emerald)}
+.pp-b-solving{background:#f0f1f6;color:var(--mut)}.pp-b-solved{background:var(--emerald-soft);color:var(--emerald)}.pp-b-failed{background:var(--rose-soft);color:var(--rose)}
 .pp-q{font-size:14px;margin-bottom:6px}.pp-ans{font-size:13px;color:var(--mut)}
 .pp-ans .lab{font-family:ui-monospace,monospace;font-size:11px;color:var(--faint);margin-right:6px}
 .pp-sol{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:13px}
@@ -354,18 +354,32 @@ function SolvePanel() {
         setStatus(`解题中 ${i + 1}/${questions.length}：${q.number}…`);
         try {
           const result = await solveQuestion(q.number, q.question);
+          const ok = result?.solution && result.solution.trim().length > 10;
           setItems((prev) => prev.map((x, idx) =>
-            idx === i ? { ...x, solution: result?.solution || "（解题失败，请重试）", knowledgePoints: result?.knowledgePoints || [], chapter: result?.chapter || "", solving: false } : x
+            idx === i ? { ...x, solution: ok ? result.solution : null, knowledgePoints: result?.knowledgePoints || [], chapter: result?.chapter || "", solving: false, failed: !ok } : x
           ));
         } catch {
           setItems((prev) => prev.map((x, idx) =>
-            idx === i ? { ...x, solution: "（出错，请重试）", solving: false } : x
+            idx === i ? { ...x, solution: null, solving: false, failed: true } : x
           ));
         }
       }
       setStatus(`全部解答完成，共 ${questions.length} 道题。`);
     } catch (err) {
       setStatus("出错：" + (err.message || err));
+    }
+  }, []);
+
+  const retryItem = useCallback(async (idx, item) => {
+    setItems((prev) => prev.map((x, i) => i === idx ? { ...x, solving: true, failed: false } : x));
+    try {
+      const result = await solveQuestion(item.number, item.question);
+      const ok = result?.solution && result.solution.trim().length > 10;
+      setItems((prev) => prev.map((x, i) =>
+        i === idx ? { ...x, solution: ok ? result.solution : null, knowledgePoints: result?.knowledgePoints || [], chapter: result?.chapter || "", solving: false, failed: !ok } : x
+      ));
+    } catch {
+      setItems((prev) => prev.map((x, i) => i === idx ? { ...x, solving: false, failed: true } : x));
     }
   }, []);
 
@@ -390,9 +404,14 @@ function SolvePanel() {
                 <span className="pp-num">{item.number || `#${idx + 1}`}</span>
                 {item.solving
                   ? <span className="pp-badge pp-b-solving">解题中…</span>
-                  : <span className="pp-badge pp-b-solved">已解答</span>}
+                  : item.failed
+                    ? <span className="pp-badge pp-b-failed">解题失败</span>
+                    : <span className="pp-badge pp-b-solved">已解答</span>}
                 {item.chapter && <span className="pp-badge pp-b-kp">{item.chapter}</span>}
                 {(item.knowledgePoints || []).slice(0, 1).map((pt) => <span key={pt} className="pp-badge pp-b-kp">{pt}</span>)}
+                {item.failed && !item.solving && (
+                  <button className="pp-btn mini" style={{ marginLeft: "auto" }} onClick={() => retryItem(idx, item)}>重试</button>
+                )}
               </div>
               <div className="pp-q"><MathText text={item.question} /></div>
               {!item.solving && item.solution && (
