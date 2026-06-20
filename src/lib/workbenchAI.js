@@ -11,6 +11,7 @@ async function callVision(dataURI, promptText, { json = true } = {}) {
   return json ? parseLooseJSON(content) : content;
 }
 
+// 批改模式：题目 + 学生手写答案都有
 export async function extractPaperFromText(textContent, layout = "together") {
   const layoutHint = layout === "separate"
     ? "题目和答案是分开的：可能题目在前半段，学生手写答案在后半段或另一区域。请按题号把题目和答案配对。"
@@ -21,23 +22,60 @@ export async function extractPaperFromText(textContent, layout = "together") {
 ${layoutHint}
 
 要提取：
-1. 题号 number
-2. 题目原文 question
-3. 学生的答案 studentAnswer（如果没写，填空字符串）
-4. 置信度 answerConfidence：文字清晰 high，内容缺失/无法分辨 low
+1. 题号 number（如 "1"、"Q2"、"(i)" 等）
+2. 题目原文 question（完整题干，公式用 $...$ LaTeX）
+3. 学生的答案 studentAnswer（没有则填空字符串）
+4. 置信度 answerConfidence：文字清晰 high，内容缺失 low
 
-要求：
-- 公式用 $...$ 包裹的 LaTeX
-- 跳过非题目内容（姓名、班级、页码等）
-- 只输出 JSON，无多余文字：
-
-{"items":[{"number":"1","question":"题目$公式$","studentAnswer":"学生答案","answerConfidence":"high"}]}
+规则：跳过姓名/班级/页码等非题目内容；子题作为独立 item 输出。
+只输出 JSON，无多余文字：
+{"items":[{"number":"1","question":"题目$公式$","studentAnswer":"","answerConfidence":"high"}]}
 
 卷子文字内容：
 ${textContent.slice(0, 8000)}`;
 
   const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "卷子文字提取" });
   return parseLooseJSON(raw)?.items || [];
+}
+
+// 解题模式：只有题目，无学生答案，直接解题
+export async function extractQuestionsFromText(textContent) {
+  const prompt = `你是数学老师。下面是从 PDF 提取的试卷/作业文字内容，请识别每道题目并整理。
+
+要提取：
+1. 题号 number（如 "Q1"、"Q2(i)"、"1" 等，子题单独列出）
+2. 完整题目 question（保持原题干，公式用 $...$ LaTeX）
+
+规则：
+- 跳过非题目内容（标题、姓名、页码、说明等）
+- 矩阵用 $\\begin{pmatrix}...\\end{pmatrix}$，行内公式用 $...$
+- 每个子题（(i)(ii)(iii) 或 (a)(b)(c)）作为独立 item，number 写成 "Q1(i)" 形式
+
+只输出 JSON：
+{"items":[{"number":"Q1","question":"完整题干$公式$"}]}
+
+试卷文字内容：
+${textContent.slice(0, 8000)}`;
+
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "题目提取" });
+  return parseLooseJSON(raw)?.items || [];
+}
+
+// 解题模式：对单道题生成完整解答
+export async function solveQuestion(number, question) {
+  const prompt = `你是线性代数老师。请完整解答下面这道题，给出详细分步解析。
+
+【题号】${number}
+【题目】${question}
+
+要求：
+1. solution：完整解题过程，逐步推导，关键步骤不能省略，公式用 $...$（块级公式用 $$...$$）
+2. knowledgePoints：考察的知识点（1-3 个，中文）
+3. chapter：最相关章节（Ch.1 行列式 / Ch.2 矩阵 / Ch.3 线性方程组 / Ch.4 向量空间 / Ch.5 特征值 / Ch.6 内积空间 / Ch.7 二次型）
+
+只输出 JSON：
+{"solution":"完整分步解析","knowledgePoints":["最小二乘法","投影矩阵"],"chapter":"Ch.6"}`;
+  return await callGenerate([{ role: "user", content: prompt }], { json: true, materialTitle: "AI 解题" });
 }
 
 export async function extractPaper(dataURI, layout = "together") {
