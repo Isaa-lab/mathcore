@@ -819,6 +819,8 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
           const url = part.image_url?.url || "";
           const m = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(url);
           if (m) return { inlineData: { mimeType: m[1], data: m[2] } };
+          // https:// URL — Gemini accepts fileData with direct URL
+          if (url.startsWith("http")) return { fileData: { mimeType: "image/jpeg", fileUri: url } };
         }
         return null;
       }).filter(Boolean);

@@ -14,6 +14,18 @@ export function makeWorkbenchApi(supabase) {
     return paths;
   }
 
+  // Upload a single image file and return a signed URL (valid 2 hours).
+  // The URL is passed directly to the AI instead of base64 — no giant payload through Vercel.
+  async function uploadAndGetSignedUrl(file, userId) {
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+    const path = `${userId}/vision/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error } = await supabase.storage.from("papers").upload(path, file, { cacheControl: "7200", upsert: false });
+    if (error) throw new Error("上传失败: " + error.message);
+    const { data, error: signErr } = await supabase.storage.from("papers").createSignedUrl(path, 7200);
+    if (signErr) throw new Error("签名失败: " + signErr.message);
+    return data.signedUrl;
+  }
+
   async function imageToDataURI(path) {
     const { data, error } = await supabase.storage.from("papers").download(path);
     if (error || !data) return null;
@@ -95,6 +107,7 @@ export function makeWorkbenchApi(supabase) {
   }
 
   return {
+    uploadAndGetSignedUrl,
     uploadImages,
     imageToDataURI,
     createPaper,
