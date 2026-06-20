@@ -203,7 +203,16 @@ const CSS = `
 .pp-sol{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:13px}
 .pp-sol-hd{font-family:ui-monospace,monospace;font-size:11px;color:var(--emerald);margin-bottom:4px;display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
 .pp-sol-body{line-height:1.8;color:var(--ink)}
-.pp-edit{width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px;margin-top:4px;outline:none}.pp-edit:focus{border-color:var(--brand)}
+.pp-edit{width:100%;border:1px solid var(--line);border-radius:8px;padding:7px 9px;font:inherit;font-size:13px;margin-top:4px;outline:none;resize:vertical;min-height:52px}.pp-edit:focus{border-color:var(--brand)}
+.pp-preview{background:var(--brand-soft);border:1px solid #dfe2ff;border-radius:8px;padding:7px 10px;margin-top:6px;font-size:13px;color:#3730a3;line-height:1.7}
+.pp-preview-label{font-family:ui-monospace,monospace;font-size:10px;color:var(--mut);display:block;margin-bottom:3px}
+.pp-ans-val{padding:4px 8px;border-radius:7px;cursor:pointer;transition:.12s;line-height:1.7;display:inline-block;min-width:40px}
+.pp-ans-val:hover{background:var(--soft)}
+.pp-ans-val.unconfirmed{background:var(--amber-soft);border:1px dashed var(--amber);border-radius:7px;padding:5px 10px}
+.pp-ans-val .pp-edit-hint{font-family:ui-monospace,monospace;font-size:10px;color:var(--faint);margin-left:6px;opacity:0;transition:.12s}
+.pp-ans-val:hover .pp-edit-hint{opacity:1}
+.pp-ans-empty{color:var(--faint);font-style:italic}
+.pp-grade-warn{font-size:12px;color:var(--amber);background:var(--amber-soft);border-radius:7px;padding:5px 10px;margin-top:6px;text-align:center}
 .pp-actions{display:flex;gap:6px;margin-top:9px}
 .pp-btn{font-size:12px;border:1px solid var(--line);background:#fff;color:#3a3f55;border-radius:7px;padding:5px 10px;cursor:pointer;font-family:inherit}
 .pp-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}.pp-btn.mini{padding:3px 8px;font-size:11px}
@@ -504,7 +513,17 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
           <div className="pp-prog-wrap"><div className="pp-prog-bar" style={{ width: `${progress}%` }} /></div>
         </>
       )}
-      {needGrade && <button className="pp-btn primary" style={{ marginTop: 8 }} onClick={gradeAll}>全部批改（判对错 + 分析）</button>}
+      {needGrade && (() => {
+        const unconfirmed = items.filter((x) => x.is_correct === null && x.answer_confidence === "low" && !x.reviewed).length;
+        return (
+          <>
+            {unconfirmed > 0 && (
+              <div className="pp-grade-warn">⚠ {unconfirmed} 道题答案待确认，建议先核对再批改</div>
+            )}
+            <button className="pp-btn primary" style={{ marginTop: 6 }} onClick={gradeAll}>全部批改（判对错 + 分析）</button>
+          </>
+        );
+      })()}
 
       <div className="pp-list">
         {items.length === 0
@@ -513,31 +532,51 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
             const isWrong = item.is_correct === false;
             const isRight = item.is_correct === true;
             const isEditing = editing === item.id;
+            const needsConfirm = item.answer_confidence === "low" && !item.reviewed;
             return (
               <div key={item.id} className={"pp-item clickable" + (activeItemId === item.id ? " active" : "") + (isWrong ? " wrong" : isRight ? " correct" : "")} onClick={() => item.is_correct !== null && onSelectItem?.(item)}>
                 <div className="pp-ih">
                   <span className="pp-num">#{item.number || "—"}</span>
                   {isWrong && <span className="pp-badge pp-b-wrong">错</span>}
                   {isRight && <span className="pp-badge pp-b-correct">对</span>}
-                  {item.answer_confidence === "low" && <span className="pp-badge pp-b-low">字迹待确认</span>}
+                  {needsConfirm && <span className="pp-badge pp-b-low">字迹待确认</span>}
                   {(item.knowledge_points || []).slice(0, 1).map((pt) => <span key={pt} className="pp-badge pp-b-kp">{pt}</span>)}
                   {item.is_correct !== null && <button className="pp-flip" onClick={(e) => { e.stopPropagation(); flipCorrect(item); }}>判错了？翻转</button>}
                 </div>
                 <div className="pp-q"><MathText text={item.question} /></div>
                 <div className="pp-ans">
-                  <span className="lab">我的答案</span>
+                  <div className="lab">我的答案</div>
                   {isEditing ? (
                     <>
-                      <textarea className="pp-edit" value={draft} onClick={(e) => e.stopPropagation()} onChange={(e) => setDraft(e.target.value)} />
+                      <textarea
+                        className="pp-edit"
+                        value={draft}
+                        placeholder="输入答案，数学公式用 $...$，如 $x=3$"
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setDraft(e.target.value)}
+                      />
+                      {draft.trim() && (
+                        <div className="pp-preview">
+                          <span className="pp-preview-label">渲染预览</span>
+                          <MathText text={draft} />
+                        </div>
+                      )}
                       <div className="pp-actions">
-                        <button className="pp-btn mini primary" onClick={(e) => { e.stopPropagation(); saveAnswer(item); }}>保存</button>
+                        <button className="pp-btn mini primary" onClick={(e) => { e.stopPropagation(); saveAnswer(item); }}>确认答案</button>
                         <button className="pp-btn mini" onClick={(e) => { e.stopPropagation(); setEditing(null); }}>取消</button>
                       </div>
                     </>
                   ) : (
-                    <span onClick={(e) => { e.stopPropagation(); setEditing(item.id); setDraft(item.student_answer || ""); }} style={{ cursor: "text" }}>
-                      <MathText text={item.student_answer || "(空白，点击补充)"} />
-                    </span>
+                    <div
+                      className={"pp-ans-val" + (needsConfirm ? " unconfirmed" : "")}
+                      onClick={(e) => { e.stopPropagation(); setEditing(item.id); setDraft(item.student_answer || ""); }}
+                    >
+                      {item.student_answer
+                        ? <MathText text={item.student_answer} />
+                        : <span className="pp-ans-empty">空白，点击补充</span>
+                      }
+                      <span className="pp-edit-hint">✏ 点击修改</span>
+                    </div>
                   )}
                 </div>
               </div>
