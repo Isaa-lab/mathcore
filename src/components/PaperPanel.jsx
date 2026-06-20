@@ -31,12 +31,14 @@ async function pdfToImageURIs(file, onProgress) {
   for (let i = 1; i <= pdf.numPages; i++) {
     onProgress?.(`${file.name} 第 ${i}/${pdf.numPages} 页渲染…`);
     const page = await pdf.getPage(i);
-    const viewport = page.getViewport({ scale: 2.0 });
+    const rawViewport = page.getViewport({ scale: 1 });
+    const scale = Math.min(1.4, 1400 / rawViewport.width);
+    const viewport = page.getViewport({ scale });
     const canvas = document.createElement("canvas");
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-    uris.push(canvas.toDataURL("image/jpeg", 0.88));
+    uris.push(canvas.toDataURL("image/jpeg", 0.72));
   }
   return uris;
 }

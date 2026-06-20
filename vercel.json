@@ -1,6 +1,7 @@
 {
   "functions": {
-    "api/generate.js": { "maxDuration": 60 },
-    "api/extract.js": { "maxDuration": 60 }
+    "api/generate.js": {
+      "maxDuration": 60
+    }
   }
 }
