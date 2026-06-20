@@ -17014,15 +17014,15 @@ export default function App() {
                     initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                     transition={{ duration: 0.25 }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", borderBottom: "1px solid #e7e8ef", background: "#fff", flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", borderBottom: "1px solid #e7e8ef", background: "#fff" }}>
                       <button onClick={exitMaterial}
                         style={{ border: "1px solid #e7e8ef", background: "#fff", borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", flexShrink: 0 }}>
                         ← 教材画廊
                       </button>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: "#3a3f55", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 260, flexShrink: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13.5, color: "#3a3f55", flexShrink: 1, minWidth: 0 }}>
                         {currentMaterial.title || "线性代数"}
                       </div>
-                      <div style={{ display: "flex", gap: 6, marginLeft: 4 }}>
+                      <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
                         {[
                           { key: "工作台", label: "错题工作台" },
                           { key: "知识点", label: "知识点" },
@@ -17032,24 +17032,24 @@ export default function App() {
                           return (
                             <button key={t.key} onClick={() => setStudyTab(t.key)}
                               style={{
-                                border: on ? "1px solid #4338ca" : "1px solid #e7e8ef",
-                                background: on ? "#4338ca" : "#fff",
-                                color: on ? "#fff" : "#3a3f55",
-                                borderRadius: 8, padding: "6px 12px", cursor: "pointer",
+                                border: on ? "1px solid #9e6060" : "1px solid #e7e8ef",
+                                background: on ? "#9e6060" : "#fff",
+                                color: on ? "#fff" : "#5a4f4f",
+                                borderRadius: 8, padding: "6px 13px", cursor: "pointer",
                                 fontSize: 12.5, fontWeight: 600, transition: "0.12s", fontFamily: "inherit", whiteSpace: "nowrap",
                               }}>
                               {t.label}
                             </button>
                           );
                         })}
+                        <button onClick={() => setSandboxPreviewing(true)}
+                          style={{ border: "1px solid #e7e8ef", background: "#fff", borderRadius: 8, padding: "6px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", flexShrink: 0, color: "#3a3f55" }}>
+                          📖 查看 PDF
+                        </button>
                       </div>
-                      <button onClick={() => setSandboxPreviewing(true)}
-                        style={{ marginLeft: "auto", border: "1px solid #e7e8ef", background: "#fff", borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", flexShrink: 0 }}>
-                        📖 查看 PDF
-                      </button>
                     </div>
 
-                    <div style={{ flex: 1, overflow: "auto", padding: "16px 24px" }}>
+                    <div style={{ flex: 1, overflow: "auto", padding: "10px 16px" }}>
                       {(studyTab || "工作台") === "工作台" ? (
                         <MistakeWorkbench
                           supabase={supabase}
