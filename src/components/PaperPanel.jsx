@@ -167,23 +167,56 @@ async function extractAnswersFromFiles(files, onProgress, wb, userId) {
   return answers;
 }
 
-// 按题号合并题目和答案
+// 题号归一化：让 "Q2(i)"、"2.(i)"、"2 (I)" 都映射到同一个 key "2-i"
+// 处理：去 Q/第/题 前缀、罗马数字大小写、括号/点/空白统一为 "-"
+function canonicalNumber(raw) {
+  let s = String(raw || "").trim().toLowerCase();
+  if (!s) return "";
+  s = s.replace(/^(?:q|第|题|no\.?|#)\s*/i, "");        // 去前缀
+  s = s.replace(/[（）()\[\]{}.．、]+/g, "-");            // 各类括号/点 → -
+  s = s.replace(/\s+/g, "-");                            // 空白 → -
+  s = s.replace(/-+/g, "-").replace(/^-|-$/g, "");       // 收敛多余的 -
+  return s;
+}
+
+// 按题号合并题目和答案；题号对不上时按出现顺序兜底对齐
 function mergeQuestionsAnswers(questions, answers) {
   const ansMap = {};
   for (const a of answers) {
-    const key = String(a.number || "").trim().toLowerCase();
-    if (key) ansMap[key] = { studentAnswer: a.studentAnswer || "", answerConfidence: a.answerConfidence || "high" };
+    const key = canonicalNumber(a.number);
+    if (key && !(key in ansMap)) {
+      ansMap[key] = { studentAnswer: a.studentAnswer || "", answerConfidence: a.answerConfidence || "high", _used: false };
+    }
   }
-  return questions.map((q) => {
-    const key = String(q.number || "").trim().toLowerCase();
-    const ans = ansMap[key] || {};
+  // 第一轮：按归一化题号精确匹配
+  const merged = questions.map((q) => {
+    const key = canonicalNumber(q.number);
+    const ans = ansMap[key];
+    if (ans) ans._used = true;
     return {
       number: q.number,
       question: q.question,
-      studentAnswer: ans.studentAnswer ?? (q.studentAnswer || ""),
-      answerConfidence: ans.answerConfidence ?? (q.answerConfidence || "low"),
+      studentAnswer: ans ? ans.studentAnswer : (q.studentAnswer || ""),
+      answerConfidence: ans ? ans.answerConfidence : (q.answerConfidence || "low"),
+      _matched: !!ans,
     };
   });
+  // 第二轮：把没匹配上的答案，按出现顺序填进还空着的题（标低置信度待确认）
+  const leftover = answers.filter((a) => {
+    const k = canonicalNumber(a.number);
+    return !k || !ansMap[k] || !ansMap[k]._used;
+  });
+  let li = 0;
+  for (const item of merged) {
+    // 只填"没精确匹配上、且当前还空着"的题
+    if (!item._matched && !item.studentAnswer && li < leftover.length) {
+      item.studentAnswer = leftover[li].studentAnswer || "";
+      item.answerConfidence = "low"; // 顺序兜底的不可全信，强制人工核对
+      li++;
+    }
+    delete item._matched;
+  }
+  return merged;
 }
 
 // ── CSS ──────────────────────────────────────────────────────────────────────
@@ -258,6 +291,7 @@ const CSS = `
 .pp-rvi-num{font-family:ui-monospace,monospace;font-size:11px;color:var(--faint);margin-bottom:6px;font-weight:600}
 .pp-rvi-field{margin-bottom:8px}
 .pp-rvi-label{font-family:ui-monospace,monospace;font-size:10px;color:var(--faint);margin-bottom:3px}
+.pp-rvi-warn{color:var(--amber)}
 .pp-rvi textarea.pp-edit{min-height:40px;font-size:12px}
 .pp-rvi .pp-preview{margin-top:4px;padding:5px 8px;font-size:12px}
 .pp-rv-foot{display:flex;gap:8px;flex-shrink:0;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--line)}
@@ -286,9 +320,11 @@ function ReviewItemEditor({ item, onChange }) {
         {(item.question || "").trim() && <div className="pp-preview"><span className="pp-preview-label">预览</span><MathText text={item.question} /></div>}
       </div>
       <div className="pp-rvi-field">
-        <div className="pp-rvi-label">学生答案</div>
+        <div className="pp-rvi-label">学生答案{item.answerConfidence === "low" && (item.studentAnswer || "").trim() && <span className="pp-rvi-warn"> · 字迹待确认</span>}</div>
         <textarea className="pp-edit" rows={2} value={item.studentAnswer || ""} onChange={e => onChange({ ...item, studentAnswer: e.target.value })} />
-        {(item.studentAnswer || "").trim() && <div className="pp-preview"><span className="pp-preview-label">预览</span><MathText text={item.studentAnswer} /></div>}
+        {(item.studentAnswer || "").trim()
+          ? <div className="pp-preview"><span className="pp-preview-label">预览</span><MathText text={item.studentAnswer} /></div>
+          : <div className="pp-grade-warn">⚠ 未识别到答案——请对照左侧原图手动补充，或确认该题确实空白</div>}
       </div>
     </div>
   );

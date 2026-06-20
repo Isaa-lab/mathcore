@@ -126,23 +126,24 @@ ${layoutHint}
 
 // 从手写答案图片提取答案列表（分开模式专用）
 export async function extractAnswersFromImage(dataURI) {
-  const prompt = `你是专业的数学卷子 OCR 助手。这张图片是学生的手写答案页（没有题目，只有答案）。
+  const prompt = `你是专业的数学卷子 OCR 助手。这张图片是学生的**手写答案页**——整页可能包含多道题的解答，但**没有印刷题目**。
 
-任务：逐题识别题号和学生写下的答案内容。
+任务：把这一页按题号切分成多条，逐题识别学生写下的完整解答。
 
 【识别规则】
-1. 题号 number：原样保留，如 "1"、"2"、"(i)"、"Q3(b)" 等
-2. 答案 studentAnswer：
-   - 尽力识别手写内容，哪怕字迹潦草
-   - 数学符号和公式用 $...$ LaTeX（如 $x=3$、$\\begin{pmatrix}1\\\\2\\end{pmatrix}$）
-   - 如果完全空白（学生未作答），填空字符串 ""
-   - 不要因为字迹模糊就放弃——猜出大意也比空白好
-3. 置信度 answerConfidence：字迹清晰易读 → "high"；潦草但能辨认 → "low"；完全空白 → "low"
+1. 这一页通常有多道题（如 1、2、3…，含子题 (i)(ii)(iii) 或 (a)(b)(c)）。每个独立题号/子题输出为一条 item，**不要把整页合并成一条**。
+2. 题号 number：**原样保留学生写的编号**，如 "1"、"2(i)"、"3(b)"。不要自己加 "Q" 前缀，也不要改写。
+3. 答案 studentAnswer：把该题号下学生写的**全部手写过程**都放进来——每一步推导、每个中间式、最终结论，一步都不要省。
+   - 多行内容用 \\n 分隔，保留学生的推导顺序。
+   - 数学符号/公式用 $...$ LaTeX；矩阵用 $\\begin{pmatrix}...\\end{pmatrix}$，行列式用 $\\begin{vmatrix}...\\end{vmatrix}$。
+   - 字迹潦草也要尽力辨认，猜出大意也比空白好；完全没作答才填 ""。
+4. 【绝对禁止】不要凭手写过程反推、编造或补全"题目"——你的任务只有识别学生写了什么，question 字段一律不要输出。
+5. 置信度 answerConfidence：清晰易读 → "high"；潦草但能辨认 → "low"；空白 → "low"。
 
 【重要】即使只有一道题，也要输出 items 数组。不要输出任何多余解释。
 
 只输出 JSON：
-{"items":[{"number":"1","studentAnswer":"手写内容","answerConfidence":"high"}]}`;
+{"items":[{"number":"1","studentAnswer":"$C X = Y$\\n$X^T X C = X^T Y$\\n... 最终 $C_0=6/7,\\ C_1=15/14$","answerConfidence":"high"},{"number":"2(i)","studentAnswer":"...","answerConfidence":"low"}]}`;
   const data = await callVision(dataURI, prompt);
   return data?.items || [];
 }

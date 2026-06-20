@@ -960,6 +960,12 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     }
   }
 
+  // Priority 1.8: 视觉请求优先 Gemini 官方（原生 inlineData）
+  // 手写数学 OCR（矩阵 / 多步推导）准确率远高于豆包 mini；豆包降为后备。
+  if (!responseText && hasVisionMessages && GEMINI_KEY) {
+    responseText = await callGeminiOfficial(GEMINI_KEY) || "";
+  }
+
   // Priority 2: 火山引擎豆包（主力 server key，HUOSHAN_KEY）
   // 若 Priority 1.5 已经用平台 key 尝试过 volcengine，跳过避免重复超时（尤其视觉请求）
   const volcengineAlreadyTried = !hasUserKey && (userProvider === "volcengine" || userProvider === "doubao");
