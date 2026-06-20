@@ -755,8 +755,8 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   // Vercel Hobby = 10s 硬超时，超过会返回 HTML 错误页（前端解析失败就全归到 5xx）。
   // 这里每个 provider 最多 8s；整个 handler 用 startedAt 追剩余预算，绝不超出。
   const HANDLER_BUDGET_MS = 55000; // Pro plan 60s；视觉识别需要足够时间
-  // 视觉请求（图片 OCR）耗时远超纯文本；给 24s；文本对话 8s；生成类 14s
-  const PER_PROVIDER_MS = hasVisionMessages ? 24000 : isChatMode ? 8000 : 14000;
+  // 视觉请求（图片 OCR）耗时远超纯文本；给 45s；文本对话 8s；生成类 14s
+  const PER_PROVIDER_MS = hasVisionMessages ? 45000 : isChatMode ? 8000 : 14000;
   const startedAt = Date.now();
   const remainingBudget = () => Math.max(0, HANDLER_BUDGET_MS - (Date.now() - startedAt));
   const providerDiag = []; // 每个 provider 的诊断信息，失败时一并返回给前端
@@ -896,6 +896,8 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   const callProviderWithKey = async (pid, k, source /* "user" | "server" */) => {
     const tagSrc = source === "server" ? "server" : "user";
     if (pid === "groq") {
+      // Groq LLaMA 模型不支持视觉，vision 请求直接跳过，避免浪费时间拿 400
+      if (hasVisionMessages) { providerDiag.push(`groq(${tagSrc}): skipped(no_vision_support)`); return ""; }
       const primary  = isChatMode ? GROQ_CHAT_MODEL : GROQ_GEN_MODEL;
       const fallback = isChatMode ? GROQ_GEN_MODEL : GROQ_CHAT_MODEL;
       let out = await callOpenAICompat("https://api.groq.com/openai/v1", k, primary, `groq(${tagSrc}):${primary}`) || "";
@@ -903,10 +905,14 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
       return out;
     }
     if (pid === "deepseek") {
+      // DeepSeek 纯文本模型，不支持视觉
+      if (hasVisionMessages) { providerDiag.push(`deepseek(${tagSrc}): skipped(no_vision_support)`); return ""; }
       return await callOpenAICompat("https://api.deepseek.com", k, "deepseek-chat", `deepseek(${tagSrc})`) || "";
     }
     if (pid === "kimi") {
-      return await callOpenAICompat("https://api.moonshot.cn/v1", k, "moonshot-v1-8k", `kimi(${tagSrc})`) || "";
+      // Kimi moonshot-v1-vision-preview 支持视觉
+      const model = hasVisionMessages ? "moonshot-v1-vision-preview" : "moonshot-v1-8k";
+      return await callOpenAICompat("https://api.moonshot.cn/v1", k, model, `kimi(${tagSrc})`) || "";
     }
     if (pid === "gemini") {
       if (hasVisionMessages) {
@@ -962,13 +968,13 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     responseText = await callOpenAICompat(VOLCENGINE_BASE, VOLCENGINE_KEY, model, `volcengine(server):${model}`) || "";
   }
 
-  // Priority 3: server DeepSeek
-  if (!responseText && DEEPSEEK_KEY) {
+  // Priority 3: server DeepSeek（纯文本，vision 跳过）
+  if (!responseText && DEEPSEEK_KEY && !hasVisionMessages) {
     responseText = await callOpenAICompat("https://api.deepseek.com", DEEPSEEK_KEY, "deepseek-chat", "deepseek(server)") || "";
   }
 
-  // Priority 4: server Groq
-  if (!responseText && GROQ_KEY) {
+  // Priority 4: server Groq（纯文本，vision 跳过）
+  if (!responseText && GROQ_KEY && !hasVisionMessages) {
     const primary = isChatMode ? GROQ_CHAT_MODEL : GROQ_GEN_MODEL;
     responseText = await callOpenAICompat("https://api.groq.com/openai/v1", GROQ_KEY, primary, `groq(server):${primary}`) || "";
     const fallback = isChatMode ? GROQ_GEN_MODEL : GROQ_CHAT_MODEL;
