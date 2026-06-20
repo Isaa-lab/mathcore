@@ -145,23 +145,23 @@ async function extractFromFiles(files, mode, onProgress, wb, userId) {
   return items;
 }
 
-// 从答案文件提取答案列表
-async function extractAnswersFromFiles(files, onProgress, wb, userId) {
+// 从答案文件提取答案列表。questionNumbers：已知题号清单，传给 OCR 做对号入座。
+async function extractAnswersFromFiles(files, onProgress, wb, userId, questionNumbers = []) {
   let answers = [];
   for (const f of files) {
     onProgress?.(`识别答案 ${f.name}…`);
     if (f.type === "application/pdf") {
       const text = await pdfToText(f, onProgress);
       if (text.replace(/\s+/g, "").length >= MIN_TEXT_DENSITY) {
-        answers = answers.concat(await extractAnswersFromText(text));
+        answers = answers.concat(await extractAnswersFromText(text, questionNumbers));
       } else {
         const uris = await pdfToImageURIs(f, onProgress);
-        for (const uri of uris) answers = answers.concat(await extractAnswersFromImage(uri));
+        for (const uri of uris) answers = answers.concat(await extractAnswersFromImage(uri, questionNumbers));
       }
     } else {
       onProgress?.(`处理手写答案 ${f.name}…`);
       const imgUrl = await getAnswerImageForAI(f, wb, userId);
-      if (imgUrl) answers = answers.concat(await extractAnswersFromImage(imgUrl));
+      if (imgUrl) answers = answers.concat(await extractAnswersFromImage(imgUrl, questionNumbers));
     }
   }
   return answers;
@@ -179,44 +179,26 @@ function canonicalNumber(raw) {
   return s;
 }
 
-// 按题号合并题目和答案；题号对不上时按出现顺序兜底对齐
+// 按归一化题号合并题目和答案。
+// 不做"按顺序兜底对齐"——那会静默配错（如把 2(ii) 的答案挂到 Q1）。
+// 对不上的题留空，由用户在校对界面用「对应答案」下拉手动指认。
 function mergeQuestionsAnswers(questions, answers) {
   const ansMap = {};
   for (const a of answers) {
     const key = canonicalNumber(a.number);
-    if (key && !(key in ansMap)) {
-      ansMap[key] = { studentAnswer: a.studentAnswer || "", answerConfidence: a.answerConfidence || "high", _used: false };
+    if (key && key !== "?" && !(key in ansMap)) {
+      ansMap[key] = { studentAnswer: a.studentAnswer || "", answerConfidence: a.answerConfidence || "high" };
     }
   }
-  // 第一轮：按归一化题号精确匹配
-  const merged = questions.map((q) => {
-    const key = canonicalNumber(q.number);
-    const ans = ansMap[key];
-    if (ans) ans._used = true;
+  return questions.map((q) => {
+    const ans = ansMap[canonicalNumber(q.number)];
     return {
       number: q.number,
       question: q.question,
       studentAnswer: ans ? ans.studentAnswer : (q.studentAnswer || ""),
       answerConfidence: ans ? ans.answerConfidence : (q.answerConfidence || "low"),
-      _matched: !!ans,
     };
   });
-  // 第二轮：把没匹配上的答案，按出现顺序填进还空着的题（标低置信度待确认）
-  const leftover = answers.filter((a) => {
-    const k = canonicalNumber(a.number);
-    return !k || !ansMap[k] || !ansMap[k]._used;
-  });
-  let li = 0;
-  for (const item of merged) {
-    // 只填"没精确匹配上、且当前还空着"的题
-    if (!item._matched && !item.studentAnswer && li < leftover.length) {
-      item.studentAnswer = leftover[li].studentAnswer || "";
-      item.answerConfidence = "low"; // 顺序兜底的不可全信，强制人工核对
-      li++;
-    }
-    delete item._matched;
-  }
-  return merged;
 }
 
 // ── CSS ──────────────────────────────────────────────────────────────────────
@@ -292,6 +274,8 @@ const CSS = `
 .pp-rvi-field{margin-bottom:8px}
 .pp-rvi-label{font-family:ui-monospace,monospace;font-size:10px;color:var(--faint);margin-bottom:3px}
 .pp-rvi-warn{color:var(--amber)}
+.pp-rvi-pick{width:100%;border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;font-size:12px;margin-bottom:4px;background:#fff;color:var(--ink);cursor:pointer;outline:none}
+.pp-rvi-pick:focus{border-color:var(--brand)}
 .pp-rvi textarea.pp-edit{min-height:40px;font-size:12px}
 .pp-rvi .pp-preview{margin-top:4px;padding:5px 8px;font-size:12px}
 .pp-rv-foot{display:flex;gap:8px;flex-shrink:0;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--line)}
@@ -310,7 +294,15 @@ function useCSS() {
 }
 
 // ── 校对阶段：单题编辑器 ─────────────────────────────────────────────────────
-function ReviewItemEditor({ item, onChange }) {
+// 取答案前若干字做下拉里的预览标签（去掉 LaTeX 噪音）
+function answerSnippet(s) {
+  const t = String(s || "").replace(/\$+/g, "").replace(/\\[a-zA-Z]+/g, "").replace(/\s+/g, " ").trim();
+  return t ? t.slice(0, 36) + (t.length > 36 ? "…" : "") : "（空白）";
+}
+
+function ReviewItemEditor({ item, answers = [], onChange }) {
+  // 当前答案对应原始 OCR 段的下标（-1 表示手动/未指认）
+  const matchedIdx = answers.findIndex((a) => (a.studentAnswer || "") === (item.studentAnswer || "") && (item.studentAnswer || "").trim());
   return (
     <div className="pp-rvi">
       <div className="pp-rvi-num">#{item.number || "?"}</div>
@@ -320,11 +312,29 @@ function ReviewItemEditor({ item, onChange }) {
         {(item.question || "").trim() && <div className="pp-preview"><span className="pp-preview-label">预览</span><MathText text={item.question} /></div>}
       </div>
       <div className="pp-rvi-field">
-        <div className="pp-rvi-label">学生答案{item.answerConfidence === "low" && (item.studentAnswer || "").trim() && <span className="pp-rvi-warn"> · 字迹待确认</span>}</div>
+        <div className="pp-rvi-label">
+          学生答案{item.answerConfidence === "low" && (item.studentAnswer || "").trim() && <span className="pp-rvi-warn"> · 字迹待确认</span>}
+        </div>
+        {answers.length > 0 && (
+          <select
+            className="pp-rvi-pick"
+            value={matchedIdx}
+            onChange={(e) => {
+              const idx = Number(e.target.value);
+              if (idx < 0) onChange({ ...item, studentAnswer: "", answerConfidence: "low" });
+              else onChange({ ...item, studentAnswer: answers[idx].studentAnswer || "", answerConfidence: answers[idx].answerConfidence || "low" });
+            }}
+          >
+            <option value={-1}>{matchedIdx < 0 ? "— 未指认，手动输入或选择对应答案 —" : "— 清空 / 手动输入 —"}</option>
+            {answers.map((a, ai) => (
+              <option key={ai} value={ai}>识别段 #{a.number || "?"}：{answerSnippet(a.studentAnswer)}</option>
+            ))}
+          </select>
+        )}
         <textarea className="pp-edit" rows={2} value={item.studentAnswer || ""} onChange={e => onChange({ ...item, studentAnswer: e.target.value })} />
         {(item.studentAnswer || "").trim()
           ? <div className="pp-preview"><span className="pp-preview-label">预览</span><MathText text={item.studentAnswer} /></div>
-          : <div className="pp-grade-warn">⚠ 未识别到答案——请对照左侧原图手动补充，或确认该题确实空白</div>}
+          : <div className="pp-grade-warn">⚠ 未匹配到答案——请用上面的下拉选对应的识别段，或对照左侧原图手动补充</div>}
       </div>
     </div>
   );
@@ -348,6 +358,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   // 校对阶段
   const [reviewPhase, setReviewPhase] = useState(false);
   const [reviewItems, setReviewItems] = useState([]);
+  const [reviewAnswers, setReviewAnswers] = useState([]); // 原始 OCR 答案段，供手动指认
   const [reviewImages, setReviewImages] = useState([]);
   const [reviewImgIdx, setReviewImgIdx] = useState(0);
   const [lightbox, setLightbox] = useState(null); // URL of enlarged image
@@ -440,9 +451,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       const questions = await extractFromFiles(qFiles, "questions", (msg) => report(msg, Math.min(35, (progress || 5) + 3)), wb, userId);
       if (!questions.length) { report("题目识别失败，请检查题目文件"); setProgress(null); return; }
       report(`提取到 ${questions.length} 道题，识别学生答案…`, 40);
-      const answers = await extractAnswersFromFiles(aFiles, (msg) => report(msg, Math.min(75, (progress || 40) + 3)), wb, userId);
+      const questionNumbers = questions.map((q) => q.number).filter(Boolean);
+      const answers = await extractAnswersFromFiles(aFiles, (msg) => report(msg, Math.min(75, (progress || 40) + 3)), wb, userId, questionNumbers);
       report("AI 匹配题目和答案…", 80);
       const merged = mergeQuestionsAnswers(questions, answers);
+      setReviewAnswers(answers); // 原始 OCR 答案段，供校对时手动指认
       report("生成预览缩略图…", 85);
       // 生成本地缩略图供校对展示（不走网络，仅用于 UI 显示）
       const thumbs = (await Promise.all([
@@ -480,6 +493,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       setItems(saved);
       setReviewPhase(false);
       setReviewItems([]);
+      setReviewAnswers([]);
       setReviewImages([]);
       onReviewModeChange?.(false);
       report(`保存完成，共 ${saved.length} 道题，点「全部批改」开始。`, 100);
@@ -574,6 +588,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
               <ReviewItemEditor
                 key={i}
                 item={item}
+                answers={reviewAnswers}
                 onChange={(updated) => setReviewItems(prev => prev.map((x, j) => j === i ? updated : x))}
               />
             ))}

@@ -125,14 +125,25 @@ ${layoutHint}
 }
 
 // 从手写答案图片提取答案列表（分开模式专用）
-export async function extractAnswersFromImage(dataURI) {
+// questionNumbers：已知的题号清单（来自题目文件）。传入后，模型会把每段解答对号到清单里的题号，
+//                  极大降低 "2(ii) 的答案被挂到 Q1" 这类错配。
+export async function extractAnswersFromImage(dataURI, questionNumbers = []) {
+  const list = Array.isArray(questionNumbers) ? questionNumbers.filter(Boolean) : [];
+  const rosterBlock = list.length > 0
+    ? `\n【已知题号清单（必须对号入座）】这份卷子的题号是：${list.join(" , ")}
+- 请把你识别到的每一段解答，对应到清单里**最匹配的那个题号**：学生写的 "1" 对应 "1"，"2.(i)" 或 "2 i" 对应 "2(i)"，依此类推。
+- number 字段**必须从上面清单里原样选一个**，不要自己发明或改写格式。
+- 如果某段解答实在对不上清单里任何题号，number 填 "?"（宁可标未知，也不要硬塞给某道题）。
+- 学生的题号顺序未必和清单一致，请**按内容判断**归属，不要只按出现先后机械对应。\n`
+    : "";
+
   const prompt = `你是专业的数学卷子 OCR 助手。这张图片是学生的**手写答案页**——整页可能包含多道题的解答，但**没有印刷题目**。
 
 任务：把这一页按题号切分成多条，逐题识别学生写下的完整解答。
-
+${rosterBlock}
 【识别规则】
 1. 这一页通常有多道题（如 1、2、3…，含子题 (i)(ii)(iii) 或 (a)(b)(c)）。每个独立题号/子题输出为一条 item，**不要把整页合并成一条**。
-2. 题号 number：**原样保留学生写的编号**，如 "1"、"2(i)"、"3(b)"。不要自己加 "Q" 前缀，也不要改写。
+2. 题号 number：${list.length > 0 ? "从上面【已知题号清单】里选" : '**原样保留学生写的编号**，如 "1"、"2(i)"、"3(b)"，不要自己加 "Q" 前缀'}。
 3. 答案 studentAnswer：把该题号下学生写的**全部手写过程**都放进来——每一步推导、每个中间式、最终结论，一步都不要省。
    - 多行内容用 \\n 分隔，保留学生的推导顺序。
    - 数学符号/公式用 $...$ LaTeX；矩阵用 $\\begin{pmatrix}...\\end{pmatrix}$，行列式用 $\\begin{vmatrix}...\\end{vmatrix}$。
@@ -149,8 +160,12 @@ export async function extractAnswersFromImage(dataURI) {
 }
 
 // 从纯文字答案内容提取答案列表（分开模式专用）
-export async function extractAnswersFromText(text) {
-  const prompt = `下面是学生答案的文字内容，请提取每道题的题号和对应答案。
+export async function extractAnswersFromText(text, questionNumbers = []) {
+  const list = Array.isArray(questionNumbers) ? questionNumbers.filter(Boolean) : [];
+  const roster = list.length > 0
+    ? `\n已知题号清单：${list.join(" , ")}。number 必须从清单里选；学生写的 "2(i)" 对应清单里的 "2(i)" / "Q2(i)"；对不上填 "?"。\n`
+    : "";
+  const prompt = `下面是学生答案的文字内容，请提取每道题的题号和对应答案。${roster}
 只输出 JSON，无多余文字：
 {"items":[{"number":"1","studentAnswer":"答案内容"}]}
 
