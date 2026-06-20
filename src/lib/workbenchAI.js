@@ -103,38 +103,45 @@ export async function extractPaper(dataURI, layout = "together") {
     ? "这份卷子的【题目和答案是分开的】：可能题目在前面/上方，学生手写答案在后面/下方或另一区域。请按题号把题目和对应答案配对，不要把答案错配到相邻题。"
     : "这份卷子的【题目和答案在一起】：每道题下方或旁边通常就是学生的手写答案。";
 
-  const prompt = `你是数学卷子批改助手。仔细看这张卷子图片，提取每道题的信息。
+  const prompt = `你是专业的数学卷子批改助手。仔细看这张卷子图片，提取每道题的信息。
 
 ${layoutHint}
 
 要提取：
-1. 题号 number
-2. 题目原文 question（通常是打印的）
-3. 学生的手写答案 studentAnswer（如果空着没写，填空字符串）
-4. 识别置信度 answerConfidence：手写清晰 high，潦草/模糊/涂改 low
+1. 题号 number（原样保留，如 "1"、"Q2(i)" 等）
+2. 题目原文 question（通常是印刷体，公式用 $...$ LaTeX）
+3. 学生的手写答案 studentAnswer：
+   - 尽力识别，字迹潦草也要尝试，不要因为模糊就留空
+   - 学生未作答才填空字符串 ""
+   - 数学公式用 $...$ LaTeX
+4. 识别置信度 answerConfidence：清晰可读 → "high"，潦草但辨认出内容 → "low"，完全未作答 → "low"
 
-要求：
-- 公式用 $...$ 包裹的 LaTeX，手写的数学符号也要尽力识别
-- 不要编造：看不清就如实标 low，不要猜一个答案填上
-- 跳过非题目内容（姓名、班级、页码等）
+跳过非题目内容（姓名、班级、页码、说明）。不要输出多余解释。
 
-只输出 JSON，无多余文字：
-{"items":[{"number":"1","question":"题目$公式$","studentAnswer":"学生答案","answerConfidence":"low"}]}`;
+只输出 JSON：
+{"items":[{"number":"1","question":"题目$公式$","studentAnswer":"学生答案","answerConfidence":"high"}]}`;
   const data = await callVision(dataURI, prompt);
   return data?.items || [];
 }
 
 // 从手写答案图片提取答案列表（分开模式专用）
 export async function extractAnswersFromImage(dataURI) {
-  const prompt = `这是学生的手写答案页面（只有答案，没有题目）。
-请识别每道题的题号和学生手写的答案。
+  const prompt = `你是专业的数学卷子 OCR 助手。这张图片是学生的手写答案页（没有题目，只有答案）。
 
-要提取：
-1. 题号 number（如 "1"、"Q2"、"(i)" 等，原样保留）
-2. 学生手写答案 studentAnswer（数学公式尽力识别，用 $...$ LaTeX）
-3. 置信度 answerConfidence：字迹清晰 high，潦草/模糊 low
+任务：逐题识别题号和学生写下的答案内容。
 
-只输出 JSON，无多余文字：
+【识别规则】
+1. 题号 number：原样保留，如 "1"、"2"、"(i)"、"Q3(b)" 等
+2. 答案 studentAnswer：
+   - 尽力识别手写内容，哪怕字迹潦草
+   - 数学符号和公式用 $...$ LaTeX（如 $x=3$、$\\begin{pmatrix}1\\\\2\\end{pmatrix}$）
+   - 如果完全空白（学生未作答），填空字符串 ""
+   - 不要因为字迹模糊就放弃——猜出大意也比空白好
+3. 置信度 answerConfidence：字迹清晰易读 → "high"；潦草但能辨认 → "low"；完全空白 → "low"
+
+【重要】即使只有一道题，也要输出 items 数组。不要输出任何多余解释。
+
+只输出 JSON：
 {"items":[{"number":"1","studentAnswer":"手写内容","answerConfidence":"high"}]}`;
   const data = await callVision(dataURI, prompt);
   return data?.items || [];
