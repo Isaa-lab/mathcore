@@ -74,14 +74,14 @@ async function postGenerate(question, { materialTitle = "题库 AI", conversatio
 export async function callGenerate(input, { json = false, materialTitle = "题库 AI", signal } = {}) {
   if (Array.isArray(input)) {
     const hasVision = input.some((m) => Array.isArray(m?.content) && m.content.some((p) => p?.type === "image_url"));
-    // 视觉请求优先走豆包（HUOSHAN_KEY），用户也可自备 volcengine key
+    // 视觉请求：用户自己配了 volcengine key 则直接用，否则让后端 fallback 链决定（Gemini → 豆包 → Kimi）
     const visionConfig = () => {
       try {
         const keys = JSON.parse(localStorage.getItem("mc_ai_keys") || "{}") || {};
         const vKey = keys.volcengine || keys.doubao || "";
-        return vKey ? { userProvider: "volcengine", userKey: vKey } : { userProvider: "volcengine" };
+        return vKey ? { userProvider: "volcengine", userKey: vKey } : {};
       } catch {
-        return { userProvider: "volcengine" };
+        return {};
       }
     };
     const res = await fetch("/api/generate", {

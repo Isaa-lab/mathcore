@@ -56,9 +56,9 @@ async function pdfToText(file, onProgress) {
   return parts.join("\n\n");
 }
 
-// Compress image to max 800px and JPEG 0.55 before sending to AI.
-// Phone JPGs are often 3-5MB; this gets them under ~50KB, cutting cross-Pacific latency.
-function fileToDataURI(file, { maxPx = 800, quality = 0.55 } = {}) {
+// Compress image and optionally boost contrast (for light pencil handwriting).
+// enhance=true: grayscale + contrast 1.6 + brightness 1.05 via canvas filter.
+function fileToDataURI(file, { maxPx = 1600, quality = 0.85, enhance = false } = {}) {
   return new Promise((res) => {
     const reader = new FileReader();
     reader.onerror = () => res(null);
@@ -72,7 +72,9 @@ function fileToDataURI(file, { maxPx = 800, quality = 0.55 } = {}) {
         const h = Math.round(img.height * ratio);
         const canvas = document.createElement("canvas");
         canvas.width = w; canvas.height = h;
-        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        const ctx = canvas.getContext("2d");
+        if (enhance) ctx.filter = "grayscale(100%) contrast(1.6) brightness(1.05)";
+        ctx.drawImage(img, 0, 0, w, h);
         res(canvas.toDataURL("image/jpeg", quality));
       };
       img.src = e.target.result;
@@ -83,13 +85,29 @@ function fileToDataURI(file, { maxPx = 800, quality = 0.55 } = {}) {
 
 const MIN_TEXT_DENSITY = 60;
 
-// 获取图片供 AI 使用：优先上传到 Supabase 拿 signed URL（Volcengine 自行取图，省去跨洋传输）
-// wb/userId 缺失时退回本地压缩 base64
+// 获取题目图片供 AI 使用（印刷体，不需要增强）
 async function getImageForAI(file, wb, userId) {
   if (wb && userId) {
     try { return await wb.uploadAndGetSignedUrl(file, userId); } catch {}
   }
-  return fileToDataURI(file);
+  return fileToDataURI(file, { maxPx: 1600, quality: 0.85 });
+}
+
+// 获取手写答案图片供 AI 使用（铅笔/浅色字迹需要增强对比度）
+async function getAnswerImageForAI(file, wb, userId) {
+  if (wb && userId) {
+    try {
+      // 增强后再上传：先 canvas 处理，再转 Blob 上传到 Supabase
+      const enhanced = await fileToDataURI(file, { maxPx: 1600, quality: 0.88, enhance: true });
+      if (enhanced) {
+        const r = await fetch(enhanced);
+        const blob = await r.blob();
+        const enhancedFile = new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" });
+        return await wb.uploadAndGetSignedUrl(enhancedFile, userId);
+      }
+    } catch {}
+  }
+  return fileToDataURI(file, { maxPx: 1600, quality: 0.85, enhance: true });
 }
 
 async function extractFromFiles(files, mode, onProgress, wb, userId) {
@@ -141,8 +159,8 @@ async function extractAnswersFromFiles(files, onProgress, wb, userId) {
         for (const uri of uris) answers = answers.concat(await extractAnswersFromImage(uri));
       }
     } else {
-      onProgress?.(`上传 ${f.name} 到云端…`);
-      const imgUrl = await getImageForAI(f, wb, userId);
+      onProgress?.(`处理手写答案 ${f.name}…`);
+      const imgUrl = await getAnswerImageForAI(f, wb, userId);
       if (imgUrl) answers = answers.concat(await extractAnswersFromImage(imgUrl));
     }
   }
@@ -224,6 +242,28 @@ const CSS = `
 .pp-lp-label{font-size:12px;color:var(--mut)}
 .pp-lp-opt{font-size:12px;border:1px solid var(--line);background:#fff;color:#3a3f55;border-radius:7px;padding:5px 10px;cursor:pointer;transition:.12s;user-select:none}
 .pp-lp-opt:hover{border-color:var(--brand)}.pp-lp-opt.on{background:var(--brand);border-color:var(--brand);color:#fff}
+/* ── 校对模式 ── */
+.pp-rv{display:flex;flex-direction:column;gap:12px;height:100%;overflow:hidden}
+.pp-rv-hd{font-size:13px;font-weight:600;color:var(--ink);padding:2px 0 6px;border-bottom:1px solid var(--line);flex-shrink:0}
+.pp-rv-hd span{font-size:11px;font-weight:400;color:var(--mut);margin-left:8px}
+.pp-rv-body{display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1;min-height:0}
+.pp-rv-imgs{display:flex;flex-direction:column;gap:8px;overflow:hidden}
+.pp-rv-imgmain{flex:1;min-height:0;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:#f8f8fb;display:flex;align-items:center;justify-content:center;cursor:zoom-in}
+.pp-rv-imgmain img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.pp-rv-thumbs{display:flex;gap:6px;overflow-x:auto;flex-shrink:0;padding-bottom:4px}
+.pp-rv-thumb{height:52px;width:52px;object-fit:cover;border-radius:7px;cursor:pointer;border:2px solid transparent;opacity:.7;flex-shrink:0;transition:.12s}
+.pp-rv-thumb.active,.pp-rv-thumb:hover{border-color:var(--brand);opacity:1}
+.pp-rv-items{overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+.pp-rvi{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.pp-rvi-num{font-family:ui-monospace,monospace;font-size:11px;color:var(--faint);margin-bottom:6px;font-weight:600}
+.pp-rvi-field{margin-bottom:8px}
+.pp-rvi-label{font-family:ui-monospace,monospace;font-size:10px;color:var(--faint);margin-bottom:3px}
+.pp-rvi textarea.pp-edit{min-height:40px;font-size:12px}
+.pp-rvi .pp-preview{margin-top:4px;padding:5px 8px;font-size:12px}
+.pp-rv-foot{display:flex;gap:8px;flex-shrink:0;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--line)}
+/* 图片灯箱 */
+.pp-lightbox{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out}
+.pp-lightbox img{max-width:92vw;max-height:92vh;object-fit:contain;border-radius:8px}
 `;
 function useCSS() {
   useEffect(() => {
@@ -235,8 +275,27 @@ function useCSS() {
   }, []);
 }
 
+// ── 校对阶段：单题编辑器 ─────────────────────────────────────────────────────
+function ReviewItemEditor({ item, onChange }) {
+  return (
+    <div className="pp-rvi">
+      <div className="pp-rvi-num">#{item.number || "?"}</div>
+      <div className="pp-rvi-field">
+        <div className="pp-rvi-label">题目</div>
+        <textarea className="pp-edit" rows={3} value={item.question || ""} onChange={e => onChange({ ...item, question: e.target.value })} />
+        {(item.question || "").trim() && <div className="pp-preview"><span className="pp-preview-label">预览</span><MathText text={item.question} /></div>}
+      </div>
+      <div className="pp-rvi-field">
+        <div className="pp-rvi-label">学生答案</div>
+        <textarea className="pp-edit" rows={2} value={item.studentAnswer || ""} onChange={e => onChange({ ...item, studentAnswer: e.target.value })} />
+        {(item.studentAnswer || "").trim() && <div className="pp-preview"><span className="pp-preview-label">预览</span><MathText text={item.studentAnswer} /></div>}
+      </div>
+    </div>
+  );
+}
+
 // ── 批改模式 ─────────────────────────────────────────────────────────────────
-function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGraded }) {
+function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGraded, onReviewModeChange }) {
   const wb = useMemo(() => makeWorkbenchApi(supabase), [supabase]);
   const [hot, setHot] = useState(false);
   const [hotQ, setHotQ] = useState(false);
@@ -250,6 +309,12 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   // 分开模式：暂存题目/答案文件
   const [qFiles, setQFiles] = useState([]);
   const [aFiles, setAFiles] = useState([]);
+  // 校对阶段
+  const [reviewPhase, setReviewPhase] = useState(false);
+  const [reviewItems, setReviewItems] = useState([]);
+  const [reviewImages, setReviewImages] = useState([]);
+  const [reviewImgIdx, setReviewImgIdx] = useState(0);
+  const [lightbox, setLightbox] = useState(null); // URL of enlarged image
   const fileRef = useRef(null);
   const qRef = useRef(null);
   const aRef = useRef(null);
@@ -277,6 +342,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       };
       const imageFiles = allFiles.filter((f) => f.type.startsWith("image/"));
       const pdfFiles = allFiles.filter((f) => f.type === "application/pdf");
+      const collectedImages = []; // 收集源图 URI 供校对阶段展示
       if (imageFiles.length) {
         report(`上传图片 (${imageFiles.length} 张)…`, 10);
         const urls = await wb.uploadImages(imageFiles, userId);
@@ -285,7 +351,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
           for (let i = 0; i < urls.length; i++) {
             report(`AI 识别第 ${i + 1}/${urls.length} 张…`, Math.round(15 + (i / urls.length) * 65));
             const uri = await wb.imageToDataURI(urls[i]);
-            if (uri) extracted = extracted.concat(await extractPaper(uri, paperLayout));
+            if (uri) { collectedImages.push(uri); extracted = extracted.concat(await extractPaper(uri, paperLayout)); }
           }
         }
       }
@@ -302,6 +368,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
           if (r.length) { extracted = extracted.concat(r); }
           else {
             const uris = await pdfToImageURIs(pdf, (msg) => report(msg, baseP + 15));
+            collectedImages.push(...uris);
             for (let i = 0; i < uris.length; i++) {
               report(`视觉识别第 ${i + 1}/${uris.length} 页…`, Math.round(baseP + 15 + (i / uris.length) * 40));
               extracted = extracted.concat(await extractPaper(uris[i], paperLayout));
@@ -309,6 +376,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
           }
         } else {
           const uris = await pdfToImageURIs(pdf, (msg) => report(msg, baseP + 10));
+          collectedImages.push(...uris);
           for (let i = 0; i < uris.length; i++) {
             report(`视觉识别扫描页 ${i + 1}/${uris.length}…`, Math.round(baseP + 10 + (i / uris.length) * 55));
             extracted = extracted.concat(await extractPaper(uris[i], paperLayout));
@@ -316,24 +384,16 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
         }
       }
       if (!extracted.length) { report("没识别出题目，请检查文件"); setProgress(null); return; }
-      report("保存题目…", 92);
-      const rows = extracted.map((item) => ({
-        paper_id: localPaperId,
-        user_id: userId,
-        number: item.number || "",
-        question: item.question || "",
-        student_answer: item.studentAnswer || "",
-        answer_confidence: item.answerConfidence || "high",
-        reviewed: false,
-        is_correct: null,
-      }));
-      const saved = await wb.insertItems(rows);
-      setItems(saved);
-      await wb.setPaperStatus(localPaperId, "reviewing");
-      report(`识别完成，共 ${saved.length} 道题。核对答案后点「全部批改」。`, 100);
-      setTimeout(() => setProgress(null), 800);
+      // 进入校对阶段，而不是立即保存
+      setReviewItems(extracted.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low" })));
+      setReviewImages(collectedImages);
+      setReviewImgIdx(0);
+      setReviewPhase(true);
+      onReviewModeChange?.(true);
+      report(`识别完成 ${extracted.length} 道题，请校对后确认`, 100);
+      setTimeout(() => setProgress(null), 600);
     } catch (err) { report("出错：" + (err.message || err)); setProgress(null); }
-  }, [userId, wb, paperLayout, report]);
+  }, [userId, wb, paperLayout, report, onReviewModeChange]);
 
   // ── 分开模式：合并题目文件 + 答案文件 ──
   const processSeparate = useCallback(async () => {
@@ -347,25 +407,49 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       const answers = await extractAnswersFromFiles(aFiles, (msg) => report(msg, Math.min(75, (progress || 40) + 3)), wb, userId);
       report("AI 匹配题目和答案…", 80);
       const merged = mergeQuestionsAnswers(questions, answers);
-      report("保存…", 88);
+      report("生成预览缩略图…", 85);
+      // 生成本地缩略图供校对展示（不走网络，仅用于 UI 显示）
+      const thumbs = (await Promise.all([
+        ...qFiles.filter(f => f.type.startsWith("image/")).map(f => fileToDataURI(f, { maxPx: 600, quality: 0.8 })),
+        ...aFiles.filter(f => f.type.startsWith("image/")).map(f => fileToDataURI(f, { maxPx: 600, quality: 0.8 })),
+      ])).filter(Boolean);
+      // 进入校对阶段
+      setReviewItems(merged.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low" })));
+      setReviewImages(thumbs);
+      setReviewImgIdx(0);
+      setReviewPhase(true);
+      onReviewModeChange?.(true);
+      report(`识别完成 ${merged.length} 道题，请校对后确认`, 100);
+      setTimeout(() => setProgress(null), 600);
+    } catch (err) { report("出错：" + (err.message || err)); setProgress(null); }
+  }, [userId, wb, qFiles, aFiles, report, progress, onReviewModeChange]);
+
+  const confirmReview = async () => {
+    try {
+      report("保存中…", 92);
+      setProgress(92);
       const paper = await wb.createPaper({ userId, imageUrls: [] });
-      const rows = merged.map((item) => ({
+      const rows = reviewItems.map((item) => ({
         paper_id: paper.id,
         user_id: userId,
         number: item.number || "",
         question: item.question || "",
         student_answer: item.studentAnswer || "",
-        answer_confidence: item.answerConfidence || "low",
-        reviewed: false,
+        answer_confidence: "high", // 用户已确认
+        reviewed: true,
         is_correct: null,
       }));
       const saved = await wb.insertItems(rows);
-      setItems(saved);
       await wb.setPaperStatus(paper.id, "reviewing");
-      report(`匹配完成，共 ${saved.length} 道题。请核对答案后批改。`, 100);
+      setItems(saved);
+      setReviewPhase(false);
+      setReviewItems([]);
+      setReviewImages([]);
+      onReviewModeChange?.(false);
+      report(`保存完成，共 ${saved.length} 道题，点「全部批改」开始。`, 100);
       setTimeout(() => setProgress(null), 800);
-    } catch (err) { report("出错：" + (err.message || err)); setProgress(null); }
-  }, [userId, wb, qFiles, aFiles, report, progress]);
+    } catch (err) { report("保存失败：" + (err.message || err)); setProgress(null); }
+  };
 
   const saveAnswer = async (item) => {
     const updated = await wb.updateItem(item.id, { student_answer: draft, reviewed: true });
@@ -419,6 +503,59 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     onDragLeave: (e) => { e.preventDefault(); e.stopPropagation(); setH(false); },
     onDrop: (e) => { e.preventDefault(); e.stopPropagation(); setH(false); if (e.dataTransfer?.files?.length) onDrop(e.dataTransfer.files); },
   });
+
+  // ── 校对阶段 JSX ─────────────────────────────────────────────────────────────
+  if (reviewPhase) {
+    return (
+      <div className="pp-rv">
+        <div className="pp-rv-hd">
+          识别校对
+          <span>对照原图核对 AI 识别的题目和答案，确认后再批改</span>
+        </div>
+        <div className="pp-rv-body">
+          {/* 左：原图查看 */}
+          <div className="pp-rv-imgs">
+            {reviewImages.length > 0 ? (
+              <>
+                <div className="pp-rv-imgmain" onClick={() => setLightbox(reviewImages[reviewImgIdx])}>
+                  <img src={reviewImages[reviewImgIdx]} alt="原始图片" />
+                </div>
+                {reviewImages.length > 1 && (
+                  <div className="pp-rv-thumbs">
+                    {reviewImages.map((img, i) => (
+                      <img key={i} src={img} alt={`图${i + 1}`} className={"pp-rv-thumb" + (i === reviewImgIdx ? " active" : "")} onClick={() => setReviewImgIdx(i)} />
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ color: "var(--faint)", fontSize: 12, textAlign: "center", padding: 20 }}>（PDF 模式无图片预览）</div>
+            )}
+          </div>
+          {/* 右：可编辑题目列表 */}
+          <div className="pp-rv-items">
+            {reviewItems.map((item, i) => (
+              <ReviewItemEditor
+                key={i}
+                item={item}
+                onChange={(updated) => setReviewItems(prev => prev.map((x, j) => j === i ? updated : x))}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="pp-rv-foot">
+          <button className="pp-btn" onClick={() => { setReviewPhase(false); onReviewModeChange?.(false); }}>← 重新上传</button>
+          <button className="pp-btn primary" onClick={confirmReview}>确认识别，开始批改 →</button>
+        </div>
+        {/* 图片灯箱 */}
+        {lightbox && (
+          <div className="pp-lightbox" onClick={() => setLightbox(null)}>
+            <img src={lightbox} alt="放大" />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <>
@@ -723,7 +860,7 @@ function SolvePanel() {
 }
 
 // ── 主组件 ────────────────────────────────────────────────────────────────────
-export default function PaperPanel({ supabase, userId, activeItemId, onSelectItem, onItemsGraded }) {
+export default function PaperPanel({ supabase, userId, activeItemId, onSelectItem, onItemsGraded, onReviewModeChange }) {
   useCSS();
   const [mode, setMode] = useState("grade");
   return (
@@ -733,7 +870,7 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
         <span className={"pp-tab" + (mode === "solve" ? " on" : "")} onClick={() => setMode("solve")}>AI 解题</span>
       </div>
       {mode === "grade"
-        ? <GradePanel supabase={supabase} userId={userId} activeItemId={activeItemId} onSelectItem={onSelectItem} onItemsGraded={onItemsGraded} />
+        ? <GradePanel supabase={supabase} userId={userId} activeItemId={activeItemId} onSelectItem={onSelectItem} onItemsGraded={onItemsGraded} onReviewModeChange={onReviewModeChange} />
         : <SolvePanel />}
     </div>
   );
