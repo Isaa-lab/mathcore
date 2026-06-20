@@ -1,7 +1,54 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MathText from "../lib/MathText";
 import { makeWorkbenchApi } from "../lib/workbenchApi";
-import { extractPaper, gradeItem } from "../lib/workbenchAI";
+import { extractPaper, extractPaperFromText, gradeItem } from "../lib/workbenchAI";
+
+// PDF.js worker (webpack 5 / CRA 5 handles new URL() natively)
+let _pdfjsLib = null;
+async function getPdfjs() {
+  if (_pdfjsLib) return _pdfjsLib;
+  const lib = await import("pdfjs-dist");
+  lib.GlobalWorkerOptions.workerSrc = new URL(
+    "pdfjs-dist/build/pdf.worker.min.mjs",
+    import.meta.url
+  ).href;
+  _pdfjsLib = lib;
+  return lib;
+}
+
+// Render all pages of a PDF file → array of JPEG data URIs
+async function pdfToImageURIs(file, onProgress) {
+  const pdfjs = await getPdfjs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+  const uris = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    onProgress?.(`第 ${i}/${pdf.numPages} 页渲染中…`);
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 2.0 });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+    uris.push(canvas.toDataURL("image/jpeg", 0.88));
+  }
+  return uris;
+}
+
+// Extract plain text from all PDF pages (fast, no vision needed)
+async function pdfToText(file, onProgress) {
+  const pdfjs = await getPdfjs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+  const parts = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    onProgress?.(`第 ${i}/${pdf.numPages} 页文字提取…`);
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    parts.push(content.items.map((it) => it.str).join(" "));
+  }
+  return parts.join("\n\n");
+}
 
 const CSS = `
 .pp{--ink:#0f1220;--mut:#6b7184;--faint:#9aa0b4;--line:#e7e8ef;--soft:#f0f1f6;--card:#fff;--brand:#4338ca;--brand-soft:#eef0ff;--emerald:#047857;--emerald-soft:#e7f6ef;--rose:#be123c;--rose-soft:#fdeaef;--amber:#d97706;--amber-soft:#fef3e2;color:var(--ink);height:100%;display:flex;flex-direction:column}
@@ -23,7 +70,7 @@ const CSS = `
 `;
 
 function useCSS() {
-  React.useEffect(() => {
+  useEffect(() => {
     if (document.getElementById("pp-style")) return;
     const style = document.createElement("style");
     style.id = "pp-style";
@@ -31,6 +78,9 @@ function useCSS() {
     document.head.appendChild(style);
   }, []);
 }
+
+// 文字密度够用时走文字通道（无需视觉 API，DeepSeek 也能处理）
+const MIN_TEXT_DENSITY = 60;
 
 export default function PaperPanel({ supabase, userId, activeItemId, onSelectItem, onItemsGraded }) {
   useCSS();
@@ -46,37 +96,89 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
 
   const handleFiles = useCallback(async (files) => {
     if (!files?.length) return;
-    if (!userId) {
-      alert("请先登录后再上传卷子");
+    if (!userId) { alert("请先登录后再上传卷子"); return; }
+
+    const allFiles = [...files];
+    const imageFiles = allFiles.filter((f) => f.type.startsWith("image/"));
+    const pdfFiles = allFiles.filter((f) => f.type === "application/pdf");
+
+    if (!imageFiles.length && !pdfFiles.length) {
+      setStatus("请上传图片或 PDF 文件");
       return;
     }
-    const imageFiles = [...files].filter((file) => file.type.startsWith("image/"));
-    if (!imageFiles.length) {
-      setStatus("当前先支持图片卷子；多页 PDF 转图下一步再加。");
-      return;
-    }
+
     try {
-      setStatus("上传卷子中...");
-      const urls = await wb.uploadImages(imageFiles, userId);
-      if (!urls.length) {
-        setStatus("上传失败，请重试");
-        return;
-      }
-      const paper = await wb.createPaper({ userId, imageUrls: urls });
-      setPaperId(paper.id);
-      setStatus("AI 正在识别题目和手写答案...");
       let extracted = [];
-      for (const path of urls) {
-        const uri = await wb.imageToDataURI(path);
-        if (!uri) continue;
-        extracted = extracted.concat(await extractPaper(uri, paperLayout));
+
+      // ── 图片文件：上传到 Supabase → 转 dataURI → Gemini 视觉识别 ──
+      if (imageFiles.length > 0) {
+        setStatus("上传图片中…");
+        const urls = await wb.uploadImages(imageFiles, userId);
+        if (urls.length) {
+          const paper = await wb.createPaper({ userId, imageUrls: urls });
+          setPaperId(paper.id);
+          setStatus("AI 正在识别题目和手写答案…");
+          for (const path of urls) {
+            const uri = await wb.imageToDataURI(path);
+            if (!uri) continue;
+            extracted = extracted.concat(await extractPaper(uri, paperLayout));
+          }
+        }
       }
+
+      // ── PDF 文件 ──
+      for (const pdf of pdfFiles) {
+        setStatus(`处理 ${pdf.name}…`);
+
+        // 先尝试文字提取（文字型 PDF，任意 LLM 都能处理）
+        const text = await pdfToText(pdf, setStatus);
+        const isTextPdf = text.replace(/\s+/g, "").length >= MIN_TEXT_DENSITY;
+
+        if (isTextPdf) {
+          setStatus("PDF 文字版 — AI 解析题目中…");
+          const items2 = await extractPaperFromText(text, paperLayout);
+          if (items2.length) {
+            // 文字 PDF 不需要存储图片，仅记录到 paper
+            if (!paperId) {
+              const paper = await wb.createPaper({ userId, imageUrls: [] });
+              setPaperId(paper.id);
+            }
+            extracted = extracted.concat(items2);
+          } else {
+            // 文字提取没题目，当作扫描件走视觉
+            setStatus("文字解析无结果，转图片识别…");
+            const uris = await pdfToImageURIs(pdf, setStatus);
+            setStatus("AI 视觉识别 PDF 页面…");
+            for (const uri of uris) {
+              extracted = extracted.concat(await extractPaper(uri, paperLayout));
+            }
+          }
+        } else {
+          // 扫描件 / 手写型 PDF：渲染为图片 → Gemini 视觉识别
+          const uris = await pdfToImageURIs(pdf, setStatus);
+          if (!paperId) {
+            const paper = await wb.createPaper({ userId, imageUrls: [] });
+            setPaperId(paper.id);
+          }
+          setStatus(`AI 视觉识别 PDF（${uris.length} 页）…`);
+          for (const uri of uris) {
+            extracted = extracted.concat(await extractPaper(uri, paperLayout));
+          }
+        }
+      }
+
       if (!extracted.length) {
-        setStatus("没识别出题目，换张清晰的图试试");
+        setStatus("没识别出题目，请换张清晰的图或文字版 PDF 再试");
         return;
       }
+
+      const currentPaperId = paperId || (() => {
+        // paperId 应当在上面某个分支里已经设置了
+        return null;
+      })();
+
       const rows = extracted.map((item) => ({
-        paper_id: paper.id,
+        paper_id: currentPaperId,
         user_id: userId,
         number: item.number || "",
         question: item.question || "",
@@ -87,12 +189,12 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
       }));
       const saved = await wb.insertItems(rows);
       setItems(saved);
-      await wb.setPaperStatus(paper.id, "reviewing");
-      setStatus(`识别完成，共 ${saved.length} 道题。请核对手写答案后点「全部批改」。`);
+      if (currentPaperId) await wb.setPaperStatus(currentPaperId, "reviewing");
+      setStatus(`识别完成，共 ${saved.length} 道题。请核对答案后点「全部批改」。`);
     } catch (error) {
       setStatus("出错：" + (error.message || error));
     }
-  }, [userId, wb, paperLayout]);
+  }, [userId, wb, paperLayout, paperId]);
 
   const saveAnswer = async (item) => {
     const updated = await wb.updateItem(item.id, { student_answer: draft, reviewed: true });
@@ -102,7 +204,7 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
   };
 
   const gradeAll = async () => {
-    setStatus("AI 批改中...");
+    setStatus("AI 批改中…");
     const graded = [];
     for (const item of items) {
       try {
@@ -137,22 +239,9 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
 
   const needGrade = items.length > 0 && items.some((item) => item.is_correct === null);
 
-  const onDragOver = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setHot(true);
-  };
-  const onDragLeave = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setHot(false);
-  };
-  const onDrop = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setHot(false);
-    if (event.dataTransfer?.files?.length) handleFiles(event.dataTransfer.files);
-  };
+  const onDragOver = (e) => { e.preventDefault(); e.stopPropagation(); setHot(true); };
+  const onDragLeave = (e) => { e.preventDefault(); e.stopPropagation(); setHot(false); };
+  const onDrop = (e) => { e.preventDefault(); e.stopPropagation(); setHot(false); if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files); };
 
   return (
     <div className="pp">
@@ -161,13 +250,13 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
         {[
           { key: "together", label: "题目+答案在一起" },
           { key: "separate", label: "题目和答案分开" },
-        ].map((option) => (
+        ].map((opt) => (
           <span
-            key={option.key}
-            className={"pp-lp-opt" + (paperLayout === option.key ? " on" : "")}
-            onClick={() => setPaperLayout(option.key)}
+            key={opt.key}
+            className={"pp-lp-opt" + (paperLayout === opt.key ? " on" : "")}
+            onClick={() => setPaperLayout(opt.key)}
           >
-            {option.label}
+            {opt.label}
           </span>
         ))}
       </div>
@@ -182,15 +271,31 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
         role="button"
         tabIndex={0}
       >
-        点击或拖入卷子 <b>图片</b><br />
-        <span style={{ fontSize: 12 }}>题目打印、答案手写都可以</span>
+        点击或拖入卷子 <b>图片 / PDF</b><br />
+        <span style={{ fontSize: 12 }}>题目打印、手写答案均可；PDF 支持文字版和扫描版</span>
       </div>
-      <input ref={fileInputRef} type="file" accept="image/*,.pdf" multiple hidden onChange={(event) => handleFiles(event.target.files)} />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,application/pdf"
+        multiple
+        hidden
+        onChange={(e) => handleFiles(e.target.files)}
+      />
+
       {status && <div className="pp-status">{status}</div>}
-      {needGrade && <button className="pp-btn primary" style={{ marginTop: 8 }} onClick={gradeAll}>全部批改（判对错 + 分析）</button>}
+      {needGrade && (
+        <button className="pp-btn primary" style={{ marginTop: 8 }} onClick={gradeAll}>
+          全部批改（判对错 + 分析）
+        </button>
+      )}
+
       <div className="pp-list">
         {items.length === 0 ? (
-          <div className="pp-empty">还没有题目<br />上传一张卷子，AI 会识别出题目和你的手写答案</div>
+          <div className="pp-empty">
+            还没有题目<br />
+            上传图片或 PDF，AI 会识别题目和你的手写答案
+          </div>
         ) : items.map((item) => {
           const isWrong = item.is_correct === false;
           const isRight = item.is_correct === true;
@@ -206,22 +311,36 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
                 {isWrong && <span className="pp-badge pp-b-wrong">错</span>}
                 {isRight && <span className="pp-badge pp-b-correct">对</span>}
                 {item.answer_confidence === "low" && <span className="pp-badge pp-b-low">字迹待确认</span>}
-                {(item.knowledge_points || []).slice(0, 1).map((point) => <span key={point} className="pp-badge pp-b-kp">{point}</span>)}
-                {item.is_correct !== null && <button className="pp-flip" onClick={(event) => { event.stopPropagation(); flipCorrect(item); }}>判错了？点这翻转</button>}
+                {(item.knowledge_points || []).slice(0, 1).map((pt) => (
+                  <span key={pt} className="pp-badge pp-b-kp">{pt}</span>
+                ))}
+                {item.is_correct !== null && (
+                  <button className="pp-flip" onClick={(e) => { e.stopPropagation(); flipCorrect(item); }}>
+                    判错了？点这翻转
+                  </button>
+                )}
               </div>
               <div className="pp-q"><MathText text={item.question} /></div>
               <div className="pp-ans">
                 <span className="lab">我的答案</span>
                 {isEditing ? (
                   <>
-                    <textarea className="pp-edit" value={draft} onClick={(event) => event.stopPropagation()} onChange={(event) => setDraft(event.target.value)} />
+                    <textarea
+                      className="pp-edit"
+                      value={draft}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setDraft(e.target.value)}
+                    />
                     <div className="pp-actions">
-                      <button className="pp-btn mini primary" onClick={(event) => { event.stopPropagation(); saveAnswer(item); }}>保存</button>
-                      <button className="pp-btn mini" onClick={(event) => { event.stopPropagation(); setEditing(null); }}>取消</button>
+                      <button className="pp-btn mini primary" onClick={(e) => { e.stopPropagation(); saveAnswer(item); }}>保存</button>
+                      <button className="pp-btn mini" onClick={(e) => { e.stopPropagation(); setEditing(null); }}>取消</button>
                     </div>
                   </>
                 ) : (
-                  <span onClick={(event) => { event.stopPropagation(); setEditing(item.id); setDraft(item.student_answer || ""); }} style={{ cursor: "text" }}>
+                  <span
+                    onClick={(e) => { e.stopPropagation(); setEditing(item.id); setDraft(item.student_answer || ""); }}
+                    style={{ cursor: "text" }}
+                  >
                     <MathText text={item.student_answer || "(空白，点击补充)"} />
                   </span>
                 )}

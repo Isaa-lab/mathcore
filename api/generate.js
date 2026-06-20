@@ -98,7 +98,7 @@ async function runHandler(req, res) {
     .filter(Boolean);
   const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || __fromPlatformSlot("anthropic");
   const GROQ_KEY      = process.env.GROQ_KEY      || __fromPlatformSlot("groq");
-  const DEEPSEEK_KEY  = process.env.DEEPSEEK_KEY  || __fromPlatformSlot("deepseek");
+  const DEEPSEEK_KEY  = process.env.DEEPSEEK_KEY  || process.env.deep_seek_key || __fromPlatformSlot("deepseek");
   const KIMI_KEY      = process.env.KIMI_KEY      || __fromPlatformSlot("kimi");
 
   // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底
@@ -799,6 +799,22 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   };
 
   // ── Gemini helper ──────────────────────────────────────────────────────────
+  // 把消息 content 转成 Gemini parts：纯文本 → {text}；image_url(data URI) → inlineData
+  const toGeminiParts = (content) => {
+    if (typeof content === "string") return [{ text: content }];
+    if (Array.isArray(content)) {
+      return content.map((part) => {
+        if (part?.type === "text") return { text: String(part.text || "") };
+        if (part?.type === "image_url") {
+          const url = part.image_url?.url || "";
+          const m = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(url);
+          if (m) return { inlineData: { mimeType: m[1], data: m[2] } };
+        }
+        return null;
+      }).filter(Boolean);
+    }
+    return [{ text: String(content || "") }];
+  };
   const callGeminiOfficial = async (key) => {
     const budget = Math.min(PER_PROVIDER_MS, remainingBudget());
     if (budget < 1500) { providerDiag.push(`gemini(official): skipped(budget_exhausted)`); return null; }
@@ -809,11 +825,11 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
       if (isChatMode && messages) {
         geminiContents = messages
           .filter(m => m.role !== "system")
-          .map(m => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
+          .map(m => ({ role: m.role === "assistant" ? "model" : "user", parts: toGeminiParts(m.content) }));
         if (messages[0]?.role === "system") {
-          // Prepend system message to first user message
+          // Prepend system message to first user message (text-only messages)
           const firstUserIdx = geminiContents.findIndex(m => m.role === "user");
-          if (firstUserIdx >= 0) {
+          if (firstUserIdx >= 0 && geminiContents[firstUserIdx].parts[0]?.text !== undefined) {
             geminiContents[firstUserIdx].parts[0].text = messages[0].content + "\n\n" + geminiContents[firstUserIdx].parts[0].text;
           }
         }
@@ -881,14 +897,21 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
       return await callOpenAICompat("https://api.moonshot.cn/v1", k, "moonshot-v1-8k", `kimi(${tagSrc})`) || "";
     }
     if (pid === "gemini") {
+      if (hasVisionMessages) {
+        // 视觉请求：OpenAI 兼容网关（如 bboluo）要求网关自己发的 key，用户/官方 Google key 在那边会 401。
+        // 官方 Gemini API 原生支持图片（inlineData），优先走官方，失败再退兼容网关。
+        const official = await callGeminiOfficial(k) || "";
+        if (official) return official;
+        return await callGeminiCompat(k, tagSrc) || "";
+      }
       // 优先官方 Gemini；失败后尝试 OpenAI 兼容网关（例如 bboluo）。
-      if (!hasVisionMessages && GEMINI_KEY && k === GEMINI_KEY) {
+      if (GEMINI_KEY && k === GEMINI_KEY) {
         const official = await callGeminiOfficial(k) || "";
         if (official) return official;
       }
       const compat = await callGeminiCompat(k, tagSrc) || "";
       if (compat) return compat;
-      return hasVisionMessages ? "" : (await callGeminiOfficial(k) || "");
+      return await callGeminiOfficial(k) || "";
     }
     if (pid === "custom") {
       const base = String(userCustomUrl || "").trim().replace(/\/$/, "");
@@ -930,7 +953,7 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
 
   // Priority 4: server Gemini
   if (!responseText && (GEMINI_KEY || GEMINI_OAI_KEY)) {
-    if (!hasVisionMessages && GEMINI_KEY) responseText = await callGeminiOfficial(GEMINI_KEY) || "";
+    if (GEMINI_KEY) responseText = await callGeminiOfficial(GEMINI_KEY) || "";
     if (!responseText && GEMINI_OAI_KEY) responseText = await callGeminiCompat(GEMINI_OAI_KEY, "server") || "";
   }
 

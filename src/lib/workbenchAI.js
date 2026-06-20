@@ -11,6 +11,35 @@ async function callVision(dataURI, promptText, { json = true } = {}) {
   return json ? parseLooseJSON(content) : content;
 }
 
+export async function extractPaperFromText(textContent, layout = "together") {
+  const layoutHint = layout === "separate"
+    ? "题目和答案是分开的：可能题目在前半段，学生手写答案在后半段或另一区域。请按题号把题目和答案配对。"
+    : "题目和答案在一起：每道题下方或旁边通常就是学生的答案。";
+
+  const prompt = `你是数学卷子批改助手。下面是从 PDF 提取的卷子文字内容，提取每道题的信息。
+
+${layoutHint}
+
+要提取：
+1. 题号 number
+2. 题目原文 question
+3. 学生的答案 studentAnswer（如果没写，填空字符串）
+4. 置信度 answerConfidence：文字清晰 high，内容缺失/无法分辨 low
+
+要求：
+- 公式用 $...$ 包裹的 LaTeX
+- 跳过非题目内容（姓名、班级、页码等）
+- 只输出 JSON，无多余文字：
+
+{"items":[{"number":"1","question":"题目$公式$","studentAnswer":"学生答案","answerConfidence":"high"}]}
+
+卷子文字内容：
+${textContent.slice(0, 8000)}`;
+
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "卷子文字提取" });
+  return parseLooseJSON(raw)?.items || [];
+}
+
 export async function extractPaper(dataURI, layout = "together") {
   const layoutHint = layout === "separate"
     ? "这份卷子的【题目和答案是分开的】：可能题目在前面/上方，学生手写答案在后面/下方或另一区域。请按题号把题目和对应答案配对，不要把答案错配到相邻题。"

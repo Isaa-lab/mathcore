@@ -74,6 +74,15 @@ async function postGenerate(question, { materialTitle = "题库 AI", conversatio
 export async function callGenerate(input, { json = false, materialTitle = "题库 AI", signal } = {}) {
   if (Array.isArray(input)) {
     const hasVision = input.some((m) => Array.isArray(m?.content) && m.content.some((p) => p?.type === "image_url"));
+    const visionConfig = () => {
+      try {
+        const keys = JSON.parse(localStorage.getItem("mc_ai_keys") || "{}") || {};
+        const geminiKey = keys.gemini || "";
+        return geminiKey ? { userProvider: "gemini", userKey: geminiKey } : { userProvider: "gemini" };
+      } catch {
+        return { userProvider: "gemini" };
+      }
+    };
     const res = await fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -82,7 +91,7 @@ export async function callGenerate(input, { json = false, materialTitle = "题�
         materialTitle,
         messages: input,
         stream: false,
-        ...(hasVision ? { userProvider: "gemini" } : getUserAIConfig()),
+        ...(hasVision ? visionConfig() : getUserAIConfig()),
       }),
       signal,
     });
