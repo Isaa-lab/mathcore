@@ -155,7 +155,10 @@ const CSS = `
 .pp-fitem .rm{cursor:pointer;color:var(--rose);font-size:13px;line-height:1;margin-left:auto}
 .pp-zones{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px}
 .pp-zone-hd{font-size:11px;font-family:ui-monospace,monospace;color:var(--mut);margin-bottom:5px}
-.pp-status{font-family:ui-monospace,monospace;font-size:12px;color:var(--brand);padding:8px 0;text-align:center}
+.pp-status{font-family:ui-monospace,monospace;font-size:12px;color:var(--brand);padding:5px 0 3px;text-align:center}
+.pp-prog-wrap{height:4px;border-radius:3px;background:#e7e8ef;margin:4px 0 6px;overflow:hidden}
+.pp-prog-bar{height:100%;border-radius:3px;background:var(--brand);transition:width .3s ease}
+.pp-prog-pct{font-family:ui-monospace,monospace;font-size:11px;color:var(--brand);text-align:right;margin-bottom:4px}
 .pp-list{flex:1;overflow-y:auto;margin-top:10px}
 .pp-item{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 14px;margin-bottom:10px;transition:.12s}
 .pp-item.clickable{cursor:pointer}.pp-item.clickable:hover{border-color:#d7d9e6}
@@ -202,6 +205,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const [hotQ, setHotQ] = useState(false);
   const [hotA, setHotA] = useState(false);
   const [status, setStatus] = useState("");
+  const [progress, setProgress] = useState(null); // null=idle, 0-100=processing
   const [items, setItems] = useState([]);
   const [editing, setEditing] = useState(null);
   const [draft, setDraft] = useState("");
@@ -213,13 +217,19 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const qRef = useRef(null);
   const aRef = useRef(null);
 
+  const report = useCallback((msg, pct) => {
+    setStatus(msg);
+    if (pct !== undefined) setProgress(pct);
+  }, []);
+
   // ── 在一起模式：单区上传 ──
   const handleTogether = useCallback(async (files) => {
     if (!files?.length) return;
     if (!userId) { alert("请先登录"); return; }
     const allFiles = [...files].filter((f) => f.type.startsWith("image/") || f.type === "application/pdf");
-    if (!allFiles.length) { setStatus("请上传图片或 PDF 文件"); return; }
+    if (!allFiles.length) { report("请上传图片或 PDF 文件"); return; }
     try {
+      setProgress(5);
       let extracted = [];
       let localPaperId = null;
       const ensurePaper = async (imageUrls = []) => {
@@ -231,42 +241,45 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       const imageFiles = allFiles.filter((f) => f.type.startsWith("image/"));
       const pdfFiles = allFiles.filter((f) => f.type === "application/pdf");
       if (imageFiles.length) {
-        setStatus(`上传图片 (${imageFiles.length} 张)…`);
+        report(`上传图片 (${imageFiles.length} 张)…`, 10);
         const urls = await wb.uploadImages(imageFiles, userId);
         if (urls.length) {
           await ensurePaper(urls);
-          setStatus("AI 识别题目和手写答案…");
           for (let i = 0; i < urls.length; i++) {
-            setStatus(`AI 识别第 ${i + 1}/${urls.length} 张…`);
+            report(`AI 识别第 ${i + 1}/${urls.length} 张…`, Math.round(15 + (i / urls.length) * 65));
             const uri = await wb.imageToDataURI(urls[i]);
             if (uri) extracted = extracted.concat(await extractPaper(uri, paperLayout));
           }
         }
       }
-      for (const pdf of pdfFiles) {
-        setStatus(`处理 ${pdf.name}…`);
-        const text = await pdfToText(pdf, setStatus);
+      const pdfTotal = pdfFiles.length;
+      for (let pi = 0; pi < pdfTotal; pi++) {
+        const pdf = pdfFiles[pi];
+        const baseP = Math.round(10 + (pi / pdfTotal) * 70);
+        report(`处理 ${pdf.name}…`, baseP);
+        const text = await pdfToText(pdf, (msg) => report(msg, baseP + 5));
         await ensurePaper();
         if (text.replace(/\s+/g, "").length >= MIN_TEXT_DENSITY) {
-          setStatus("AI 解析题目…");
+          report("AI 解析题目…", baseP + 15);
           const r = await extractPaperFromText(text, paperLayout);
           if (r.length) { extracted = extracted.concat(r); }
           else {
-            const uris = await pdfToImageURIs(pdf, setStatus);
+            const uris = await pdfToImageURIs(pdf, (msg) => report(msg, baseP + 15));
             for (let i = 0; i < uris.length; i++) {
-              setStatus(`视觉识别第 ${i + 1}/${uris.length} 页…`);
+              report(`视觉识别第 ${i + 1}/${uris.length} 页…`, Math.round(baseP + 15 + (i / uris.length) * 40));
               extracted = extracted.concat(await extractPaper(uris[i], paperLayout));
             }
           }
         } else {
-          const uris = await pdfToImageURIs(pdf, setStatus);
+          const uris = await pdfToImageURIs(pdf, (msg) => report(msg, baseP + 10));
           for (let i = 0; i < uris.length; i++) {
-            setStatus(`视觉识别扫描页 ${i + 1}/${uris.length}…`);
+            report(`视觉识别扫描页 ${i + 1}/${uris.length}…`, Math.round(baseP + 10 + (i / uris.length) * 55));
             extracted = extracted.concat(await extractPaper(uris[i], paperLayout));
           }
         }
       }
-      if (!extracted.length) { setStatus("没识别出题目，请检查文件"); return; }
+      if (!extracted.length) { report("没识别出题目，请检查文件"); setProgress(null); return; }
+      report("保存题目…", 92);
       const rows = extracted.map((item) => ({
         paper_id: localPaperId,
         user_id: userId,
@@ -280,22 +293,24 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       const saved = await wb.insertItems(rows);
       setItems(saved);
       await wb.setPaperStatus(localPaperId, "reviewing");
-      setStatus(`识别完成，共 ${saved.length} 道题。核对答案后点「全部批改」。`);
-    } catch (err) { setStatus("出错：" + (err.message || err)); }
-  }, [userId, wb, paperLayout]);
+      report(`识别完成，共 ${saved.length} 道题。核对答案后点「全部批改」。`, 100);
+      setTimeout(() => setProgress(null), 800);
+    } catch (err) { report("出错：" + (err.message || err)); setProgress(null); }
+  }, [userId, wb, paperLayout, report]);
 
   // ── 分开模式：合并题目文件 + 答案文件 ──
   const processSeparate = useCallback(async () => {
     if (!userId) { alert("请先登录"); return; }
     if (!qFiles.length || !aFiles.length) return;
     try {
-      setStatus("提取题目…");
-      const questions = await extractFromFiles(qFiles, "questions", setStatus);
-      if (!questions.length) { setStatus("题目识别失败，请检查题目文件"); return; }
-      setStatus(`提取到 ${questions.length} 道题，识别学生答案…`);
-      const answers = await extractAnswersFromFiles(aFiles, setStatus);
-      setStatus("AI 匹配题目和答案…");
+      report("提取题目…", 5);
+      const questions = await extractFromFiles(qFiles, "questions", (msg) => report(msg, Math.min(35, (progress || 5) + 3)));
+      if (!questions.length) { report("题目识别失败，请检查题目文件"); setProgress(null); return; }
+      report(`提取到 ${questions.length} 道题，识别学生答案…`, 40);
+      const answers = await extractAnswersFromFiles(aFiles, (msg) => report(msg, Math.min(75, (progress || 40) + 3)));
+      report("AI 匹配题目和答案…", 80);
       const merged = mergeQuestionsAnswers(questions, answers);
+      report("保存…", 88);
       const paper = await wb.createPaper({ userId, imageUrls: [] });
       const rows = merged.map((item) => ({
         paper_id: paper.id,
@@ -310,9 +325,10 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       const saved = await wb.insertItems(rows);
       setItems(saved);
       await wb.setPaperStatus(paper.id, "reviewing");
-      setStatus(`匹配完成，共 ${saved.length} 道题。请核对答案后批改。`);
-    } catch (err) { setStatus("出错：" + (err.message || err)); }
-  }, [userId, wb, qFiles, aFiles]);
+      report(`匹配完成，共 ${saved.length} 道题。请核对答案后批改。`, 100);
+      setTimeout(() => setProgress(null), 800);
+    } catch (err) { report("出错：" + (err.message || err)); setProgress(null); }
+  }, [userId, wb, qFiles, aFiles, report, progress]);
 
   const saveAnswer = async (item) => {
     const updated = await wb.updateItem(item.id, { student_answer: draft, reviewed: true });
@@ -321,11 +337,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   };
 
   const gradeAll = async () => {
-    setStatus("AI 批改中…");
+    report("AI 批改中…", 5);
     const graded = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      setStatus(`批改 ${i + 1}/${items.length}：第 ${item.number} 题…`);
+      report(`批改 ${i + 1}/${items.length}：第 ${item.number} 题…`, Math.round(5 + (i / items.length) * 90));
       try {
         const result = await gradeItem({ question: item.question, studentAnswer: item.student_answer });
         const patch = {
@@ -343,7 +359,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     }
     setItems(graded);
     await wb.bumpMastery(userId, graded);
-    setStatus(`批改完成：错 ${graded.filter((x) => x.is_correct === false).length} 题。点错题开始辅导。`);
+    report(`批改完成：错 ${graded.filter((x) => x.is_correct === false).length} 题。点错题开始辅导。`, 100);
+    setTimeout(() => setProgress(null), 800);
     onItemsGraded?.(graded);
   };
 
@@ -455,6 +472,12 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       )}
 
       {status && <div className="pp-status">{status}</div>}
+      {progress !== null && progress < 100 && (
+        <>
+          <div className="pp-prog-pct">{progress}%</div>
+          <div className="pp-prog-wrap"><div className="pp-prog-bar" style={{ width: `${progress}%` }} /></div>
+        </>
+      )}
       {needGrade && <button className="pp-btn primary" style={{ marginTop: 8 }} onClick={gradeAll}>全部批改（判对错 + 分析）</button>}
 
       <div className="pp-list">
@@ -503,27 +526,32 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
 function SolvePanel() {
   const [hot, setHot] = useState(false);
   const [status, setStatus] = useState("");
+  const [progress, setProgress] = useState(null);
   const [items, setItems] = useState([]);
   const fileInputRef = useRef(null);
+  const report = useCallback((msg, pct) => { setStatus(msg); if (pct !== undefined) setProgress(pct); }, []);
 
   const handleFiles = useCallback(async (files) => {
     if (!files?.length) return;
     const allFiles = [...files].filter((f) => f.type.startsWith("image/") || f.type === "application/pdf");
-    if (!allFiles.length) { setStatus("请上传图片或 PDF 文件"); return; }
+    if (!allFiles.length) { report("请上传图片或 PDF 文件"); return; }
     try {
       setItems([]);
       let questions = [];
-      for (const f of allFiles) {
-        setStatus(`读取 ${f.name}…`);
+      const total = allFiles.length;
+      for (let fi = 0; fi < total; fi++) {
+        const f = allFiles[fi];
+        const baseP = Math.round(5 + (fi / total) * 25);
+        report(`读取 ${f.name}…`, baseP);
         if (f.type === "application/pdf") {
-          const text = await pdfToText(f, setStatus);
+          const text = await pdfToText(f, (msg) => report(msg, baseP + 3));
           if (text.replace(/\s+/g, "").length >= MIN_TEXT_DENSITY) {
-            setStatus("AI 识别题目结构…");
+            report("AI 识别题目结构…", baseP + 8);
             questions = questions.concat(await extractQuestionsFromText(text));
           } else {
-            const uris = await pdfToImageURIs(f, setStatus);
+            const uris = await pdfToImageURIs(f, (msg) => report(msg, baseP + 5));
             for (let i = 0; i < uris.length; i++) {
-              setStatus(`视觉识别第 ${i + 1}/${uris.length} 页…`);
+              report(`视觉识别第 ${i + 1}/${uris.length} 页…`, Math.round(baseP + 5 + (i / uris.length) * 18));
               const parsed = await extractPaper(uris[i], "together");
               questions = questions.concat(parsed.map((x) => ({ number: x.number, question: x.question })));
             }
@@ -531,17 +559,17 @@ function SolvePanel() {
         } else {
           const uri = await fileToDataURI(f);
           if (!uri) continue;
-          setStatus(`AI 识别图片题目…`);
+          report("AI 识别图片题目…", baseP + 5);
           const parsed = await extractPaper(uri, "together");
           questions = questions.concat(parsed.map((x) => ({ number: x.number, question: x.question })));
         }
       }
-      if (!questions.length) { setStatus("没有识别到题目，请检查文件"); return; }
+      if (!questions.length) { report("没有识别到题目，请检查文件"); setProgress(null); return; }
       setItems(questions.map((q) => ({ ...q, solution: null, knowledgePoints: [], chapter: "", solving: true, expanded: true, failed: false })));
-      setStatus(`识别到 ${questions.length} 道题，AI 解题中…`);
+      report(`识别到 ${questions.length} 道题，AI 解题中…`, 30);
       for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
-        setStatus(`解题 ${i + 1}/${questions.length}：${q.number}…`);
+        report(`解题 ${i + 1}/${questions.length}：${q.number}…`, Math.round(30 + (i / questions.length) * 68));
         try {
           const result = await solveQuestion(q.number, q.question);
           const ok = result?.solution && result.solution.trim().length > 10;
@@ -554,9 +582,10 @@ function SolvePanel() {
           ));
         }
       }
-      setStatus(`全部完成，共 ${questions.length} 道题。`);
-    } catch (err) { setStatus("出错：" + (err.message || err)); }
-  }, []);
+      report(`全部完成，共 ${questions.length} 道题。`, 100);
+      setTimeout(() => setProgress(null), 800);
+    } catch (err) { report("出错：" + (err.message || err)); setProgress(null); }
+  }, [report]);
 
   const retryItem = useCallback(async (idx, item) => {
     setItems((prev) => prev.map((x, i) => i === idx ? { ...x, solving: true, failed: false } : x));
@@ -586,6 +615,12 @@ function SolvePanel() {
       </div>
       <input ref={fileInputRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={(e) => handleFiles(e.target.files)} />
       {status && <div className="pp-status">{status}</div>}
+      {progress !== null && progress < 100 && (
+        <>
+          <div className="pp-prog-pct">{progress}%</div>
+          <div className="pp-prog-wrap"><div className="pp-prog-bar" style={{ width: `${progress}%` }} /></div>
+        </>
+      )}
       <div className="pp-list">
         {items.length === 0
           ? <div className="pp-empty">还没有题目<br />上传一份试卷或作业 PDF，AI 会给出完整解答</div>

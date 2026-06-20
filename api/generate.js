@@ -103,8 +103,8 @@ async function runHandler(req, res) {
   // 火山引擎豆包（Volcengine ARK）— 兼容 OpenAI 格式，视觉模型可替代 Gemini OCR
   const VOLCENGINE_KEY  = process.env.HUOSHAN_KEY || process.env.VOLCENGINE_KEY || process.env.DOUBAO_KEY || process.env.doubao_key || __fromPlatformSlot("volcengine");
   const VOLCENGINE_BASE = "https://ark.cn-beijing.volces.com/api/v3";
-  const VOLCENGINE_VISION_MODEL = process.env.VOLCENGINE_VISION_MODEL || "doubao-seed-2-0";
-  const VOLCENGINE_TEXT_MODEL   = process.env.VOLCENGINE_TEXT_MODEL   || "doubao-seed-2-0-mini";
+  const VOLCENGINE_VISION_MODEL = process.env.VOLCENGINE_VISION_MODEL || "doubao-seed-2-0-mini";
+  const VOLCENGINE_TEXT_MODEL   = process.env.VOLCENGINE_TEXT_MODEL   || "doubao-seed-2-0-lite";
 
   // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底
   const SERVER_KEY_FOR = {

@@ -17014,38 +17014,39 @@ export default function App() {
                     initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                     transition={{ duration: 0.25 }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 24px", borderBottom: "1px solid #e7e8ef", background: "#fff" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", borderBottom: "1px solid #e7e8ef", background: "#fff", flexWrap: "wrap" }}>
                       <button onClick={exitMaterial}
-                        style={{ border: "1px solid #e7e8ef", background: "#fff", borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>
+                        style={{ border: "1px solid #e7e8ef", background: "#fff", borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", flexShrink: 0 }}>
                         ← 教材画廊
                       </button>
-                      <div style={{ fontWeight: 700, fontSize: 15 }}>{currentMaterial.title || "线性代数"}</div>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "#3a3f55", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 260, flexShrink: 1 }}>
+                        {currentMaterial.title || "线性代数"}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, marginLeft: 4 }}>
+                        {[
+                          { key: "工作台", label: "错题工作台" },
+                          { key: "知识点", label: "知识点" },
+                          { key: "错题本", label: "错题本" },
+                        ].map((t) => {
+                          const on = (studyTab || "工作台") === t.key;
+                          return (
+                            <button key={t.key} onClick={() => setStudyTab(t.key)}
+                              style={{
+                                border: on ? "1px solid #4338ca" : "1px solid #e7e8ef",
+                                background: on ? "#4338ca" : "#fff",
+                                color: on ? "#fff" : "#3a3f55",
+                                borderRadius: 8, padding: "6px 12px", cursor: "pointer",
+                                fontSize: 12.5, fontWeight: 600, transition: "0.12s", fontFamily: "inherit", whiteSpace: "nowrap",
+                              }}>
+                              {t.label}
+                            </button>
+                          );
+                        })}
+                      </div>
                       <button onClick={() => setSandboxPreviewing(true)}
-                        style={{ marginLeft: "auto", border: "1px solid #e7e8ef", background: "#fff", borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>
+                        style={{ marginLeft: "auto", border: "1px solid #e7e8ef", background: "#fff", borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", flexShrink: 0 }}>
                         📖 查看 PDF
                       </button>
-                    </div>
-
-                    <div style={{ display: "flex", gap: 8, padding: "12px 24px 0", background: "#FAFAFC" }}>
-                      {[
-                        { key: "工作台", label: "📝 错题工作台" },
-                        { key: "知识点", label: "📚 知识点" },
-                        { key: "错题本", label: "❌ 错题本" },
-                      ].map((t) => {
-                        const on = (studyTab || "工作台") === t.key;
-                        return (
-                          <button key={t.key} onClick={() => setStudyTab(t.key)}
-                            style={{
-                              border: on ? "1px solid #4338ca" : "1px solid #e7e8ef",
-                              background: on ? "#4338ca" : "#fff",
-                              color: on ? "#fff" : "#3a3f55",
-                              borderRadius: 9, padding: "8px 15px", cursor: "pointer",
-                              fontSize: 13, fontWeight: 600, transition: "0.12s", fontFamily: "inherit",
-                            }}>
-                            {t.label}
-                          </button>
-                        );
-                      })}
                     </div>
 
                     <div style={{ flex: 1, overflow: "auto", padding: "16px 24px" }}>
