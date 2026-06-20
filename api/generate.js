@@ -100,6 +100,11 @@ async function runHandler(req, res) {
   const GROQ_KEY      = process.env.GROQ_KEY      || __fromPlatformSlot("groq");
   const DEEPSEEK_KEY  = process.env.DEEPSEEK_KEY  || process.env.deep_seek_key || __fromPlatformSlot("deepseek");
   const KIMI_KEY      = process.env.KIMI_KEY      || __fromPlatformSlot("kimi");
+  // 火山引擎豆包（Volcengine ARK）— 兼容 OpenAI 格式，视觉模型可替代 Gemini OCR
+  const VOLCENGINE_KEY  = process.env.VOLCENGINE_KEY || process.env.DOUBAO_KEY || process.env.doubao_key || __fromPlatformSlot("volcengine");
+  const VOLCENGINE_BASE = "https://ark.cn-beijing.volces.com/api/v3";
+  const VOLCENGINE_VISION_MODEL = process.env.VOLCENGINE_VISION_MODEL || "doubao-1.5-vision-pro-32k";
+  const VOLCENGINE_TEXT_MODEL   = process.env.VOLCENGINE_TEXT_MODEL   || "doubao-1.5-pro-32k";
 
   // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底
   const SERVER_KEY_FOR = {
@@ -108,11 +113,13 @@ async function runHandler(req, res) {
     deepseek: DEEPSEEK_KEY,
     kimi: KIMI_KEY,
     anthropic: ANTHROPIC_KEY,
+    volcengine: VOLCENGINE_KEY,
+    doubao: VOLCENGINE_KEY,
   };
 
   const hasUserKey = userKey && String(userKey).trim().length > 8;
   const effectiveProvider = hasUserKey ? (userProvider || "groq") : null;
-  const hasServerKey = !!(GROQ_KEY || GEMINI_KEY || GEMINI_OAI_KEY || ANTHROPIC_KEY || DEEPSEEK_KEY || KIMI_KEY);
+  const hasServerKey = !!(GROQ_KEY || GEMINI_KEY || GEMINI_OAI_KEY || ANTHROPIC_KEY || DEEPSEEK_KEY || KIMI_KEY || VOLCENGINE_KEY);
 
   // ── Provider-aware：判断这次请求"最终会落在哪个 provider"，用来选配不同的 VIZ 指令 ──
   // 不同模型的结构化输出能力差异很大：
@@ -913,6 +920,10 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
       if (compat) return compat;
       return await callGeminiOfficial(k) || "";
     }
+    if (pid === "volcengine" || pid === "doubao") {
+      const model = hasVisionMessages ? VOLCENGINE_VISION_MODEL : VOLCENGINE_TEXT_MODEL;
+      return await callOpenAICompat(VOLCENGINE_BASE, k, model, `volcengine(${tagSrc}):${model}`) || "";
+    }
     if (pid === "custom") {
       const base = String(userCustomUrl || "").trim().replace(/\/$/, "");
       if (!base) { providerDiag.push(`custom(${tagSrc}): no_base_url`); return ""; }
@@ -960,6 +971,12 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   // Priority 4.5: server Kimi
   if (!responseText && KIMI_KEY) {
     responseText = await callOpenAICompat("https://api.moonshot.cn/v1", KIMI_KEY, "moonshot-v1-8k", "kimi(server)") || "";
+  }
+
+  // Priority 4.7: 火山引擎豆包（含视觉模型，Gemini 失效时的主要替代）
+  if (!responseText && VOLCENGINE_KEY) {
+    const model = hasVisionMessages ? VOLCENGINE_VISION_MODEL : VOLCENGINE_TEXT_MODEL;
+    responseText = await callOpenAICompat(VOLCENGINE_BASE, VOLCENGINE_KEY, model, `volcengine(server):${model}`) || "";
   }
 
   // Priority 5: Anthropic

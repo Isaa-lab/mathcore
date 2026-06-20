@@ -124,6 +124,34 @@ ${layoutHint}
   return data?.items || [];
 }
 
+// 从手写答案图片提取答案列表（分开模式专用）
+export async function extractAnswersFromImage(dataURI) {
+  const prompt = `这是学生的手写答案页面（只有答案，没有题目）。
+请识别每道题的题号和学生手写的答案。
+
+要提取：
+1. 题号 number（如 "1"、"Q2"、"(i)" 等，原样保留）
+2. 学生手写答案 studentAnswer（数学公式尽力识别，用 $...$ LaTeX）
+3. 置信度 answerConfidence：字迹清晰 high，潦草/模糊 low
+
+只输出 JSON，无多余文字：
+{"items":[{"number":"1","studentAnswer":"手写内容","answerConfidence":"high"}]}`;
+  const data = await callVision(dataURI, prompt);
+  return data?.items || [];
+}
+
+// 从纯文字答案内容提取答案列表（分开模式专用）
+export async function extractAnswersFromText(text) {
+  const prompt = `下面是学生答案的文字内容，请提取每道题的题号和对应答案。
+只输出 JSON，无多余文字：
+{"items":[{"number":"1","studentAnswer":"答案内容"}]}
+
+文字内容：
+${text.slice(0, 6000)}`;
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "答案提取" });
+  return parseLooseJSON(raw)?.items || [];
+}
+
 export async function gradeItem({ question, studentAnswer }) {
   const prompt = `你是线性代数老师。判断学生答案是否正确，并分析。
 
