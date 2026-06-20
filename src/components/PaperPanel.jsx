@@ -83,14 +83,16 @@ function fileToDataURI(file, { maxPx = 800, quality = 0.55 } = {}) {
 
 const MIN_TEXT_DENSITY = 60;
 
-// 从任意文件（图片或 PDF）提取题目信息
-// 获取图片供 AI 使用：压缩后转 base64（Volcengine 在国内，无法访问 Supabase/AWS 的境外 URL）
-// maxPx=1200 / quality=0.75 用于答案图（手写字迹需要更高分辨率），题目图用默认 800/0.55
-async function getImageForAI(file, { maxPx = 800, quality = 0.55 } = {}) {
-  return fileToDataURI(file, { maxPx, quality });
+// 获取图片供 AI 使用：优先上传到 Supabase 拿 signed URL（Volcengine 自行取图，省去跨洋传输）
+// wb/userId 缺失时退回本地压缩 base64
+async function getImageForAI(file, wb, userId) {
+  if (wb && userId) {
+    try { return await wb.uploadAndGetSignedUrl(file, userId); } catch {}
+  }
+  return fileToDataURI(file);
 }
 
-async function extractFromFiles(files, mode, onProgress) {
+async function extractFromFiles(files, mode, onProgress, wb, userId) {
   let items = [];
   for (const f of files) {
     onProgress?.(`处理 ${f.name}…`);
@@ -111,22 +113,22 @@ async function extractFromFiles(files, mode, onProgress) {
         for (const uri of uris) items = items.concat(await extractPaper(uri, "together"));
       }
     } else {
-      onProgress?.(`AI 视觉识别 ${f.name}…`);
-      const imgUri = await getImageForAI(f);
-      if (!imgUri) continue;
+      onProgress?.(`上传 ${f.name} 到云端…`);
+      const imgUrl = await getImageForAI(f, wb, userId);
+      if (!imgUrl) continue;
       if (mode === "questions") {
-        const parsed = await extractPaper(imgUri, "together");
+        const parsed = await extractPaper(imgUrl, "together");
         items = items.concat(parsed.map((x) => ({ number: x.number, question: x.question })));
       } else {
-        items = items.concat(await extractPaper(imgUri, "together"));
+        items = items.concat(await extractPaper(imgUrl, "together"));
       }
     }
   }
   return items;
 }
 
-// 从答案文件提取答案列表（用更高分辨率：手写字迹需要清晰度）
-async function extractAnswersFromFiles(files, onProgress) {
+// 从答案文件提取答案列表
+async function extractAnswersFromFiles(files, onProgress, wb, userId) {
   let answers = [];
   for (const f of files) {
     onProgress?.(`识别答案 ${f.name}…`);
@@ -139,9 +141,9 @@ async function extractAnswersFromFiles(files, onProgress) {
         for (const uri of uris) answers = answers.concat(await extractAnswersFromImage(uri));
       }
     } else {
-      onProgress?.(`AI 识别手写答案 ${f.name}…`);
-      const imgUri = await getImageForAI(f, { maxPx: 1200, quality: 0.75 });
-      if (imgUri) answers = answers.concat(await extractAnswersFromImage(imgUri));
+      onProgress?.(`上传 ${f.name} 到云端…`);
+      const imgUrl = await getImageForAI(f, wb, userId);
+      if (imgUrl) answers = answers.concat(await extractAnswersFromImage(imgUrl));
     }
   }
   return answers;
@@ -339,10 +341,10 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     if (!qFiles.length || !aFiles.length) return;
     try {
       report("提取题目…", 5);
-      const questions = await extractFromFiles(qFiles, "questions", (msg) => report(msg, Math.min(35, (progress || 5) + 3)));
+      const questions = await extractFromFiles(qFiles, "questions", (msg) => report(msg, Math.min(35, (progress || 5) + 3)), wb, userId);
       if (!questions.length) { report("题目识别失败，请检查题目文件"); setProgress(null); return; }
       report(`提取到 ${questions.length} 道题，识别学生答案…`, 40);
-      const answers = await extractAnswersFromFiles(aFiles, (msg) => report(msg, Math.min(75, (progress || 40) + 3)));
+      const answers = await extractAnswersFromFiles(aFiles, (msg) => report(msg, Math.min(75, (progress || 40) + 3)), wb, userId);
       report("AI 匹配题目和答案…", 80);
       const merged = mergeQuestionsAnswers(questions, answers);
       report("保存…", 88);
