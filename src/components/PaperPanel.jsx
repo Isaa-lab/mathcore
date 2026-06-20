@@ -56,11 +56,27 @@ async function pdfToText(file, onProgress) {
   return parts.join("\n\n");
 }
 
-function fileToDataURI(file) {
+// Compress image to max 800px and JPEG 0.55 before sending to AI.
+// Phone JPGs are often 3-5MB; this gets them under ~50KB, cutting cross-Pacific latency.
+function fileToDataURI(file, { maxPx = 800, quality = 0.55 } = {}) {
   return new Promise((res) => {
     const reader = new FileReader();
-    reader.onload = () => res(reader.result);
     reader.onerror = () => res(null);
+    reader.onload = (e) => {
+      if (!file.type.startsWith("image/")) { res(e.target.result); return; }
+      const img = new Image();
+      img.onerror = () => res(e.target.result);
+      img.onload = () => {
+        const ratio = Math.min(1, maxPx / Math.max(img.width, img.height));
+        const w = Math.round(img.width * ratio);
+        const h = Math.round(img.height * ratio);
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        res(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = e.target.result;
+    };
     reader.readAsDataURL(file);
   });
 }

@@ -778,9 +778,11 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     if (budget < 1500) { providerDiag.push(`${tag}: skipped(budget_exhausted)`); return null; }
     const t0 = Date.now();
     try {
+      // 视觉 OCR 不需要长回复，减小 max_tokens 让模型尽快输出
+      const maxTok = hasVisionMessages ? 1500 : 4000;
       const body = isChatMode
-        ? { model, messages, temperature: 0.6, max_tokens: 4000 }
-        : { model, messages: [{ role: "user", content: prompt }], temperature: 0.5, max_tokens: 4000 };
+        ? { model, messages, temperature: 0.6, max_tokens: maxTok }
+        : { model, messages: [{ role: "user", content: prompt }], temperature: 0.5, max_tokens: maxTok };
       const r = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
@@ -950,8 +952,10 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     }
   }
 
-  // Priority 2: 火山引擎豆包（主力 server key，HUOSHAN_KEY）—— 文字用 Seed-2.0-mini，视觉用 Seed-2.0
-  if (!responseText && VOLCENGINE_KEY) {
+  // Priority 2: 火山引擎豆包（主力 server key，HUOSHAN_KEY）
+  // 若 Priority 1.5 已经用平台 key 尝试过 volcengine，跳过避免重复超时（尤其视觉请求）
+  const volcengineAlreadyTried = !hasUserKey && (userProvider === "volcengine" || userProvider === "doubao");
+  if (!responseText && VOLCENGINE_KEY && !volcengineAlreadyTried) {
     const model = hasVisionMessages ? VOLCENGINE_VISION_MODEL : VOLCENGINE_TEXT_MODEL;
     responseText = await callOpenAICompat(VOLCENGINE_BASE, VOLCENGINE_KEY, model, `volcengine(server):${model}`) || "";
   }
