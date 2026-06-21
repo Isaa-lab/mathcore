@@ -28,7 +28,8 @@ function useCSS() {
 
 export default function KnowledgePanel({ item, existingNotes = {} }) {
   useCSS();
-  const points = item?.knowledge_points || [];
+  // 过滤空字符串/重复，避免出现空白知识点标签
+  const points = [...new Set((item?.knowledge_points || []).map((p) => String(p).trim()).filter(Boolean))];
   const [active, setActive] = useState(points[0] || null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);

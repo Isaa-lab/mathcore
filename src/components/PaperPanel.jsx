@@ -256,6 +256,8 @@ const CSS = `
 .pp-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}.pp-btn.mini{padding:3px 8px;font-size:11px}
 .pp-empty{text-align:center;color:var(--faint);padding:30px 14px;font-size:13px;line-height:1.7}
 .pp-flip{margin-left:auto;font-family:ui-monospace,monospace;font-size:11px;color:var(--brand);cursor:pointer;background:none;border:none}
+.pp-collapse-bar{font-size:12px;color:var(--brand);background:var(--brand-soft);border:1px solid #dfe2ff;border-radius:8px;padding:6px 12px;cursor:pointer;text-align:center;margin-bottom:8px;user-select:none;flex-shrink:0}
+.pp-collapse-bar:hover{background:#e7e9ff}
 .pp-layout-pick{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:10px}
 .pp-lp-label{font-size:12px;color:var(--mut)}
 .pp-lp-opt{font-size:12px;border:1px solid var(--line);background:#fff;color:#3a3f55;border-radius:7px;padding:5px 10px;cursor:pointer;transition:.12s;user-select:none}
@@ -436,6 +438,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const [reviewImgIdx, setReviewImgIdx] = useState(0);
   const [focusBox, setFocusBox] = useState(null); // {img, bbox} 当前高亮的题在原图里的区域
   const [lightbox, setLightbox] = useState(null); // URL of enlarged image
+  const [uploadCollapsed, setUploadCollapsed] = useState(false); // 有题目后收起上传区，给列表腾空间
   const fileRef = useRef(null);
   const qRef = useRef(null);
   const aRef = useRef(null);
@@ -444,6 +447,10 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     setStatus(msg);
     if (pct !== undefined) setProgress(pct);
   }, []);
+
+  // 识别/批改出题目后，自动收起上面的上传区，把空间让给题目列表
+  const hasItems = items.length > 0;
+  useEffect(() => { if (hasItems) setUploadCollapsed(true); }, [hasItems]);
 
   // ── 在一起模式：单区上传 ──
   const handleTogether = useCallback(async (files) => {
@@ -700,6 +707,13 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
 
   return (
     <>
+      {hasItems && (
+        <div className="pp-collapse-bar" onClick={() => setUploadCollapsed((c) => !c)}>
+          {uploadCollapsed ? "▸ 展开上传区（重新上传卷子）" : "▾ 收起上传区，腾出空间看题目"}
+        </div>
+      )}
+      {!uploadCollapsed && (
+      <>
       <div className="pp-layout-pick">
         <span className="pp-lp-label">卷子格式：</span>
         {[{ key: "together", label: "题目+答案在一起" }, { key: "separate", label: "题目和答案分开" }].map((opt) => (
@@ -784,6 +798,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
             </div>
           )}
         </>
+      )}
+      </>
       )}
 
       {status && <div className="pp-status">{status}</div>}
