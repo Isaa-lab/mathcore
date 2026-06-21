@@ -656,7 +656,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                     ))}
                   </div>
                 )}
-                <div className="pp-rv-hint">点右侧某道题的答案框，左图会高亮它在原卷的位置</div>
+                <div className="pp-rv-hint">点右侧某道题的答案框，左图会跳到它所在的原卷页（识别到坐标时还会画框）</div>
               </>
             ) : (
               <div style={{ color: "var(--faint)", fontSize: 12, textAlign: "center", padding: 20 }}>（PDF 文字版无图片预览）</div>
@@ -671,9 +671,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                 answers={reviewAnswers}
                 onChange={(updated) => setReviewItems(prev => prev.map((x, j) => j === i ? updated : x))}
                 onFocusAnswer={(it) => {
-                  if (it && it._img >= 0 && Array.isArray(it.bbox)) {
+                  // 只要知道来源图就先跳到那页（靠我们记的页码，一定有效）；
+                  // 模型给了 bbox 才额外画框。
+                  if (it && it._img >= 0) {
                     setReviewImgIdx(it._img);
-                    setFocusBox({ img: it._img, bbox: it.bbox });
+                    setFocusBox(Array.isArray(it.bbox) ? { img: it._img, bbox: it.bbox } : null);
                   } else {
                     setFocusBox(null);
                   }
