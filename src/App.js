@@ -10941,7 +10941,7 @@ function WrongDrill({ questions, onExit, onMastered }) {
 // 错题本只读表、渲染、触发重做/标签/AI 变式。
 // 错题本：在"练习错题（SM2 间隔重复）"与"卷子错题/收藏（来自批改工作台的 paper_items）"之间切换。
 function NotebookSwitcher({ supabase, userId, wrongPageProps = {} }) {
-  const [view, setView] = React.useState("paper"); // "paper" | "practice"
+  const [view, setView] = useState("paper"); // "paper" | "practice"
   const tabBtn = (k, label) => (
     <span
       onClick={() => setView(k)}
