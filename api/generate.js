@@ -928,8 +928,10 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   const callProviderWithKey = async (pid, k, source /* "user" | "server" */) => {
     const tagSrc = source === "server" ? "server" : "user";
     if (pid === "groq") {
-      // Groq LLaMA 模型不支持视觉，vision 请求直接跳过，避免浪费时间拿 400
-      if (hasVisionMessages) { providerDiag.push(`groq(${tagSrc}): skipped(no_vision_support)`); return ""; }
+      // Groq 的 Llama-4 Scout 支持视觉；视觉请求走该多模态模型。
+      if (hasVisionMessages) {
+        return await callOpenAICompat("https://api.groq.com/openai/v1", k, "meta-llama/llama-4-scout-17b-16e-instruct", `groq(${tagSrc}):llama-4-scout`) || "";
+      }
       const primary  = isChatMode ? GROQ_CHAT_MODEL : GROQ_GEN_MODEL;
       const fallback = isChatMode ? GROQ_GEN_MODEL : GROQ_CHAT_MODEL;
       let out = await callOpenAICompat("https://api.groq.com/openai/v1", k, primary, `groq(${tagSrc}):${primary}`) || "";
@@ -975,15 +977,22 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     return "";
   };
 
-  // ── Priority 0（仅视觉）：豆包优先，Gemini 兜底 ─────────────────────────────
-  // 豆包机房在北京、与本函数（香港 hkg1）同区，且有付费额度，稳定且快；
-  // Gemini 免费层经常 429，故只作兜底。Kimi vision 再兜底。
+  // ── Priority 0（仅视觉）：按"全球可达 + 质量"排序 ───────────────────────────
+  // 现实约束：Vercel 在大陆境外，豆包(北京)/Kimi(国内) 跨境传图常被重置(fetch failed)，
+  // 只能放最后试。真正可靠的是境外可达的 Gemini / Groq。
+  //   1) Gemini 官方 —— 质量最好，但免费层每天 200 次(RPD)用完会 429
+  //   2) Groq Llama-4 Scout —— 免费、美国机房、不跨境，作主力兜底
+  //   3) 豆包 / Kimi —— 国内，跨境多半连不上，最后试（失败也快）
+  const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
   if (hasVisionMessages) {
-    if (!responseText && VOLCENGINE_KEY) {
-      responseText = await callOpenAICompat(VOLCENGINE_BASE, VOLCENGINE_KEY, VOLCENGINE_VISION_MODEL, `volcengine(server):${VOLCENGINE_VISION_MODEL}`) || "";
-    }
     if (!responseText && GEMINI_KEY) {
       responseText = await callGeminiOfficial(GEMINI_KEY) || "";
+    }
+    if (!responseText && GROQ_KEY) {
+      responseText = await callOpenAICompat("https://api.groq.com/openai/v1", GROQ_KEY, GROQ_VISION_MODEL, `groq(server):llama-4-scout`) || "";
+    }
+    if (!responseText && VOLCENGINE_KEY) {
+      responseText = await callOpenAICompat(VOLCENGINE_BASE, VOLCENGINE_KEY, VOLCENGINE_VISION_MODEL, `volcengine(server):${VOLCENGINE_VISION_MODEL}`) || "";
     }
     if (!responseText && KIMI_KEY) {
       responseText = await callOpenAICompat("https://api.moonshot.cn/v1", KIMI_KEY, "moonshot-v1-vision-preview", "kimi(server)") || "";
