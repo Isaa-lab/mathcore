@@ -3,7 +3,12 @@ import MathText from "../lib/MathText";
 import { explainKnowledge } from "../lib/workbenchAI";
 
 const CSS = `
-.kp{--ink:#0f1220;--mut:#6b7184;--faint:#9aa0b4;--line:#e7e8ef;--soft:#f0f1f6;--brand:#4338ca;--amber:#d97706;--amber-soft:#fef3e2;color:var(--ink);height:100%;overflow-y:auto}
+.kp{--ink:#0f1220;--mut:#6b7184;--faint:#9aa0b4;--line:#e7e8ef;--soft:#f0f1f6;--brand:#4338ca;--amber:#d97706;--amber-soft:#fef3e2;--rose:#be123c;--rose-soft:#fdeaef;--emerald:#047857;--emerald-soft:#e7f6ef;color:var(--ink);height:100%;overflow-y:auto}
+.kp-err{background:var(--rose-soft);border:1px solid #f3c7d2;border-radius:11px;padding:12px 14px}
+.kp-err-h{font-family:ui-monospace,monospace;font-size:11px;color:var(--rose);font-weight:600;margin-bottom:6px}
+.kp-err-b{font-size:13px;color:#7c2030;line-height:1.75}
+.kp-correct{background:var(--emerald-soft);border:1px solid #c7ead8;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;color:var(--ink)}
+.kp-ca-h{font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.12em;color:var(--emerald);text-transform:uppercase;margin:0 0 8px}
 .kp-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}.kp-tab{font-size:12px;border:1px solid var(--line);background:#fff;color:#3a3f55;border-radius:8px;padding:6px 11px;cursor:pointer;font-family:ui-monospace,monospace}.kp-tab.on{background:var(--brand);border-color:var(--brand);color:#fff}
 .kp-sec{margin-bottom:18px}.kp-ey{font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;margin:0 0 8px}.kp-summary{font-size:15px;font-weight:600;line-height:1.5;margin-bottom:12px}.kp-detail{font-size:14px;line-height:1.75;color:#3a3f55}
 .kp-points{list-style:none;padding:0;margin:0;display:grid;gap:7px}.kp-points li{font-size:13px;padding:8px 11px;background:var(--soft);border-radius:8px;display:flex;gap:8px}.kp-points li::before{content:"▸";color:var(--brand)}
@@ -62,6 +67,24 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
 
   return (
     <div className="kp">
+      {item.is_correct === false && (item.error_detail || item.error_type || item.correct_answer) && (
+        <>
+          {(item.error_detail || item.error_type) && (
+            <div className="kp-sec">
+              <div className="kp-err">
+                <div className="kp-err-h">✗ 错在哪里{item.error_type ? ` · ${item.error_type}错误` : ""}</div>
+                <div className="kp-err-b"><MathText text={item.error_detail || "（未给出具体说明）"} /></div>
+              </div>
+            </div>
+          )}
+          {item.correct_answer && (
+            <div className="kp-sec">
+              <p className="kp-ca-h">✓ 参考正确答案</p>
+              <div className="kp-correct"><MathText text={item.correct_answer} /></div>
+            </div>
+          )}
+        </>
+      )}
       {points.length > 0 && (
         <>
           <p className="kp-ey" style={{ marginBottom: 8 }}>这道题考的知识点 · 点击查看</p>

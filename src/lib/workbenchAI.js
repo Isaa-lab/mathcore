@@ -260,11 +260,41 @@ export async function tutorReply({ item, history, userMessage }) {
 }
 
 export async function explainKnowledge({ point, existingNote }) {
+  // 用分段标记而非 JSON：讲解里全是 $LaTeX$，塞进 JSON 会被反斜杠破坏解析 → 整段空白。
   const prompt = `你是线性代数老师。请讲解知识点「${point}」，帮助学生彻底理解。
 ${existingNote ? `\n已有教材资料，优先参考：\n${existingNote}\n` : ""}
-输出 JSON：
-{"summary":"一句话核心","detail":"详细讲解含$公式$","keyPoints":["要点1","要点2"],"visualHint":"建议的可视化方式","example":"一个简单例子"}`;
-  return await callGenerate([{ role: "user", content: prompt }], { json: true, materialTitle: "知识点详解" });
+严格按以下分段输出，每段以独立一行的标记开头，公式一律用 $...$ 包裹（不要用 JSON，不要代码块围栏）：
+
+@@概要@@
+（一句话核心）
+@@详解@@
+（详细讲解，可多段，含 $公式$）
+@@要点@@
+- 要点一
+- 要点二
+@@例子@@
+（一个简单具体的例子）`;
+
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "知识点详解" });
+  if (!raw) return null;
+  // 按 @@标记@@ 切段
+  const pick = (tag) => {
+    const re = new RegExp(`@@${tag}@@\\s*([\\s\\S]*?)(?=@@[^@]+@@|$)`, "i");
+    const m = raw.match(re);
+    return m ? m[1].trim() : "";
+  };
+  const summary = pick("概要");
+  const detail = pick("详解");
+  const example = pick("例子");
+  const keyPoints = pick("要点")
+    .split("\n")
+    .map((l) => l.replace(/^[-•·*]\s*/, "").trim())
+    .filter(Boolean);
+  // 完全没解析到分段时，退回把整段当详解，避免空白
+  if (!summary && !detail && !keyPoints.length && !example) {
+    return { summary: "", detail: raw.trim(), keyPoints: [], example: "" };
+  }
+  return { summary, detail, keyPoints, example };
 }
 
 export async function generateVariant(item) {
