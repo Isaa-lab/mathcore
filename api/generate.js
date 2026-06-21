@@ -43,6 +43,29 @@ function stripVizMarkers(text) {
   return out.trim();
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// 剥离思考型模型（如豆包 Seed / DeepSeek-R1）泄漏到正文里的 reasoning。
+// 现象：正文里夹着 <think>...</think>，或被 tokenizer 改名的
+// </think_never_used_51bce...> 这类落单闭合标签，且 reasoning 与正式回答重复。
+// 策略：先去成对块；若仍有落单闭合标签，则只保留「最后一个闭合标签之后」的正式回答；
+//       最后清掉任何残留 think 标签。
+// ────────────────────────────────────────────────────────────────────────────
+function stripThinking(text) {
+  let s = String(text || "");
+  // 1) 成对的 <think...>...</think...>
+  s = s.replace(/<think[^>]*>[\s\S]*?<\/think[^>]*>/gi, "");
+  // 2) 落单闭合标签：保留最后一个之后的正文（那是模型真正的回答）
+  const closes = [...s.matchAll(/<\/think[^>]*>/gi)];
+  if (closes.length) {
+    const last = closes[closes.length - 1];
+    const after = s.slice(last.index + last[0].length).trim();
+    if (after.length >= 8) s = after;
+  }
+  // 3) 清掉任何残留的开/闭 think 标签
+  s = s.replace(/<\/?think[^>]*>/gi, "");
+  return s.trim();
+}
+
 // ── 顶层 try/catch 守卫 ────────────────────────────────────────────────────
 // 关键：任何同步/异步异常都必须返回合法 JSON，绝不能让 Vercel 返回 HTML
 // ("FUNCTION_INVOCATION_FAILED") —— 那会让前端完全丢失定位信息。
@@ -1046,7 +1069,7 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   }
 
   if (isChatMode) {
-    let finalAnswer = responseText.trim();
+    let finalAnswer = stripThinking(responseText);
 
     // —— 可视化按需触发：后端兜底剥离 ——
     // 若本轮不允许 [VIZ:...]（socratic 模式且用户没要求），把 AI 偷偷塞进来的可视化指令删掉。

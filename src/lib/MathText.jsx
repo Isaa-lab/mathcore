@@ -34,7 +34,9 @@ function PlainText({ value }) {
 }
 
 export default function MathText({ children, text }) {
-  const raw = String(text != null ? text : children || "");
+  const raw = String(text != null ? text : children || "")
+    // 防御：清掉任何漏到正文的 reasoning 标签（<think> / </think_never_used_…>）
+    .replace(/<\/?think[^>]*>/gi, "");
 
   if (!raw.includes("$") && !raw.includes("\\(") && !raw.includes("\\[") && looksLikePureLatex(raw)) {
     return <span dangerouslySetInnerHTML={{ __html: renderTex(raw) }} />;

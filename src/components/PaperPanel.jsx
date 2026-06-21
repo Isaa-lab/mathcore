@@ -146,25 +146,38 @@ async function extractFromFiles(files, mode, onProgress, wb, userId) {
 }
 
 // 从答案文件提取答案列表。questionNumbers：已知题号清单，传给 OCR 做对号入座。
+// 返回 { answers, images }：answers 每条带 _img（来源图在 images 里的下标，无图为 -1）+ bbox，
+// images 是可直接展示的答案原图（dataURI），供校对时画框定位。
 async function extractAnswersFromFiles(files, onProgress, wb, userId, questionNumbers = []) {
   let answers = [];
+  const images = []; // 展示用原图（与 _img 下标对应）
+  // 把一批 OCR 出的答案打上来源图下标
+  const tag = (arr, imgIdx) => arr.map((a) => ({ ...a, _img: imgIdx }));
   for (const f of files) {
     onProgress?.(`识别答案 ${f.name}…`);
     if (f.type === "application/pdf") {
       const text = await pdfToText(f, onProgress);
       if (text.replace(/\s+/g, "").length >= MIN_TEXT_DENSITY) {
-        answers = answers.concat(await extractAnswersFromText(text, questionNumbers));
+        answers = answers.concat(tag(await extractAnswersFromText(text, questionNumbers), -1));
       } else {
         const uris = await pdfToImageURIs(f, onProgress);
-        for (const uri of uris) answers = answers.concat(await extractAnswersFromImage(uri, questionNumbers));
+        for (const uri of uris) {
+          const imgIdx = images.push(uri) - 1; // pdfToImageURIs 已是 dataURI，可直接展示
+          answers = answers.concat(tag(await extractAnswersFromImage(uri, questionNumbers), imgIdx));
+        }
       }
     } else {
       onProgress?.(`处理手写答案 ${f.name}…`);
       const imgUrl = await getAnswerImageForAI(f, wb, userId);
-      if (imgUrl) answers = answers.concat(await extractAnswersFromImage(imgUrl, questionNumbers));
+      if (imgUrl) {
+        // OCR 用 imgUrl（可能是签名链接）；展示用本地压缩 dataURI，避免链接过期/CORS
+        const displayUri = await fileToDataURI(f, { maxPx: 1100, quality: 0.85 }) || imgUrl;
+        const imgIdx = images.push(displayUri) - 1;
+        answers = answers.concat(tag(await extractAnswersFromImage(imgUrl, questionNumbers), imgIdx));
+      }
     }
   }
-  return answers;
+  return { answers, images };
 }
 
 // 题号归一化：让 "Q2(i)"、"2.(i)"、"2 (I)" 都映射到同一个 key "2-i"
@@ -187,7 +200,7 @@ function mergeQuestionsAnswers(questions, answers) {
   for (const a of answers) {
     const key = canonicalNumber(a.number);
     if (key && key !== "?" && !(key in ansMap)) {
-      ansMap[key] = { studentAnswer: a.studentAnswer || "", answerConfidence: a.answerConfidence || "high" };
+      ansMap[key] = { studentAnswer: a.studentAnswer || "", answerConfidence: a.answerConfidence || "high", bbox: a.bbox || null, _img: a._img ?? -1 };
     }
   }
   return questions.map((q) => {
@@ -197,6 +210,8 @@ function mergeQuestionsAnswers(questions, answers) {
       question: q.question,
       studentAnswer: ans ? ans.studentAnswer : (q.studentAnswer || ""),
       answerConfidence: ans ? ans.answerConfidence : (q.answerConfidence || "low"),
+      bbox: ans ? ans.bbox : null,
+      _img: ans ? ans._img : -1,
     };
   });
 }
@@ -263,8 +278,11 @@ const CSS = `
 .pp-rv-hd span{font-size:11px;font-weight:400;color:var(--mut);margin-left:8px}
 .pp-rv-body{display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1;min-height:0}
 .pp-rv-imgs{display:flex;flex-direction:column;gap:8px;overflow:hidden}
-.pp-rv-imgmain{flex:1;min-height:0;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:#f8f8fb;display:flex;align-items:center;justify-content:center;cursor:zoom-in}
-.pp-rv-imgmain img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.pp-rv-imgmain{flex:1;min-height:0;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:#f8f8fb;display:flex;align-items:center;justify-content:center}
+.pp-rv-imgwrap{position:relative;display:inline-block;max-width:100%;max-height:100%;line-height:0}
+.pp-rv-imgwrap img{max-width:100%;max-height:100%;object-fit:contain;display:block;cursor:zoom-in}
+.pp-rv-box{position:absolute;border:2px solid var(--brand);background:rgba(67,56,202,.12);border-radius:3px;pointer-events:none;transition:all .15s ease}
+.pp-rv-hint{flex-shrink:0;font-size:11px;color:var(--faint);text-align:center}
 .pp-rv-thumbs{display:flex;gap:6px;overflow-x:auto;flex-shrink:0;padding-bottom:4px}
 .pp-rv-thumb{height:52px;width:52px;object-fit:cover;border-radius:7px;cursor:pointer;border:2px solid transparent;opacity:.7;flex-shrink:0;transition:.12s}
 .pp-rv-thumb.active,.pp-rv-thumb:hover{border-color:var(--brand);opacity:1}
@@ -276,6 +294,9 @@ const CSS = `
 .pp-rvi-warn{color:var(--amber)}
 .pp-rvi-pick{width:100%;border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;font-size:12px;margin-bottom:4px;background:#fff;color:var(--ink);cursor:pointer;outline:none}
 .pp-rvi-pick:focus{border-color:var(--brand)}
+.pp-mtb{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px}
+.pp-mtb button{font-size:11px;border:1px solid var(--line);background:#fff;border-radius:6px;padding:2px 7px;cursor:pointer;font-family:ui-monospace,monospace;color:#3a3f55;line-height:1.4}
+.pp-mtb button:hover{border-color:var(--brand);color:var(--brand)}
 .pp-rvi textarea.pp-edit{min-height:40px;font-size:12px}
 .pp-rvi .pp-preview{margin-top:4px;padding:5px 8px;font-size:12px}
 .pp-rv-foot{display:flex;gap:8px;flex-shrink:0;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--line)}
@@ -300,7 +321,64 @@ function answerSnippet(s) {
   return t ? t.slice(0, 36) + (t.length > 36 ? "…" : "") : "（空白）";
 }
 
-function ReviewItemEditor({ item, answers = [], onChange }) {
+// 数学输入助手：在光标处插入 LaTeX 片段。片段里用 ‸ 标记插入后光标落点（包裹选中文本）。
+const MATH_BTNS = [
+  { label: "$ $", snip: "$‸$", title: "公式包裹" },
+  { label: "a/b", snip: "\\frac{‸}{}", title: "分数" },
+  { label: "x²", snip: "^{‸}", title: "上标" },
+  { label: "xᵢ", snip: "_{‸}", title: "下标" },
+  { label: "√", snip: "\\sqrt{‸}", title: "根号" },
+  { label: "矩阵", snip: "\\begin{pmatrix} ‸ & \\\\ & \\end{pmatrix}", title: "矩阵 pmatrix" },
+  { label: "|·|", snip: "\\begin{vmatrix} ‸ & \\\\ & \\end{vmatrix}", title: "行列式" },
+  { label: "∑", snip: "\\sum_{‸}^{}" },
+  { label: "∫", snip: "\\int ‸" },
+  { label: "λ", snip: "\\lambda " },
+  { label: "α", snip: "\\alpha " },
+  { label: "≤", snip: "\\le " },
+  { label: "≥", snip: "\\ge " },
+  { label: "≠", snip: "\\ne " },
+  { label: "→", snip: "\\to " },
+  { label: "∈", snip: "\\in " },
+  { label: "×", snip: "\\times " },
+  { label: "det", snip: "\\det(‸)" },
+];
+
+function insertSnippet(ta, snip, onChange) {
+  if (!ta) return;
+  const start = ta.selectionStart ?? ta.value.length;
+  const end = ta.selectionEnd ?? start;
+  const before = ta.value.slice(0, start);
+  const selected = ta.value.slice(start, end);
+  const after = ta.value.slice(end);
+  const caretIdx = snip.indexOf("‸");
+  const clean = snip.replace("‸", "");
+  let insertText, newCaret;
+  if (caretIdx >= 0) {
+    insertText = clean.slice(0, caretIdx) + selected + clean.slice(caretIdx);
+    newCaret = before.length + caretIdx + selected.length;
+  } else {
+    insertText = clean;
+    newCaret = before.length + clean.length;
+  }
+  onChange(before + insertText + after);
+  requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(newCaret, newCaret); });
+}
+
+function MathToolbar({ taRef, onChange }) {
+  return (
+    <div className="pp-mtb">
+      {MATH_BTNS.map((b) => (
+        <button key={b.label} type="button" title={b.title || b.label}
+          onMouseDown={(e) => { e.preventDefault(); insertSnippet(taRef.current, b.snip, onChange); }}>
+          {b.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer }) {
+  const ansRef = useRef(null);
   // 当前答案对应原始 OCR 段的下标（-1 表示手动/未指认）
   const matchedIdx = answers.findIndex((a) => (a.studentAnswer || "") === (item.studentAnswer || "") && (item.studentAnswer || "").trim());
   return (
@@ -321,8 +399,12 @@ function ReviewItemEditor({ item, answers = [], onChange }) {
             value={matchedIdx}
             onChange={(e) => {
               const idx = Number(e.target.value);
-              if (idx < 0) onChange({ ...item, studentAnswer: "", answerConfidence: "low" });
-              else onChange({ ...item, studentAnswer: answers[idx].studentAnswer || "", answerConfidence: answers[idx].answerConfidence || "low" });
+              if (idx < 0) onChange({ ...item, studentAnswer: "", answerConfidence: "low", bbox: null, _img: -1 });
+              else {
+                const a = answers[idx];
+                onChange({ ...item, studentAnswer: a.studentAnswer || "", answerConfidence: a.answerConfidence || "low", bbox: a.bbox || null, _img: a._img ?? -1 });
+                onFocusAnswer?.({ ...item, bbox: a.bbox || null, _img: a._img ?? -1 });
+              }
             }}
           >
             <option value={-1}>{matchedIdx < 0 ? "— 未指认，手动输入或选择对应答案 —" : "— 清空 / 手动输入 —"}</option>
@@ -331,7 +413,10 @@ function ReviewItemEditor({ item, answers = [], onChange }) {
             ))}
           </select>
         )}
-        <textarea className="pp-edit" rows={2} value={item.studentAnswer || ""} onChange={e => onChange({ ...item, studentAnswer: e.target.value })} />
+        <MathToolbar taRef={ansRef} onChange={(v) => onChange({ ...item, studentAnswer: v })} />
+        <textarea ref={ansRef} className="pp-edit" rows={2} value={item.studentAnswer || ""}
+          onFocus={() => onFocusAnswer?.(item)}
+          onChange={e => onChange({ ...item, studentAnswer: e.target.value })} />
         {(item.studentAnswer || "").trim()
           ? <div className="pp-preview"><span className="pp-preview-label">预览</span><MathText text={item.studentAnswer} /></div>
           : <div className="pp-grade-warn">⚠ 未匹配到答案——请用上面的下拉选对应的识别段，或对照左侧原图手动补充</div>}
@@ -361,6 +446,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const [reviewAnswers, setReviewAnswers] = useState([]); // 原始 OCR 答案段，供手动指认
   const [reviewImages, setReviewImages] = useState([]);
   const [reviewImgIdx, setReviewImgIdx] = useState(0);
+  const [focusBox, setFocusBox] = useState(null); // {img, bbox} 当前高亮的题在原图里的区域
   const [lightbox, setLightbox] = useState(null); // URL of enlarged image
   const fileRef = useRef(null);
   const qRef = useRef(null);
@@ -452,19 +538,13 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       if (!questions.length) { report("题目识别失败，请检查题目文件"); setProgress(null); return; }
       report(`提取到 ${questions.length} 道题，识别学生答案…`, 40);
       const questionNumbers = questions.map((q) => q.number).filter(Boolean);
-      const answers = await extractAnswersFromFiles(aFiles, (msg) => report(msg, Math.min(75, (progress || 40) + 3)), wb, userId, questionNumbers);
+      const { answers, images } = await extractAnswersFromFiles(aFiles, (msg) => report(msg, Math.min(75, (progress || 40) + 3)), wb, userId, questionNumbers);
       report("AI 匹配题目和答案…", 80);
       const merged = mergeQuestionsAnswers(questions, answers);
-      setReviewAnswers(answers); // 原始 OCR 答案段，供校对时手动指认
-      report("生成预览缩略图…", 85);
-      // 生成本地缩略图供校对展示（不走网络，仅用于 UI 显示）
-      const thumbs = (await Promise.all([
-        ...qFiles.filter(f => f.type.startsWith("image/")).map(f => fileToDataURI(f, { maxPx: 600, quality: 0.8 })),
-        ...aFiles.filter(f => f.type.startsWith("image/")).map(f => fileToDataURI(f, { maxPx: 600, quality: 0.8 })),
-      ])).filter(Boolean);
-      // 进入校对阶段
-      setReviewItems(merged.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low" })));
-      setReviewImages(thumbs);
+      setReviewAnswers(answers); // 原始 OCR 答案段（带 bbox/_img），供手动指认 + 画框定位
+      // 校对左侧用答案原图（带坐标），让每道题能高亮回原图区域
+      setReviewImages(images);
+      setReviewItems(merged.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low", bbox: x.bbox || null, _img: x._img ?? -1 })));
       setReviewImgIdx(0);
       setReviewPhase(true);
       onReviewModeChange?.(true);
@@ -495,6 +575,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       setReviewItems([]);
       setReviewAnswers([]);
       setReviewImages([]);
+      setFocusBox(null);
       onReviewModeChange?.(false);
       report(`保存完成，共 ${saved.length} 道题，点「全部批改」开始。`, 100);
       setTimeout(() => setProgress(null), 800);
@@ -563,12 +644,22 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
           <span>对照原图核对 AI 识别的题目和答案，确认后再批改</span>
         </div>
         <div className="pp-rv-body">
-          {/* 左：原图查看 */}
+          {/* 左：原图查看（点选右侧某题 → 在原图上画框定位该题） */}
           <div className="pp-rv-imgs">
             {reviewImages.length > 0 ? (
               <>
-                <div className="pp-rv-imgmain" onClick={() => setLightbox(reviewImages[reviewImgIdx])}>
-                  <img src={reviewImages[reviewImgIdx]} alt="原始图片" />
+                <div className="pp-rv-imgmain">
+                  <div className="pp-rv-imgwrap">
+                    <img src={reviewImages[reviewImgIdx]} alt="原始图片" onClick={() => setLightbox(reviewImages[reviewImgIdx])} />
+                    {focusBox && focusBox.img === reviewImgIdx && Array.isArray(focusBox.bbox) && (
+                      <div className="pp-rv-box" style={{
+                        left: `${focusBox.bbox[0] * 100}%`,
+                        top: `${focusBox.bbox[1] * 100}%`,
+                        width: `${(focusBox.bbox[2] - focusBox.bbox[0]) * 100}%`,
+                        height: `${(focusBox.bbox[3] - focusBox.bbox[1]) * 100}%`,
+                      }} />
+                    )}
+                  </div>
                 </div>
                 {reviewImages.length > 1 && (
                   <div className="pp-rv-thumbs">
@@ -577,9 +668,10 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                     ))}
                   </div>
                 )}
+                <div className="pp-rv-hint">点右侧某道题的答案框，左图会高亮它在原卷的位置</div>
               </>
             ) : (
-              <div style={{ color: "var(--faint)", fontSize: 12, textAlign: "center", padding: 20 }}>（PDF 模式无图片预览）</div>
+              <div style={{ color: "var(--faint)", fontSize: 12, textAlign: "center", padding: 20 }}>（PDF 文字版无图片预览）</div>
             )}
           </div>
           {/* 右：可编辑题目列表 */}
@@ -590,12 +682,20 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                 item={item}
                 answers={reviewAnswers}
                 onChange={(updated) => setReviewItems(prev => prev.map((x, j) => j === i ? updated : x))}
+                onFocusAnswer={(it) => {
+                  if (it && it._img >= 0 && Array.isArray(it.bbox)) {
+                    setReviewImgIdx(it._img);
+                    setFocusBox({ img: it._img, bbox: it.bbox });
+                  } else {
+                    setFocusBox(null);
+                  }
+                }}
               />
             ))}
           </div>
         </div>
         <div className="pp-rv-foot">
-          <button className="pp-btn" onClick={() => { setReviewPhase(false); onReviewModeChange?.(false); }}>← 重新上传</button>
+          <button className="pp-btn" onClick={() => { setReviewPhase(false); setFocusBox(null); onReviewModeChange?.(false); }}>← 重新上传</button>
           <button className="pp-btn primary" onClick={confirmReview}>确认识别，开始批改 →</button>
         </div>
         {/* 图片灯箱 */}

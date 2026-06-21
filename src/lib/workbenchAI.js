@@ -150,13 +150,28 @@ ${rosterBlock}
    - 字迹潦草也要尽力辨认，猜出大意也比空白好；完全没作答才填 ""。
 4. 【绝对禁止】不要凭手写过程反推、编造或补全"题目"——你的任务只有识别学生写了什么，question 字段一律不要输出。
 5. 置信度 answerConfidence：清晰易读 → "high"；潦草但能辨认 → "low"；空白 → "low"。
+6. 区域坐标 bbox：给出这一题解答在图片中占据的矩形区域，格式 [x0, y0, x1, y1]，
+   全部用**相对比例**（0~1，左上角为原点，x 向右、y 向下）。x0,y0 是左上角，x1,y1 是右下角。
+   尽量贴合该题所有手写行；估不准就给大致范围。无法确定就省略 bbox 字段。
 
 【重要】即使只有一道题，也要输出 items 数组。不要输出任何多余解释。
 
 只输出 JSON：
-{"items":[{"number":"1","studentAnswer":"$C X = Y$\\n$X^T X C = X^T Y$\\n... 最终 $C_0=6/7,\\ C_1=15/14$","answerConfidence":"high"},{"number":"2(i)","studentAnswer":"...","answerConfidence":"low"}]}`;
+{"items":[{"number":"1","studentAnswer":"$C X = Y$\\n$X^T X C = X^T Y$\\n... 最终 $C_0=6/7,\\ C_1=15/14$","answerConfidence":"high","bbox":[0.05,0.08,0.95,0.32]},{"number":"2(i)","studentAnswer":"...","answerConfidence":"low","bbox":[0.05,0.34,0.95,0.6]}]}`;
   const data = await callVision(dataURI, prompt);
-  return data?.items || [];
+  // 归一化 bbox：容错模型偶尔给 0~100 或像素值（简单按 >1 判定为百分制）
+  return (data?.items || []).map((it) => {
+    const b = Array.isArray(it.bbox) && it.bbox.length === 4 ? it.bbox.map(Number) : null;
+    let bbox = null;
+    if (b && b.every((n) => Number.isFinite(n))) {
+      const scaled = b.some((n) => n > 1.5) ? b.map((n) => n / 100) : b;
+      const [x0, y0, x1, y1] = scaled;
+      if (x1 > x0 && y1 > y0 && x0 >= 0 && y0 >= 0 && x1 <= 1.2 && y1 <= 1.2) {
+        bbox = [Math.max(0, x0), Math.max(0, y0), Math.min(1, x1), Math.min(1, y1)];
+      }
+    }
+    return { ...it, bbox };
+  });
 }
 
 // 从纯文字答案内容提取答案列表（分开模式专用）
