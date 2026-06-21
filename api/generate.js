@@ -128,10 +128,11 @@ async function runHandler(req, res) {
   const VOLCENGINE_BASE = "https://ark.cn-beijing.volces.com/api/v3";
   const VOLCENGINE_VISION_MODEL = process.env.VOLCENGINE_VISION_MODEL || "doubao-seed-2-0-mini-260428";
   const VOLCENGINE_TEXT_MODEL   = process.env.VOLCENGINE_TEXT_MODEL   || "doubao-seed-2-0-mini-260428";
-  // 阿里云通义千问 Qwen-VL（国际站 / 新加坡节点）— OpenAI 兼容，全球可达、支付宝可付。
-  // 用户只需在 Vercel 加 QWEN_KEY 即可启用；默认走国际站，避免大陆节点跨境不通。
+  // 阿里云通义千问 Qwen-VL（DashScope，OpenAI 兼容）— 中文/手写数学 OCR 最强。
+  // 用户只需在 Vercel 加 QWEN_KEY 即可启用。默认走大陆站（实测用户 key 属大陆账号）；
+  // 若是国际站 key，设 QWEN_BASE=https://dashscope-intl.aliyuncs.com/compatible-mode/v1。
   const QWEN_KEY  = process.env.QWEN_KEY || process.env.DASHSCOPE_KEY || process.env.qwen_key || "";
-  const QWEN_BASE = String(process.env.QWEN_BASE || "https://dashscope-intl.aliyuncs.com/compatible-mode/v1").trim().replace(/\/$/, "");
+  const QWEN_BASE = String(process.env.QWEN_BASE || "https://dashscope.aliyuncs.com/compatible-mode/v1").trim().replace(/\/$/, "");
   const QWEN_VISION_MODEL = process.env.QWEN_VISION_MODEL || "qwen-vl-plus";
 
   // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底
