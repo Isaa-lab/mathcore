@@ -195,20 +195,38 @@ ${text.slice(0, 6000)}`;
 }
 
 export async function gradeItem({ question, studentAnswer }) {
-  const prompt = `你是线性代数老师。判断学生答案是否正确，并分析。
+  // 关键：不把含 LaTeX 的"正确答案"塞进 JSON（反斜杠会破坏 JSON 解析，导致解析失败→默认判错）。
+  // 仿 solveQuestion：正文输出参考解答（带公式），最后一行只输出"不含公式/反斜杠"的小 JSON。
+  const prompt = `你是严谨而公正的线性代数老师，给学生的"订正答案"批改。
 
 【题目】${question}
 【学生答案】${studentAnswer || "(空白)"}
 
-要求：
-1. 先自己解出正确答案 correctAnswer（完整步骤，公式用 $..$）
-2. 对比学生答案，判断 isCorrect（true/false）
-3. 若错，给 errorType（概念/计算/方法 三选一）和 errorDetail（错在哪一步）
-4. 列出这道题考的知识点 knowledgePoints（1-3个）和章节 chapter（Ch.1~Ch.7）
+判分原则（务必遵守）：
+- 这是学生订正后的答案，很可能是对的。只要**最终结论正确、关键步骤合理**，就判对（isCorrect=true），允许书写习惯、记号、排版差异。
+- 不要因为"和你的解法不完全一样"就判错；不要吹毛求疵。
+- 只有当结论确实错误、或关键步骤有实质错误、或学生空白时，才判错。
 
-只输出 JSON：
-{"correctAnswer":"正确答案含步骤","isCorrect":false,"errorType":"计算","errorDetail":"第2步符号错","knowledgePoints":["行列式展开"],"chapter":"Ch.2"}`;
-  return await callGenerate([{ role: "user", content: prompt }], { json: true, materialTitle: "错题批改" });
+输出格式（严格遵守，分两部分）：
+1. 先写「参考解答」：完整步骤，公式用 $...$ 包裹，可多段——这部分**不要放进 JSON**。
+2. 最后**单独一行**输出元数据 JSON（不要加代码块围栏）。该 JSON 里**绝对不能出现 LaTeX、反斜杠、美元符号或公式**，errorDetail 用纯中文口语说明错在哪：
+{"isCorrect": true, "errorType": "", "errorDetail": "", "knowledgePoints": ["最小二乘法"], "chapter": "Ch.3"}
+说明：isCorrect 为布尔值；errorType 仅在判错时给（"概念"/"计算"/"方法" 三选一），判对时留空字符串；chapter 形如 Ch.1~Ch.7。`;
+
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "错题批改" });
+  if (!raw) return null;
+  // 从末尾抓只含 isCorrect 的小 JSON（无嵌套花括号），正文即为参考解答
+  const metaMatch = raw.match(/\{[^{}]*"isCorrect"[^{}]*\}\s*$/);
+  const meta = metaMatch ? (parseLooseJSON(metaMatch[0]) || {}) : {};
+  const correctAnswer = metaMatch ? raw.slice(0, metaMatch.index).trim() : raw.trim();
+  return {
+    correctAnswer,
+    isCorrect: meta.isCorrect === true || meta.isCorrect === "true",
+    errorType: meta.errorType || "",
+    errorDetail: meta.errorDetail || "",
+    knowledgePoints: Array.isArray(meta.knowledgePoints) ? meta.knowledgePoints : [],
+    chapter: meta.chapter || "",
+  };
 }
 
 export async function summarizeWeakness(wrongItems) {
