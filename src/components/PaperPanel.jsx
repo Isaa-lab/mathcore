@@ -86,28 +86,16 @@ function fileToDataURI(file, { maxPx = 1600, quality = 0.85, enhance = false } =
 const MIN_TEXT_DENSITY = 60;
 
 // 获取题目图片供 AI 使用（印刷体，不需要增强）
+// 关键：直接返回压缩 base64（内联图），不发 Supabase 签名链接——
+// Gemini 官方只认 inlineData，豆包跨境抓外链会超时；内联图两家都能直接读。
 async function getImageForAI(file, wb, userId) {
-  if (wb && userId) {
-    try { return await wb.uploadAndGetSignedUrl(file, userId); } catch {}
-  }
-  return fileToDataURI(file, { maxPx: 1600, quality: 0.85 });
+  return fileToDataURI(file, { maxPx: 1500, quality: 0.85 });
 }
 
 // 获取手写答案图片供 AI 使用（铅笔/浅色字迹需要增强对比度）
+// 同样直接返回压缩 base64（增强对比度后），不发签名链接，避免豆包跨境抓图超时 / Gemini 拒收外链。
 async function getAnswerImageForAI(file, wb, userId) {
-  if (wb && userId) {
-    try {
-      // 增强后再上传：先 canvas 处理，再转 Blob 上传到 Supabase
-      const enhanced = await fileToDataURI(file, { maxPx: 1600, quality: 0.88, enhance: true });
-      if (enhanced) {
-        const r = await fetch(enhanced);
-        const blob = await r.blob();
-        const enhancedFile = new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" });
-        return await wb.uploadAndGetSignedUrl(enhancedFile, userId);
-      }
-    } catch {}
-  }
-  return fileToDataURI(file, { maxPx: 1600, quality: 0.85, enhance: true });
+  return fileToDataURI(file, { maxPx: 1500, quality: 0.85, enhance: true });
 }
 
 async function extractFromFiles(files, mode, onProgress, wb, userId) {

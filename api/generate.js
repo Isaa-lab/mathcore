@@ -850,7 +850,7 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     }
     return [{ text: String(content || "") }];
   };
-  const callGeminiOfficial = async (key) => {
+  const callGeminiOfficial = async (key, attempt = 0) => {
     const budget = Math.min(PER_PROVIDER_MS, remainingBudget());
     if (budget < 1500) { providerDiag.push(`gemini(official): skipped(budget_exhausted)`); return null; }
     const t0 = Date.now();
@@ -891,6 +891,11 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
         return content;
       }
       providerDiag.push(`gemini(official): http_${r.status}(${dt}ms)`);
+      // 429 限流：免费层每分钟配额很小。退避 4s 重试一次（仅一次，且预算够时）。
+      if (r.status === 429 && attempt < 1 && remainingBudget() > 9000) {
+        await new Promise((res) => setTimeout(res, 4000));
+        return callGeminiOfficial(key, attempt + 1);
+      }
       return null;
     } catch (e) {
       const dt = Date.now() - t0;
