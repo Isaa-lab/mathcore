@@ -784,9 +784,9 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   // ── Timeout budget ─────────────────────────────────────────────────────────
   // Vercel Hobby = 10s 硬超时，超过会返回 HTML 错误页（前端解析失败就全归到 5xx）。
   // 这里每个 provider 最多 8s；整个 handler 用 startedAt 追剩余预算，绝不超出。
-  const HANDLER_BUDGET_MS = 55000; // Pro plan 60s；视觉识别需要足够时间
-  // 视觉请求（图片 OCR）耗时远超纯文本；给 45s；文本对话 8s；生成类 14s
-  const PER_PROVIDER_MS = hasVisionMessages ? 45000 : isChatMode ? 8000 : 14000;
+  const HANDLER_BUDGET_MS = 57000; // Pro plan 60s 硬上限，留 3s 余量
+  // 满页手写 OCR 输出多、耗时长，单家给到 ~55s；文本对话 8s；生成类 14s
+  const PER_PROVIDER_MS = hasVisionMessages ? 55000 : isChatMode ? 8000 : 14000;
   const startedAt = Date.now();
   const remainingBudget = () => Math.max(0, HANDLER_BUDGET_MS - (Date.now() - startedAt));
   const providerDiag = []; // 每个 provider 的诊断信息，失败时一并返回给前端
@@ -808,8 +808,9 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     if (budget < 1500) { providerDiag.push(`${tag}: skipped(budget_exhausted)`); return null; }
     const t0 = Date.now();
     try {
-      // 视觉 OCR 不需要长回复，减小 max_tokens 让模型尽快输出
-      const maxTok = hasVisionMessages ? 1500 : 4000;
+      // 视觉 OCR：满页手写数学（矩阵 + LaTeX）很占 token，输出上限太小会把 JSON 截断，
+      // 导致整页解析失败、只剩内容少的页幸存。给足额度。
+      const maxTok = hasVisionMessages ? 8000 : 4000;
       const body = isChatMode
         ? { model, messages, temperature: 0.6, max_tokens: maxTok }
         : { model, messages: [{ role: "user", content: prompt }], temperature: 0.5, max_tokens: maxTok };
