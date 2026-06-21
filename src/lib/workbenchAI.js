@@ -194,6 +194,46 @@ ${text.slice(0, 6000)}`;
   return parseLooseJSON(raw)?.items || [];
 }
 
+// 语义对齐：按"答案实际在解哪道题"的内容来配对，而不只看题号。
+// 用于解决学生手写编号（②③）和官方题号（Q2(ii)/Q3(i)）对不上的错配。
+// 返回 { 题目下标: 答案下标 }；失败返回 null（调用方回退到题号匹配）。
+export async function alignAnswersToQuestions(questions, answers) {
+  if (!Array.isArray(questions) || !Array.isArray(answers) || !questions.length || !answers.length) return null;
+  const clip = (s) => String(s || "").replace(/\s+/g, " ").trim().slice(0, 220);
+  const qList = questions.map((q, i) => `Q${i}「${q.number || "?"}」: ${clip(q.question)}`).join("\n");
+  const aList = answers.map((a, i) => `A${i}「${a.number || "?"}」: ${clip(a.studentAnswer)}`).join("\n");
+  const prompt = `你是阅卷助手。下面是一份卷子的"官方题目"和学生的"手写答案段"。
+学生的编号常和官方编号对不上（如学生写 ②③，官方是 Q2(ii)/Q3(i)）。
+请**按数学内容判断**每段答案到底在解哪道题（例如：答案在用对角化算 A^7，就对应"求 X、Λ 并计算 A^7"那道题；答案在证明 A^T 可对角化，就对应那道证明题），**不要只看编号**。
+
+【官方题目】
+${qList}
+
+【学生答案段】
+${aList}
+
+只输出一个 JSON 数组，元素是 [题目下标, 答案下标]（即上面 Q/A 后面的整数）：
+- 一段答案最多配一道题，一道题最多配一段答案；
+- 配不上的就不出现；
+- 数组里**只能有整数**，禁止任何公式、文字、反斜杠。
+示例：[[0,0],[1,3],[2,1]]`;
+
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "答案语义对齐" });
+  const parsed = parseLooseJSON(raw);
+  if (!Array.isArray(parsed)) return null;
+  const map = {};
+  const usedA = new Set();
+  for (const pair of parsed) {
+    if (!Array.isArray(pair) || pair.length < 2) continue;
+    const qi = Number(pair[0]); const ai = Number(pair[1]);
+    if (!Number.isInteger(qi) || !Number.isInteger(ai)) continue;
+    if (qi < 0 || qi >= questions.length || ai < 0 || ai >= answers.length) continue;
+    if (qi in map || usedA.has(ai)) continue; // 保持一对一
+    map[qi] = ai; usedA.add(ai);
+  }
+  return Object.keys(map).length ? map : null;
+}
+
 export async function gradeItem({ question, studentAnswer }) {
   // 关键：不把含 LaTeX 的"正确答案"塞进 JSON（反斜杠会破坏 JSON 解析，导致解析失败→默认判错）。
   // 仿 solveQuestion：正文输出参考解答（带公式），最后一行只输出"不含公式/反斜杠"的小 JSON。

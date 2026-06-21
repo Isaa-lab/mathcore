@@ -7,6 +7,7 @@ import {
   extractQuestionsFromText,
   extractAnswersFromImage,
   extractAnswersFromText,
+  alignAnswersToQuestions,
   gradeItem,
   solveQuestion,
 } from "../lib/workbenchAI";
@@ -180,26 +181,29 @@ function canonicalNumber(raw) {
   return s;
 }
 
-// 按归一化题号合并题目和答案。
+// 合并题目和答案。优先用 AI 的"语义对齐"结果（alignMap: 题目下标→答案下标，按内容判断
+// 答案实际在解哪道题）；语义对齐没覆盖到的题，退回按归一化题号匹配。
 // 不做"按顺序兜底对齐"——那会静默配错（如把 2(ii) 的答案挂到 Q1）。
-// 对不上的题留空，由用户在校对界面用「对应答案」下拉手动指认。
-function mergeQuestionsAnswers(questions, answers) {
-  const ansMap = {};
+function mergeQuestionsAnswers(questions, answers, alignMap = null) {
+  const ansMap = {}; // 归一化题号 → 答案对象
   for (const a of answers) {
     const key = canonicalNumber(a.number);
-    if (key && key !== "?" && !(key in ansMap)) {
-      ansMap[key] = { studentAnswer: a.studentAnswer || "", answerConfidence: a.answerConfidence || "high", bbox: a.bbox || null, _img: a._img ?? -1 };
-    }
+    if (key && key !== "?" && !(key in ansMap)) ansMap[key] = a;
   }
-  return questions.map((q) => {
-    const ans = ansMap[canonicalNumber(q.number)];
+  return questions.map((q, qi) => {
+    let ans = null;
+    if (alignMap && Number.isInteger(alignMap[qi]) && answers[alignMap[qi]]) {
+      ans = answers[alignMap[qi]];                 // 语义对齐优先
+    } else {
+      ans = ansMap[canonicalNumber(q.number)] || null; // 退回题号匹配
+    }
     return {
       number: q.number,
       question: q.question,
-      studentAnswer: ans ? ans.studentAnswer : (q.studentAnswer || ""),
-      answerConfidence: ans ? ans.answerConfidence : (q.answerConfidence || "low"),
-      bbox: ans ? ans.bbox : null,
-      _img: ans ? ans._img : -1,
+      studentAnswer: ans ? (ans.studentAnswer || "") : (q.studentAnswer || ""),
+      answerConfidence: ans ? (ans.answerConfidence || "high") : (q.answerConfidence || "low"),
+      bbox: ans ? (ans.bbox || null) : null,
+      _img: ans ? (ans._img ?? -1) : -1,
     };
   });
 }
@@ -534,8 +538,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       report(`提取到 ${questions.length} 道题，识别学生答案…`, 40);
       const questionNumbers = questions.map((q) => q.number).filter(Boolean);
       const { answers, images } = await extractAnswersFromFiles(aFiles, (msg) => report(msg, Math.min(75, (progress || 40) + 3)), wb, userId, questionNumbers);
-      report("AI 匹配题目和答案…", 80);
-      const merged = mergeQuestionsAnswers(questions, answers);
+      report("AI 按内容对齐题目和答案…", 80);
+      // 语义对齐：按答案内容判断它解的是哪道题（解决手写编号和官方题号对不上）；失败则回退题号匹配
+      let alignMap = null;
+      try { alignMap = await alignAnswersToQuestions(questions, answers); } catch { alignMap = null; }
+      const merged = mergeQuestionsAnswers(questions, answers, alignMap);
       setReviewAnswers(answers); // 原始 OCR 答案段（带 bbox/_img），供手动指认 + 画框定位
       // 校对左侧用答案原图（带坐标），让每道题能高亮回原图区域
       setReviewImages(images);
