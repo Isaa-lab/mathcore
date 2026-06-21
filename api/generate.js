@@ -975,14 +975,30 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     return "";
   };
 
+  // ── Priority 0（仅视觉）：豆包优先，Gemini 兜底 ─────────────────────────────
+  // 豆包机房在北京、与本函数（香港 hkg1）同区，且有付费额度，稳定且快；
+  // Gemini 免费层经常 429，故只作兜底。Kimi vision 再兜底。
+  if (hasVisionMessages) {
+    if (!responseText && VOLCENGINE_KEY) {
+      responseText = await callOpenAICompat(VOLCENGINE_BASE, VOLCENGINE_KEY, VOLCENGINE_VISION_MODEL, `volcengine(server):${VOLCENGINE_VISION_MODEL}`) || "";
+    }
+    if (!responseText && GEMINI_KEY) {
+      responseText = await callGeminiOfficial(GEMINI_KEY) || "";
+    }
+    if (!responseText && KIMI_KEY) {
+      responseText = await callOpenAICompat("https://api.moonshot.cn/v1", KIMI_KEY, "moonshot-v1-vision-preview", "kimi(server)") || "";
+    }
+  }
+
   // Priority 1: 用户填了自己的 Key，用用户指定的 provider
-  if (hasUserKey) {
+  if (!responseText && hasUserKey) {
     responseText = await callProviderWithKey(effectiveProvider, String(userKey).trim(), "user");
   }
 
   // Priority 1.5: 用户选了某个 provider 但没填 Key —— 用该 provider 的平台 Key
   // （这是实现"用户点一下 Gemini 就直接用平台 Gemini"的关键）
-  if (!responseText && !hasUserKey && userProvider && userProvider !== "server") {
+  // 视觉请求已在 Priority 0 跑完豆包/Gemini/Kimi 全链，这里跳过避免重复慢调用。
+  if (!responseText && !hasVisionMessages && !hasUserKey && userProvider && userProvider !== "server") {
     const serverKey = SERVER_KEY_FOR[userProvider];
     if (serverKey) {
       providerDiag.push(`using platform key for user-selected provider: ${userProvider}`);
@@ -992,18 +1008,11 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     }
   }
 
-  // Priority 1.8: 视觉请求优先 Gemini 官方（原生 inlineData）
-  // 手写数学 OCR（矩阵 / 多步推导）准确率远高于豆包 mini；豆包降为后备。
-  if (!responseText && hasVisionMessages && GEMINI_KEY) {
-    responseText = await callGeminiOfficial(GEMINI_KEY) || "";
-  }
-
   // Priority 2: 火山引擎豆包（主力 server key，HUOSHAN_KEY）
   // 若 Priority 1.5 已经用平台 key 尝试过 volcengine，跳过避免重复超时（尤其视觉请求）
   const volcengineAlreadyTried = !hasUserKey && (userProvider === "volcengine" || userProvider === "doubao");
-  if (!responseText && VOLCENGINE_KEY && !volcengineAlreadyTried) {
-    const model = hasVisionMessages ? VOLCENGINE_VISION_MODEL : VOLCENGINE_TEXT_MODEL;
-    responseText = await callOpenAICompat(VOLCENGINE_BASE, VOLCENGINE_KEY, model, `volcengine(server):${model}`) || "";
+  if (!responseText && !hasVisionMessages && VOLCENGINE_KEY && !volcengineAlreadyTried) {
+    responseText = await callOpenAICompat(VOLCENGINE_BASE, VOLCENGINE_KEY, VOLCENGINE_TEXT_MODEL, `volcengine(server):${VOLCENGINE_TEXT_MODEL}`) || "";
   }
 
   // Priority 3: server DeepSeek（纯文本，vision 跳过）
@@ -1019,9 +1028,9 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     if (!responseText) responseText = await callOpenAICompat("https://api.groq.com/openai/v1", GROQ_KEY, fallback, `groq(server):${fallback}`) || "";
   }
 
-  // Priority 5: server Gemini
+  // Priority 5: server Gemini（视觉已在 Priority 0 试过官方，这里只补文本/网关）
   if (!responseText && (GEMINI_KEY || GEMINI_OAI_KEY)) {
-    if (GEMINI_KEY) responseText = await callGeminiOfficial(GEMINI_KEY) || "";
+    if (GEMINI_KEY && !hasVisionMessages) responseText = await callGeminiOfficial(GEMINI_KEY) || "";
     if (!responseText && GEMINI_OAI_KEY) responseText = await callGeminiCompat(GEMINI_OAI_KEY, "server") || "";
   }
 
