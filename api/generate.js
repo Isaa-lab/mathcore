@@ -134,6 +134,7 @@ async function runHandler(req, res) {
   const QWEN_KEY  = process.env.QWEN_KEY || process.env.DASHSCOPE_KEY || process.env.qwen_key || "";
   const QWEN_BASE = String(process.env.QWEN_BASE || "https://dashscope.aliyuncs.com/compatible-mode/v1").trim().replace(/\/$/, "");
   const QWEN_VISION_MODEL = process.env.QWEN_VISION_MODEL || "qwen-vl-plus";
+  const QWEN_TEXT_MODEL   = process.env.QWEN_TEXT_MODEL   || "qwen-plus";
 
   // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底
   const SERVER_KEY_FOR = {
@@ -1007,6 +1008,13 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     if (!responseText && KIMI_KEY) {
       responseText = await callOpenAICompat("https://api.moonshot.cn/v1", KIMI_KEY, "moonshot-v1-vision-preview", "kimi(server)") || "";
     }
+  }
+
+  // ── Priority 0.5（仅文本）：Qwen 文本若配置则优先 ───────────────────────────
+  // 题目提取 / 批改 / 知识点 / 对话都是纯文本请求；配了 QWEN_KEY 就让 Qwen 当主力，
+  // 避免落到豆包(跨境)/Gemini(429) 等不稳通道。
+  if (!hasVisionMessages && !responseText && QWEN_KEY) {
+    responseText = await callOpenAICompat(QWEN_BASE, QWEN_KEY, QWEN_TEXT_MODEL, `qwen(server):${QWEN_TEXT_MODEL}`) || "";
   }
 
   // Priority 1: 用户填了自己的 Key，用用户指定的 provider
