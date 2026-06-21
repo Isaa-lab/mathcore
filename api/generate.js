@@ -806,6 +806,10 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
       const body = isChatMode
         ? { model, messages, temperature: 0.6, max_tokens: maxTok }
         : { model, messages: [{ role: "user", content: prompt }], temperature: 0.5, max_tokens: maxTok };
+      // 豆包 Seed 系列默认开启"深度思考"，OCR 用不到却会大幅拖慢；显式关闭。
+      if (baseUrl.includes("volces.com")) {
+        body.thinking = { type: "disabled" };
+      }
       const r = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
