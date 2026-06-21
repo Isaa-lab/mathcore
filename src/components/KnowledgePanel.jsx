@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import MathText from "../lib/MathText";
 import { explainKnowledge } from "../lib/workbenchAI";
 
+const REVIEW_KEY = "__review__"; // "订正点评"标签的内部 key
+
 const CSS = `
 .kp{--ink:#0f1220;--mut:#6b7184;--faint:#9aa0b4;--line:#e7e8ef;--soft:#f0f1f6;--brand:#4338ca;--amber:#d97706;--amber-soft:#fef3e2;--rose:#be123c;--rose-soft:#fdeaef;--emerald:#047857;--emerald-soft:#e7f6ef;color:var(--ink);height:100%;overflow-y:auto}
 .kp-err{background:var(--rose-soft);border:1px solid #f3c7d2;border-radius:11px;padding:12px 14px}
@@ -10,6 +12,7 @@ const CSS = `
 .kp-correct{background:var(--emerald-soft);border:1px solid #c7ead8;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;color:var(--ink)}
 .kp-ca-h{font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.12em;color:var(--emerald);text-transform:uppercase;margin:0 0 8px}
 .kp-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}.kp-tab{font-size:12px;border:1px solid var(--line);background:#fff;color:#3a3f55;border-radius:8px;padding:6px 11px;cursor:pointer;font-family:ui-monospace,monospace}.kp-tab.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.kp-tab-review{border-color:#f3c7d2;color:var(--rose)}.kp-tab-review.on{background:var(--rose);border-color:var(--rose);color:#fff}
 .kp-sec{margin-bottom:18px}.kp-ey{font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;margin:0 0 8px}.kp-summary{font-size:15px;font-weight:600;line-height:1.5;margin-bottom:12px}.kp-detail{font-size:14px;line-height:1.75;color:#3a3f55}
 .kp-points{list-style:none;padding:0;margin:0;display:grid;gap:7px}.kp-points li{font-size:13px;padding:8px 11px;background:var(--soft);border-radius:8px;display:flex;gap:8px}.kp-points li::before{content:"▸";color:var(--brand)}
 .kp-viz{background:var(--amber-soft);border-radius:11px;padding:13px 15px;font-size:13px;color:#7c5410;line-height:1.6}.kp-viz .vh{font-family:ui-monospace,monospace;font-size:11px;color:var(--amber);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
@@ -30,17 +33,21 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
   useCSS();
   // 过滤空字符串/重复，避免出现空白知识点标签
   const points = [...new Set((item?.knowledge_points || []).map((p) => String(p).trim()).filter(Boolean))];
-  const [active, setActive] = useState(points[0] || null);
+  // 错题才有"订正点评"标签（错因 + 正确答案），作为第一个标签页
+  const hasReview = item?.is_correct === false && Boolean(item?.error_detail || item?.error_type || item?.correct_answer);
+  const tabs = [...(hasReview ? [REVIEW_KEY] : []), ...points];
+  const [active, setActive] = useState(tabs[0] || null);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [usedNote, setUsedNote] = useState(false);
 
   useEffect(() => {
-    setActive(points[0] || null);
+    setActive(tabs[0] || null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item]);
 
   useEffect(() => {
-    if (!active) {
+    if (!active || active === REVIEW_KEY) {
       setData(null);
       return;
     }
@@ -63,12 +70,29 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
   }, [active, existingNotes]);
 
   if (!item) {
-    return <div className="kp"><div className="kp-empty">选一道错题<br />这里会展开它考的知识点</div></div>;
+    return <div className="kp"><div className="kp-empty">选一道错题<br />这里会展开订正点评与知识点</div></div>;
   }
 
   return (
     <div className="kp">
-      {item.is_correct === false && (item.error_detail || item.error_type || item.correct_answer) && (
+      {tabs.length > 0 && (
+        <>
+          <p className="kp-ey" style={{ marginBottom: 8 }}>{hasReview ? "订正点评 · 知识点 · 点击切换" : "这道题考的知识点 · 点击查看"}</p>
+          <div className="kp-tabs">
+            {tabs.map((t) => (
+              <span
+                key={t}
+                className={"kp-tab" + (active === t ? " on" : "") + (t === REVIEW_KEY ? " kp-tab-review" : "")}
+                onClick={() => setActive(t)}
+              >
+                {t === REVIEW_KEY ? "订正点评" : t}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+
+      {active === REVIEW_KEY ? (
         <>
           {(item.error_detail || item.error_type) && (
             <div className="kp-sec">
@@ -85,49 +109,34 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
             </div>
           )}
         </>
-      )}
-      {points.length > 0 && (
+      ) : (
         <>
-          <p className="kp-ey" style={{ marginBottom: 8 }}>这道题考的知识点 · 点击查看</p>
-          <div className="kp-tabs">
-            {points.map((point) => (
-              <span key={point} className={"kp-tab" + (active === point ? " on" : "")} onClick={() => setActive(point)}>{point}</span>
-            ))}
-          </div>
-        </>
-      )}
-      {loading && <div className="kp-loading">正在整理「{active}」的讲解...</div>}
-      {data && !loading && (
-        <>
-          <div className="kp-sec">
-            <div className="kp-summary"><MathText text={data.summary} /></div>
-            {usedNote && <div className="kp-src">结合了已有知识点资料</div>}
-          </div>
-          <div className="kp-sec">
-            <p className="kp-ey">详解</p>
-            <div className="kp-detail"><MathText text={data.detail} /></div>
-          </div>
-          {(data.keyPoints || []).length > 0 && (
-            <div className="kp-sec">
-              <p className="kp-ey">要点</p>
-              <ul className="kp-points">
-                {data.keyPoints.map((point, index) => <li key={index}><MathText text={point} /></li>)}
-              </ul>
-            </div>
-          )}
-          {data.visualHint && (
-            <div className="kp-sec">
-              <div className="kp-viz">
-                <div className="vh">可视化理解</div>
-                <MathText text={data.visualHint} />
+          {loading && <div className="kp-loading">正在整理「{active}」的讲解...</div>}
+          {data && !loading && (
+            <>
+              <div className="kp-sec">
+                <div className="kp-summary"><MathText text={data.summary} /></div>
+                {usedNote && <div className="kp-src">结合了已有知识点资料</div>}
               </div>
-            </div>
-          )}
-          {data.example && (
-            <div className="kp-sec">
-              <p className="kp-ey">例子</p>
-              <div className="kp-example"><MathText text={data.example} /></div>
-            </div>
+              <div className="kp-sec">
+                <p className="kp-ey">详解</p>
+                <div className="kp-detail"><MathText text={data.detail} /></div>
+              </div>
+              {(data.keyPoints || []).length > 0 && (
+                <div className="kp-sec">
+                  <p className="kp-ey">要点</p>
+                  <ul className="kp-points">
+                    {data.keyPoints.map((point, index) => <li key={index}><MathText text={point} /></li>)}
+                  </ul>
+                </div>
+              )}
+              {data.example && (
+                <div className="kp-sec">
+                  <p className="kp-ey">例子</p>
+                  <div className="kp-example"><MathText text={data.example} /></div>
+                </div>
+              )}
+            </>
           )}
         </>
       )}
