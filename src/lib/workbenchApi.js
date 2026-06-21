@@ -74,6 +74,24 @@ export function makeWorkbenchApi(supabase) {
     return data || [];
   }
 
+  // 错题本：错的题（自动收录）或被收藏的题（用户点星）。
+  async function listNotebook(userId) {
+    const { data, error } = await supabase.from("paper_items")
+      .select("*")
+      .eq("user_id", userId)
+      .or("is_correct.eq.false,starred.eq.true")
+      .order("created_at", { ascending: false });
+    if (error) { console.error("[workbench] listNotebook:", error.message); return []; }
+    return data || [];
+  }
+
+  async function setStar(itemId, starred) {
+    const { data, error } = await supabase.from("paper_items")
+      .update({ starred: !!starred }).eq("id", itemId).select().single();
+    if (error) throw new Error(error.message);
+    return data;
+  }
+
   async function bumpMastery(userId, items) {
     const aggregate = {};
     for (const item of items) {
@@ -115,6 +133,8 @@ export function makeWorkbenchApi(supabase) {
     insertItems,
     updateItem,
     listWrongItems,
+    listNotebook,
+    setStar,
     bumpMastery,
   };
 }

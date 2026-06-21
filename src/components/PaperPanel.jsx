@@ -260,6 +260,7 @@ const CSS = `
 .pp-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}.pp-btn.mini{padding:3px 8px;font-size:11px}
 .pp-empty{text-align:center;color:var(--faint);padding:30px 14px;font-size:13px;line-height:1.7}
 .pp-flip{margin-left:auto;font-family:ui-monospace,monospace;font-size:11px;color:var(--brand);cursor:pointer;background:none;border:none}
+.pp-starbtn{background:none;border:none;cursor:pointer;font-size:16px;line-height:1;color:var(--amber);margin-left:6px;padding:0}
 .pp-collapse-bar{font-size:12px;color:var(--brand);background:var(--brand-soft);border:1px solid #dfe2ff;border-radius:8px;padding:6px 12px;cursor:pointer;text-align:center;margin-bottom:8px;user-select:none;flex-shrink:0}
 .pp-collapse-bar:hover{background:#e7e9ff}
 .pp-layout-pick{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:10px}
@@ -624,6 +625,13 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, ...updated } : x)));
   };
 
+  // 收藏到错题本（错题已自动收录；这里主要让"对的题"也能进错题本）
+  const toggleStar = async (item) => {
+    const next = !item.starred;
+    setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, starred: next } : x)));
+    try { await wb.setStar(item.id, next); } catch {}
+  };
+
   const removeQFile = (idx) => setQFiles((prev) => prev.filter((_, i) => i !== idx));
   const removeAFile = (idx) => setAFiles((prev) => prev.filter((_, i) => i !== idx));
 
@@ -845,6 +853,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                   {needsConfirm && <span className="pp-badge pp-b-low">字迹待确认</span>}
                   {(item.knowledge_points || []).slice(0, 1).map((pt) => <span key={pt} className="pp-badge pp-b-kp">{pt}</span>)}
                   {item.is_correct !== null && <button className="pp-flip" onClick={(e) => { e.stopPropagation(); flipCorrect(item); }}>判错了？翻转</button>}
+                  {item.is_correct !== null && (
+                    <button className="pp-starbtn" title={item.starred ? "取消收藏" : "收藏到错题本"} onClick={(e) => { e.stopPropagation(); toggleStar(item); }}>
+                      {item.starred ? "★" : "☆"}
+                    </button>
+                  )}
                 </div>
                 <div className="pp-q"><MathText text={item.question} /></div>
                 <div className="pp-ans">

@@ -11,6 +11,7 @@ import TextbookBank from "./components/TextbookBank";
 import AiGenerate from "./components/AiGenerate";
 import UploadSolve from "./components/UploadSolve";
 import MistakeWorkbench from "./components/MistakeWorkbench";
+import PaperNotebook from "./components/PaperNotebook";
 import SprintWorkspace from "./layouts/SprintWorkspace";
 import { isEditableFocused } from "./utils/keyboard";
 import { detectVizIntent, logVizIntent } from "./utils/vizIntent";
@@ -10938,6 +10939,34 @@ function WrongDrill({ questions, onExit, onMastered }) {
 // 数据源改造：从硬编码 4 道 + sessionAnswers 派生的"假薄弱章节"，
 // 升级到持久化 wrong_items 表：所有答题入口通过 recordAnswer 自动落表，
 // 错题本只读表、渲染、触发重做/标签/AI 变式。
+// 错题本：在"练习错题（SM2 间隔重复）"与"卷子错题/收藏（来自批改工作台的 paper_items）"之间切换。
+function NotebookSwitcher({ supabase, userId, wrongPageProps = {} }) {
+  const [view, setView] = React.useState("paper"); // "paper" | "practice"
+  const tabBtn = (k, label) => (
+    <span
+      onClick={() => setView(k)}
+      style={{
+        fontSize: 13, padding: "6px 14px", borderRadius: 9, cursor: "pointer", userSelect: "none",
+        fontWeight: 700, border: "1px solid", marginRight: 8,
+        ...(view === k
+          ? { background: "#4338ca", borderColor: "#4338ca", color: "#fff" }
+          : { background: "#fff", borderColor: "#e7e8ef", color: "#3a3f55" }),
+      }}
+    >{label}</span>
+  );
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", padding: "4px 0 14px" }}>
+        {tabBtn("paper", "卷子错题 / 收藏")}
+        {tabBtn("practice", "练习错题（间隔重复）")}
+      </div>
+      {view === "paper"
+        ? <PaperNotebook supabase={supabase} userId={userId} />
+        : <WrongPage {...wrongPageProps} />}
+    </div>
+  );
+}
+
 function WrongPage({ setPage, sessionAnswers = {}, onAskAIAboutQuestion, setChapterFilter, currentMaterial = null, embedded = false }) {
   const [items, setItems] = useState(() => getWrongItemsFromStore());
   // 教材沙盒模式（embedded）：默认 scope 为本教材；外部全屏模式默认全部
@@ -16902,7 +16931,7 @@ export default function App() {
     if (page === "记忆卡片") return <FlashcardPage setPage={handleSetPage} />;
     if (page === "学习报告") return <ReportPage setPage={handleSetPage} setChapterFilter={setChapterFilter} currentMaterial={currentMaterial} />;
     if (page === "技能树") return <TreeErrorBoundary><SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} /></TreeErrorBoundary>;
-    if (page === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} setChapterFilter={setChapterFilter} />;
+    if (page === "错题本") return <NotebookSwitcher supabase={supabase} userId={session?.user?.id} wrongPageProps={{ setPage: handleSetPage, sessionAnswers, setChapterFilter }} />;
     if (page === "错题工作台") {
       return (
         <div style={{ maxWidth: 1480, margin: "0 auto", padding: "0 0 18px" }}>
@@ -16921,7 +16950,7 @@ export default function App() {
     if (tab === "知识树") return <TreeErrorBoundary><SkillTreePage setPage={handleSetPage} setChapterFilter={setChapterFilter} setQuizIntent={setQuizIntent} switchStudyTab={switchStudyTab} currentMaterial={currentMaterial} /></TreeErrorBoundary>;
     if (tab === "小测") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} autoStartIntent={quizIntent} currentMaterial={currentMaterial} assessmentCourse={assessmentSession?.courseName || null} assessmentWeakConceptIds={assessmentSession?.weakConceptIds || []} assessmentForceWeakOnly={!!assessmentSession?.forceWeak} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
     if (tab === "复习") return <ReviewPage currentMaterial={currentMaterial} switchStudyTab={switchStudyTab} setQuizIntent={setQuizIntent} setChapterFilter={setChapterFilter} />;
-    if (tab === "错题本") return <WrongPage setPage={handleSetPage} sessionAnswers={sessionAnswers} setChapterFilter={setChapterFilter} currentMaterial={currentMaterial} embedded />;
+    if (tab === "错题本") return <NotebookSwitcher supabase={supabase} userId={session?.user?.id} wrongPageProps={{ setPage: handleSetPage, sessionAnswers, setChapterFilter, currentMaterial, embedded: true }} />;
     return null;
   };
 
