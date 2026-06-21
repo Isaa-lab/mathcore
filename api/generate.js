@@ -128,6 +128,11 @@ async function runHandler(req, res) {
   const VOLCENGINE_BASE = "https://ark.cn-beijing.volces.com/api/v3";
   const VOLCENGINE_VISION_MODEL = process.env.VOLCENGINE_VISION_MODEL || "doubao-seed-2-0-mini-260428";
   const VOLCENGINE_TEXT_MODEL   = process.env.VOLCENGINE_TEXT_MODEL   || "doubao-seed-2-0-mini-260428";
+  // 阿里云通义千问 Qwen-VL（国际站 / 新加坡节点）— OpenAI 兼容，全球可达、支付宝可付。
+  // 用户只需在 Vercel 加 QWEN_KEY 即可启用；默认走国际站，避免大陆节点跨境不通。
+  const QWEN_KEY  = process.env.QWEN_KEY || process.env.DASHSCOPE_KEY || process.env.qwen_key || "";
+  const QWEN_BASE = String(process.env.QWEN_BASE || "https://dashscope-intl.aliyuncs.com/compatible-mode/v1").trim().replace(/\/$/, "");
+  const QWEN_VISION_MODEL = process.env.QWEN_VISION_MODEL || "qwen-vl-plus";
 
   // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底
   const SERVER_KEY_FOR = {
@@ -985,6 +990,10 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   //   3) 豆包 / Kimi —— 国内，跨境多半连不上，最后试（失败也快）
   const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
   if (hasVisionMessages) {
+    // Qwen-VL（国际站）若已配置则优先：中文/手写数学 OCR 最强，且全球可达。
+    if (!responseText && QWEN_KEY) {
+      responseText = await callOpenAICompat(QWEN_BASE, QWEN_KEY, QWEN_VISION_MODEL, `qwen(server):${QWEN_VISION_MODEL}`) || "";
+    }
     if (!responseText && GEMINI_KEY) {
       responseText = await callGeminiOfficial(GEMINI_KEY) || "";
     }
