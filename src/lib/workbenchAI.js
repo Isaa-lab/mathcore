@@ -249,14 +249,20 @@ export async function gradeItem({ question, studentAnswer }) {
 
 输出格式（严格遵守，分两部分）：
 1. 先写「参考解答」：完整步骤，公式用 $...$ 包裹，可多段——这部分**不要放进 JSON**。
-2. 最后**单独一行**输出元数据 JSON（不要加代码块围栏）。该 JSON 里**绝对不能出现 LaTeX、反斜杠、美元符号或公式**，errorDetail 用纯中文口语说明错在哪：
-{"isCorrect": true, "errorType": "", "errorDetail": "", "knowledgePoints": ["最小二乘法"], "chapter": "Ch.3"}
-说明：isCorrect 为布尔值；errorType 仅在判错时给（"概念"/"计算"/"方法" 三选一），判对时留空字符串；chapter 形如 Ch.1~Ch.7。`;
+2. 最后**单独一行**输出元数据 JSON（放在整个回复的**最末尾**，后面不要再加任何文字/标点/换行）。该 JSON 里**绝对不能出现 LaTeX、反斜杠、美元符号或公式**，errorDetail 用纯中文口语说明错在哪：
+{"isCorrect": true, "errorType": "", "errorDetail": "", "knowledgePoints": ["最小二乘法","正规方程"], "chapter": "Ch.3"}
+说明：
+- isCorrect 为布尔值（true/false）；
+- errorType 仅在判错时给（"概念"/"计算"/"方法" 三选一），判对时留空字符串；
+- **knowledgePoints 必填，给 1~3 个这道题考查的具体知识点名称（中文），不能是空数组**；
+- chapter 形如 Ch.1~Ch.7。`;
 
   const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "错题批改" });
   if (!raw) return null;
-  // 从末尾抓只含 isCorrect 的小 JSON（无嵌套花括号），正文即为参考解答
-  const metaMatch = raw.match(/\{[^{}]*"isCorrect"[^{}]*\}\s*$/);
+  // 抓"最后一个"含 isCorrect 的小 JSON（无嵌套花括号）。不强求在结尾——
+  // 模型常在 JSON 后多带一句话/换行，旧的 \s*$ 锚点会整体匹配失败 → 元数据全丢 → 误判错 + 知识点空。
+  const metaMatches = [...raw.matchAll(/\{[^{}]*"isCorrect"[^{}]*\}/g)];
+  const metaMatch = metaMatches.length ? metaMatches[metaMatches.length - 1] : null;
   const meta = metaMatch ? (parseLooseJSON(metaMatch[0]) || {}) : {};
   const correctAnswer = metaMatch ? raw.slice(0, metaMatch.index).trim() : raw.trim();
   return {
