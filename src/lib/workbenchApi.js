@@ -81,8 +81,13 @@ export function makeWorkbenchApi(supabase) {
       .eq("user_id", userId)
       .or("is_correct.eq.false,starred.eq.true")
       .order("created_at", { ascending: false });
-    if (error) { console.error("[workbench] listNotebook:", error.message); return []; }
-    return data || [];
+    if (!error) return data || [];
+    // starred 列可能还没建（用户尚未执行 sql/paper_items_starred.sql）→ 退回只取错题，至少不空白
+    console.warn("[workbench] listNotebook fallback (starred 列可能缺失):", error.message);
+    const r = await supabase.from("paper_items")
+      .select("*").eq("user_id", userId).eq("is_correct", false)
+      .order("created_at", { ascending: false });
+    return r.data || [];
   }
 
   async function setStar(itemId, starred) {
@@ -90,6 +95,30 @@ export function makeWorkbenchApi(supabase) {
       .update({ starred: !!starred }).eq("id", itemId).select().single();
     if (error) throw new Error(error.message);
     return data;
+  }
+
+  // AI 解题/收藏：把一道（非批改的）题存进错题本——挂到用户的"收藏夹"卷子下，标 starred。
+  async function getOrCreateFavPaper(userId) {
+    const { data } = await supabase.from("papers")
+      .select("id").eq("user_id", userId).eq("title", "⭐ 收藏夹").limit(1);
+    if (data && data.length) return data[0].id;
+    const p = await createPaper({ userId, title: "⭐ 收藏夹", imageUrls: [] });
+    return p.id;
+  }
+
+  async function saveSolvedItem(userId, { number, question, solution, knowledgePoints, chapter }) {
+    const paperId = await getOrCreateFavPaper(userId);
+    const data = await insertItems([{
+      paper_id: paperId, user_id: userId, number: number || "", question: question || "",
+      student_answer: "", correct_answer: solution || "", is_correct: null,
+      error_type: null, error_detail: "", knowledge_points: knowledgePoints || [],
+      chapter: chapter || "", answer_confidence: "high", reviewed: true, starred: true,
+    }]);
+    return data?.[0] || null;
+  }
+
+  async function deleteItem(itemId) {
+    await supabase.from("paper_items").delete().eq("id", itemId);
   }
 
   async function bumpMastery(userId, items) {
@@ -135,6 +164,8 @@ export function makeWorkbenchApi(supabase) {
     listWrongItems,
     listNotebook,
     setStar,
+    saveSolvedItem,
+    deleteItem,
     bumpMastery,
   };
 }

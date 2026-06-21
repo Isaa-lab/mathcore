@@ -904,13 +904,32 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
 }
 
 // ── 解题模式 ─────────────────────────────────────────────────────────────────
-function SolvePanel() {
+function SolvePanel({ supabase, userId }) {
+  const wb = useMemo(() => makeWorkbenchApi(supabase), [supabase]);
   const [hot, setHot] = useState(false);
   const [status, setStatus] = useState("");
   const [progress, setProgress] = useState(null);
   const [items, setItems] = useState([]);
   const fileInputRef = useRef(null);
   const report = useCallback((msg, pct) => { setStatus(msg); if (pct !== undefined) setProgress(pct); }, []);
+
+  // 收藏一道 AI 解题的题到错题本（存进 paper_items 的"收藏夹"卷子，标 starred）
+  const toggleStar = async (idx, item) => {
+    if (!userId) { alert("请先登录"); return; }
+    if (item.savedId) {
+      setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, savedId: null } : x)));
+      try { await wb.deleteItem(item.savedId); } catch {}
+      return;
+    }
+    try {
+      const saved = await wb.saveSolvedItem(userId, {
+        number: item.number, question: item.question, solution: item.solution,
+        knowledgePoints: item.knowledgePoints || [], chapter: item.chapter || "",
+      });
+      if (saved) setItems((prev) => prev.map((x, i) => (i === idx ? { ...x, savedId: saved.id } : x)));
+      else alert("收藏失败：请先在 Supabase 执行 sql/paper_items_starred.sql 添加 starred 列");
+    } catch (e) { alert("收藏失败：" + (e.message || e)); }
+  };
 
   const handleFiles = useCallback(async (files) => {
     if (!files?.length) return;
@@ -1019,6 +1038,11 @@ function SolvePanel() {
                 {item.failed && !item.solving && (
                   <button className="pp-btn mini" style={{ marginLeft: "auto" }} onClick={() => retryItem(idx, item)}>重试</button>
                 )}
+                {!item.solving && !item.failed && item.solution && (
+                  <button className="pp-starbtn" style={{ marginLeft: "auto" }} title={item.savedId ? "取消收藏" : "收藏到错题本"} onClick={() => toggleStar(idx, item)}>
+                    {item.savedId ? "★" : "☆"}
+                  </button>
+                )}
               </div>
               <div className="pp-q"><MathText text={item.question} /></div>
               {!item.solving && item.solution && (
@@ -1048,7 +1072,7 @@ export default function PaperPanel({ supabase, userId, activeItemId, onSelectIte
       </div>
       {mode === "grade"
         ? <GradePanel supabase={supabase} userId={userId} activeItemId={activeItemId} onSelectItem={onSelectItem} onItemsGraded={onItemsGraded} onReviewModeChange={onReviewModeChange} />
-        : <SolvePanel />}
+        : <SolvePanel supabase={supabase} userId={userId} />}
     </div>
   );
 }
