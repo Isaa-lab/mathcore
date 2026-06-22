@@ -12,6 +12,7 @@ const CSS = `
 .kp-correct{background:var(--emerald-soft);border:1px solid #c7ead8;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;color:var(--ink)}
 .kp-ca-h{font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.12em;color:var(--emerald);text-transform:uppercase;margin:0 0 8px}
 .kp-minor{background:var(--amber-soft);border:1px solid #f5d99a;border-radius:10px;padding:10px 13px;font-size:13px;line-height:1.7;color:#7c5410}
+.kp-score{background:#eef2ff;border:1px solid #d7ddff;border-radius:10px;padding:9px 13px;font-size:14px;color:#3730a3}.kp-score b{font-size:16px;font-variant-numeric:tabular-nums}.kp-score-src{font-size:11px;color:var(--mut)}.kp-score-cm{font-size:12px}.kp-score.teacher{background:var(--rose-soft);border-color:#f3c7d2;color:var(--rose)}
 .kp-tabsbar{position:sticky;top:0;z-index:3;background:var(--card,#fff);padding:2px 0 8px;margin-bottom:6px;border-bottom:1px solid var(--line)}
 .kp-tabs{display:flex;gap:6px;flex-wrap:wrap}.kp-tab{font-size:12px;border:1px solid var(--line);background:#fff;color:#3a3f55;border-radius:8px;padding:6px 11px;cursor:pointer;font-family:ui-monospace,monospace}.kp-tab.on{background:var(--brand);border-color:var(--brand);color:#fff}
 .kp-tab-review{border-color:#f3c7d2;color:var(--rose)}.kp-tab-review.on{background:var(--rose);border-color:var(--rose);color:#fff}
@@ -79,8 +80,23 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
   }
 
   const minorNote = item.is_correct === true && (item.error_detail || "").trim();
+  // 得分：有满分 → "8/10"，否则 → "85%"
+  const pct = Number(item.score_pct);
+  const maxS = Number(item.max_score);
+  const scoreText = Number.isFinite(pct)
+    ? (Number.isFinite(maxS) && maxS > 0 ? `${Math.round((pct / 100) * maxS * 10) / 10} / ${maxS}` : `${Math.round(pct)}%`)
+    : null;
+  const scoreSrc = item.score_source === "teacher" ? "老师红笔" : item.score_source === "manual" ? "翻转后估分" : "AI 估分";
   return (
     <div className="kp">
+      {scoreText && (
+        <div className="kp-sec">
+          <div className={"kp-score" + (item.score_source === "teacher" ? " teacher" : "")}>
+            得分 <b>{scoreText}</b> <span className="kp-score-src">· {scoreSrc}</span>
+            {item.score_source === "teacher" && item.teacher_comment ? <span className="kp-score-cm">：{item.teacher_comment}</span> : null}
+          </div>
+        </div>
+      )}
       {minorNote && (
         <div className="kp-sec">
           <div className="kp-minor">✓ 判对 · 小瑕疵：<MathText text={autoLatex(item.error_detail)} /></div>

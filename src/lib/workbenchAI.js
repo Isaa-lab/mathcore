@@ -200,13 +200,14 @@ ${layoutHint}
    - 【全部写完，不要中途截断】把该题学生写的全部过程都识别进来；若一道题内部分成 ①②③ / (a)(b)(c) / 多个小证明，必须把每个小部分都识别全，一直到该题最后一行——只写开头一两步就停是常见错误，禁止
    - 数学公式用 $...$ LaTeX
 4. 识别置信度 answerConfidence：清晰可读 → "high"，潦草但辨认出内容 → "low"，完全未作答 → "low"
+5. 【满分与老师红笔批改 — 没有就一律省略这些字段】maxScore：题目附近印着该题分值（如 "(10 marks)"、"[5分]"）时填数字；teacherScorePct/teacherComment：有**红笔批改**（红色打勾打叉/圈错/得分/扣分/批注）时，把老师给分换算成 0~100 填 teacherScorePct、红笔文字填 teacherComment（黑色学生原笔迹不算）。没有就都省略。
 
 跳过非题目内容（姓名、班级、页码、说明）。不要输出多余解释。
 
 只输出 JSON：
 {"items":[{"number":"1","question":"题目$公式$","studentAnswer":"学生答案","answerConfidence":"high"}]}`;
   const data = await callVision(dataURI, prompt);
-  return (data?.items || []).map((it) => ({ ...it, studentAnswer: normalizeNewlineEscapes(it.studentAnswer) }));
+  return (data?.items || []).map((it) => ({ ...it, studentAnswer: normalizeNewlineEscapes(it.studentAnswer), ...pickScoreFields(it) }));
 }
 
 // 从手写答案图片提取答案列表（分开模式专用）
@@ -248,6 +249,9 @@ ${rosterBlock}
 6. 【区域定位 bbox — 用整数 0~1000 坐标系】给出该题所有手写行的**紧致外接框**（刚好框住，不要框到别题）：
    格式 [x0, y0, x1, y1]，整数，范围 0~1000，左上角 (0,0)、右下角 (1000,1000)，x 向右、y 向下。
    x0,y0 左上角，x1,y1 右下角，必须 x1>x0、y1>y0。这是你擅长的视觉定位，请尽量精确贴合。无法确定才省略 bbox。
+7. 【满分与老师红笔批改 — 没有就一律省略这些字段】
+   - maxScore：如果题目附近**印着该题分值**（如 "(10 marks)"、"[5分]"、"（8 分）"），填这个数字；没印就省略。
+   - teacherScorePct / teacherComment：如果这道题上有**老师红笔批改**（红色的打勾打叉、圈错、写的得分或扣分、批注），把老师给的得分换算成 0~100 的百分比填 teacherScorePct（例如满分 10 给了 8 分→80；只写"-2"且满分 10→80），红笔文字批注填 teacherComment。**只有确实看到红笔批改才填，黑色的学生原笔迹不算**；没有红笔就两个都省略。
 
 【重要】即使只有一道题，也要输出 items 数组。不要输出任何多余解释。
 
@@ -266,8 +270,20 @@ ${rosterBlock}
         bbox = [Math.max(0, x0), Math.max(0, y0), Math.min(1, x1), Math.min(1, y1)];
       }
     }
-    return { ...it, studentAnswer: normalizeNewlineEscapes(it.studentAnswer), bbox };
+    return { ...it, studentAnswer: normalizeNewlineEscapes(it.studentAnswer), bbox, ...pickScoreFields(it) };
   });
+}
+
+// 从 OCR item 里取出"满分 / 老师红笔得分"字段并归一化（缺失则不带这些键）
+function pickScoreFields(it) {
+  const out = {};
+  const max = Number(it.maxScore);
+  if (Number.isFinite(max) && max > 0) out.maxScore = max;
+  const ts = Number(it.teacherScorePct);
+  if (Number.isFinite(ts)) out.teacherScorePct = Math.max(0, Math.min(100, Math.round(ts)));
+  const tc = String(it.teacherComment || "").trim();
+  if (tc) out.teacherComment = tc;
+  return out;
 }
 
 // 从纯文字答案内容提取答案列表（分开模式专用）
@@ -348,8 +364,9 @@ export async function gradeItem({ question, studentAnswer }) {
 输出格式（分两部分）：
 1. 先写「参考解答」：完整步骤，公式用 $...$ 包裹——不要放进 JSON。
 2. 最后**单独一行**输出元数据 JSON（放回复最末尾，之后不要再有任何字符）。JSON 里**禁止 LaTeX/反斜杠/美元符号/公式**，note 与 errorDetail 用纯中文口语：
-{"verdict": "correct", "note": "", "errorType": "", "errorDetail": "", "knowledgePoints": ["最小二乘法","正规方程"], "chapter": "Ch.3"}
+{"verdict": "correct", "scorePct": 100, "note": "", "errorType": "", "errorDetail": "", "knowledgePoints": ["最小二乘法","正规方程"], "chapter": "Ch.3"}
 - verdict 取 "correct"/"minor"/"wrong"；
+- scorePct：0~100 的整数，这道题的**得分百分比**（按数学正确性与完成度给，像阅卷老师那样）。correct 一般 90~100；minor 78~92；wrong 按完成度与错误严重程度给 0~65（做对了一半给一半分，完全空白/没做给 0）。务必和 verdict 自洽。
 - note 仅 minor 时给（一句话点小瑕疵），其余留空；
 - errorType+errorDetail 仅 wrong 时给（errorType 取 "概念"/"计算"/"方法"），errorDetail 说清错在哪一步、最终结果应是什么；
 - knowledgePoints 必填 1~3 个中文知识点，不能空；chapter 形如 Ch.1~Ch.7。`;
@@ -362,9 +379,14 @@ export async function gradeItem({ question, studentAnswer }) {
   const correctAnswer = metaMatch ? raw.slice(0, metaMatch.index).trim() : raw.trim();
   const verdict = String(meta.verdict || "").toLowerCase();
   const isWrong = verdict === "wrong";
+  // 得分百分比：模型给了就用（夹到 0~100），没给则按档位兜底
+  let scorePct = Number(meta.scorePct);
+  if (!Number.isFinite(scorePct)) scorePct = isWrong ? 30 : verdict === "minor" ? 85 : 100;
+  scorePct = Math.max(0, Math.min(100, Math.round(scorePct)));
   return {
     correctAnswer,
     isCorrect: !isWrong,                          // correct 与 minor 都算对
+    scorePct,
     minorNote: verdict === "minor" ? (meta.note || "有小瑕疵，已基本掌握") : "",
     errorType: isWrong ? (meta.errorType || "计算") : "",
     errorDetail: isWrong ? (meta.errorDetail || "") : "",

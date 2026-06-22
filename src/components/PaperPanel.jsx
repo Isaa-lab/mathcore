@@ -147,6 +147,25 @@ function fileToDataURI(file, { maxPx = 1600, quality = 0.85, enhance = false } =
 
 const MIN_TEXT_DENSITY = 60;
 
+// 分数列（sql/paper_items_score.sql 加的）。用户没跑迁移时这些列不存在，写入会报错——
+// 故所有写分数的地方都包一层：先带分数写，失败就剥掉分数列重试，保证主流程不被打断。
+const SCORE_COLS = ["score_pct", "max_score", "score_source", "teacher_comment"];
+const stripScoreCols = (row) => {
+  const r = { ...row };
+  for (const k of SCORE_COLS) delete r[k];
+  return r;
+};
+const isMissingColumnErr = (e) => /column|score_pct|max_score|score_source|teacher_comment/i.test(String(e?.message || e));
+
+// 分数展示标签：有满分 → "8/10"，否则 → "85%"。无分数返回 null。
+function scoreLabel(item) {
+  const pct = Number(item?.score_pct);
+  if (!Number.isFinite(pct)) return null;
+  const max = Number(item?.max_score);
+  if (Number.isFinite(max) && max > 0) return `${Math.round((pct / 100) * max * 10) / 10}/${max}`;
+  return `${Math.round(pct)}%`;
+}
+
 // 获取题目图片供 AI 使用（印刷体，不需要增强）
 // 关键：直接返回压缩 base64（内联图），不发 Supabase 签名链接——
 // Gemini 官方只认 inlineData，豆包跨境抓外链会超时；内联图两家都能直接读。
@@ -302,6 +321,7 @@ const CSS = `
 .pp-badge{font-family:ui-monospace,monospace;font-size:11px;padding:2px 8px;border-radius:6px}
 .pp-b-correct{background:var(--emerald-soft);color:var(--emerald)}.pp-b-wrong{background:var(--rose-soft);color:var(--rose)}
 .pp-b-low{background:var(--amber-soft);color:var(--amber)}.pp-b-kp{background:var(--brand-soft);color:#3730a3}
+.pp-b-score{background:#eef2ff;color:#3730a3;font-variant-numeric:tabular-nums;font-weight:600}.pp-b-score.teacher{background:var(--rose-soft);color:var(--rose)}
 .pp-b-solving{background:#f0f1f6;color:var(--mut)}.pp-b-solved{background:var(--emerald-soft);color:var(--emerald)}
 .pp-b-failed{background:var(--rose-soft);color:var(--rose)}
 .pp-q{font-size:14px;margin-bottom:6px;line-height:1.6}
@@ -546,6 +566,23 @@ function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer, onFrame
         editExtra={dropdown}
         emptyHint="（未识别，点修改补充）"
       />
+      <div className="pp-rvi-score" style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, fontSize: 12, color: "var(--mut,#6b7184)" }}>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          本题满分
+          <input
+            type="number" min="0" step="1"
+            value={item.maxScore ?? ""}
+            placeholder="留空=只给百分比"
+            onChange={(e) => onChange({ ...item, maxScore: e.target.value === "" ? null : Math.max(0, Number(e.target.value)) })}
+            style={{ width: 110, padding: "3px 6px", border: "1px solid var(--line,#e7e8ef)", borderRadius: 6, fontSize: 12 }}
+          />
+        </label>
+        {item.teacherScorePct != null && (
+          <span style={{ color: "#be123c" }} title={item.teacherComment || ""}>
+            🖊 检测到红笔批改：{item.teacherScorePct}%{item.teacherComment ? `（${answerSnippet(item.teacherComment)}）` : ""}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -778,7 +815,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       }
       if (!extracted.length) { report("没识别出题目，请检查文件"); setProgress(null); return; }
       // 进入校对阶段，而不是立即保存
-      setReviewItems(extracted.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low" })));
+      setReviewItems(extracted.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low", maxScore: x.maxScore ?? null, teacherScorePct: x.teacherScorePct ?? null, teacherComment: x.teacherComment || "" })));
       setReviewImages(collectedImages);
       setReviewImgIdx(0);
       setReviewPhase(true);
@@ -808,7 +845,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       setReviewAnswers(answers); // 原始 OCR 答案段（带 bbox/_img），供手动指认 + 画框定位
       // 校对左侧用答案原图（带坐标），让每道题能高亮回原图区域
       setReviewImages(images);
-      setReviewItems(merged.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low", bbox: x.bbox || null, _img: x._img ?? -1 })));
+      setReviewItems(merged.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low", bbox: x.bbox || null, _img: x._img ?? -1, maxScore: x.maxScore ?? null, teacherScorePct: x.teacherScorePct ?? null, teacherComment: x.teacherComment || "" })));
       setReviewImgIdx(0);
       setReviewPhase(true);
       onReviewModeChange?.(true);
@@ -834,8 +871,17 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
         answer_confidence: "high", // 用户已确认
         reviewed: true,
         is_correct: null,
+        max_score: item.maxScore ?? null,
+        // 红笔已给分：直接作为初始分数存下，批改时不被 AI 估分覆盖
+        ...(item.teacherScorePct != null ? { score_pct: item.teacherScorePct, score_source: "teacher" } : {}),
+        ...(item.teacherComment ? { teacher_comment: item.teacherComment } : {}),
       }));
-      const saved = await wb.insertItems(rows);
+      let saved;
+      try { saved = await wb.insertItems(rows); }
+      catch (e) {
+        if (!isMissingColumnErr(e)) throw e;
+        saved = await wb.insertItems(rows.map(stripScoreCols)); // 未跑分数迁移 → 不带分数列重存
+      }
       await wb.setPaperStatus(paper.id, "reviewing");
       setItems(saved);
       setReviewPhase(false);
@@ -856,6 +902,15 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     setEditing(null); setDraft("");
   };
 
+  // 带分数列的更新：未跑分数迁移时剥掉分数列重试，避免整次更新失败
+  const safeUpdateItem = async (id, patch) => {
+    try { return await wb.updateItem(id, patch); }
+    catch (e) {
+      if (!isMissingColumnErr(e)) throw e;
+      return await wb.updateItem(id, stripScoreCols(patch));
+    }
+  };
+
   const gradeAll = async () => {
     report("AI 批改中…（并发处理）", 5);
     let done = 0;
@@ -863,6 +918,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     const graded = await mapLimit(items, 3, async (item) => {
       try {
         const result = await gradeItem({ question: item.question, studentAnswer: item.student_answer });
+        // 红笔已给分的题：保留老师分数，AI 只负责判定/错因/知识点，不覆盖分数
+        const hasTeacherScore = item.score_source === "teacher" && item.score_pct != null;
         const patch = {
           correct_answer: result?.correctAnswer || "",
           is_correct: !!result?.isCorrect,
@@ -872,8 +929,9 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
           knowledge_points: result?.knowledgePoints || [],
           chapter: result?.chapter || "Ch.?",
           reviewed: true,
+          ...(hasTeacherScore ? {} : { score_pct: result?.scorePct ?? null, score_source: "ai" }),
         };
-        const updated = await wb.updateItem(item.id, patch);
+        const updated = await safeUpdateItem(item.id, patch);
         return updated || { ...item, ...patch };
       } catch {
         return item;
@@ -891,8 +949,12 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
         try {
           const v = await verifyGrade({ question: item.question, studentAnswer: item.student_answer });
           if (v && v.ok === false) {
-            const patch = { is_correct: false, error_type: item.error_type || "计算", error_detail: v.reason || "复核发现答案未完成或最终结果不正确" };
-            const updated = await wb.updateItem(item.id, patch);
+            const keepTeacher = item.score_source === "teacher" && item.score_pct != null;
+            const patch = {
+              is_correct: false, error_type: item.error_type || "计算", error_detail: v.reason || "复核发现答案未完成或最终结果不正确",
+              ...(keepTeacher ? {} : { score_pct: Math.min(Number(item.score_pct) || 45, 45), score_source: "ai" }),
+            };
+            const updated = await safeUpdateItem(item.id, patch);
             const merged = updated || { ...item, ...patch };
             const gi = graded.findIndex((g) => g.id === item.id);
             if (gi >= 0) graded[gi] = merged;
@@ -910,7 +972,14 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
 
   const flipCorrect = async (item) => {
     const next = !item.is_correct;
-    const updated = await wb.updateItem(item.id, { is_correct: next, error_type: next ? null : (item.error_type || "计算") });
+    // 手动翻转时同步调整分数（红笔老师分不动），让分数和判定自洽
+    const keepTeacher = item.score_source === "teacher" && item.score_pct != null;
+    const cur = Number(item.score_pct);
+    const patch = {
+      is_correct: next, error_type: next ? null : (item.error_type || "计算"),
+      ...(keepTeacher ? {} : { score_pct: next ? Math.max(Number.isFinite(cur) ? cur : 0, 90) : Math.min(Number.isFinite(cur) ? cur : 45, 45), score_source: "manual" }),
+    };
+    const updated = await safeUpdateItem(item.id, patch);
     setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, ...updated } : x)));
   };
 
@@ -1210,6 +1279,14 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                   <span className="pp-num">#{item.number || "—"}</span>
                   {isWrong && <span className="pp-badge pp-b-wrong">错</span>}
                   {isRight && <span className="pp-badge pp-b-correct">对</span>}
+                  {item.is_correct !== null && scoreLabel(item) && (
+                    <span
+                      className={"pp-badge pp-b-score" + (item.score_source === "teacher" ? " teacher" : "")}
+                      title={item.score_source === "teacher" ? "老师红笔给分" : item.score_source === "manual" ? "翻转后估分" : "AI 估分"}
+                    >
+                      {item.score_source === "teacher" ? "🖊 " : ""}{scoreLabel(item)}
+                    </span>
+                  )}
                   {needsConfirm && <span className="pp-badge pp-b-low">字迹待确认</span>}
                   {(item.knowledge_points || []).slice(0, 1).map((pt) => <span key={pt} className="pp-badge pp-b-kp">{pt}</span>)}
                   {item.is_correct !== null && <button className="pp-flip" onClick={(e) => { e.stopPropagation(); flipCorrect(item); }}>判错了？翻转</button>}
