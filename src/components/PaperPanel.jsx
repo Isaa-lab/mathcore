@@ -370,6 +370,11 @@ const CSS = `
 .pp-rv-body{display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1;min-height:0}
 .pp-rv-imgs{display:flex;flex-direction:column;gap:8px;overflow:hidden}
 .pp-rv-imgmain{position:relative;flex:1;min-height:0;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:#f8f8fb;display:flex;align-items:center;justify-content:center}
+/* 框选时整块取景区铺满全屏，图更大、可缩放/平移取景 */
+.pp-rv-imgmain.framing-full{position:fixed;inset:0;z-index:9998;max-width:none;border:none;border-radius:0;background:rgba(15,18,32,.92)}
+.pp-rv-imgmain.framing-full .pp-rv-zoom{flex-wrap:wrap;max-width:70vw;justify-content:flex-end}
+.pp-rv-fratool{width:auto!important;padding:0 10px!important;font-size:12px!important}
+.pp-rv-fratool.on{background:var(--brand)!important;border-color:var(--brand)!important;color:#fff!important}
 .pp-rv-imgwrap{position:relative;display:inline-block;max-width:100%;max-height:100%;line-height:0;transform-origin:center center}
 .pp-rv-imgwrap img{max-width:100%;max-height:100%;object-fit:contain;display:block;user-select:none;-webkit-user-drag:none}
 .pp-rv-zoom{position:absolute;top:8px;right:8px;display:flex;gap:4px;z-index:3}
@@ -629,7 +634,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const imgDragRef = useRef(null);
   const imgElRef = useRef(null);
   const imgMainRef = useRef(null);                    // 图片容器（含居中留白），框选用它的像素坐标
-  const [framing, setFraming] = useState(false);     // 框选识别模式
+  const [framing, setFraming] = useState(false);     // 框选识别模式（全屏取景）
+  const [frameTool, setFrameTool] = useState("draw"); // 框选时工具：'draw' 画框 / 'pan' 移动图
   const [frameRect, setFrameRect] = useState(null);   // 拖框中的矩形：相对 imgmain 的像素 {x0,y0,x1,y1}
   const frameModeRef = useRef(null);                  // 框选交互：{ mode:'draw'|'move'|'resize', handle?, sx, sy, orig }
   const [regionBusy, setRegionBusy] = useState(false);
@@ -656,7 +662,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     const z = Math.min(6, Math.max(1, v.zoom * factor));
     return z === 1 ? { zoom: 1, x: 0, y: 0 } : { ...v, zoom: z };
   });
-  const onImgWheel = (e) => { if (framing) return; e.preventDefault(); zoomImg(e.deltaY < 0 ? 1.15 : 1 / 1.15); };
+  // 框选时也允许滚轮缩放（全屏取景，crop 数学按变换后的图片 rect 算，缩放/平移都不影响结果）
+  const onImgWheel = (e) => { e.preventDefault(); zoomImg(e.deltaY < 0 ? 1.15 : 1 / 1.15); };
   // 框选：相对 imgmain 容器的像素坐标（光标在哪框就在哪，不受居中留白影响）
   const mainPx = (e) => {
     const r = imgMainRef.current?.getBoundingClientRect();
@@ -674,8 +681,10 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   };
   const onImgDown = (e) => {
     if (framing) {
+      // 移动工具：拖动平移图片（去够到目标区域）
+      if (frameTool === "pan") { imgDragRef.current = { sx: e.clientX, sy: e.clientY, ox: imgView.x, oy: imgView.y }; return; }
       const p = mainPx(e);
-      // 已有框且点在框内 → 移动整框；否则在空白处按下 → 重新画框
+      // 画框工具：已有框且点在框内 → 移动整框；否则在空白处按下 → 重新画框
       if (frameRect && insideRect(p, frameRect)) {
         frameModeRef.current = { mode: "move", sx: p.x, sy: p.y, orig: normRect(frameRect) };
       } else {
@@ -694,6 +703,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   };
   const onImgMove = (e) => {
     if (framing) {
+      if (frameTool === "pan") {
+        const d = imgDragRef.current;
+        if (d) setImgView((v) => ({ ...v, x: d.ox + (e.clientX - d.sx), y: d.oy + (e.clientY - d.sy) }));
+        return;
+      }
       const fm = frameModeRef.current;
       if (!fm) return;
       const p = mainPx(e);
@@ -719,7 +733,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   };
   const onImgUp = () => {
     if (framing) {
-      // 框选模式下松开鼠标只结束本次拖动/画框，不立即识别；
+      if (frameTool === "pan") { imgDragRef.current = null; return; }
+      // 画框模式下松开鼠标只结束本次拖动/画框，不立即识别；
       // 用户可继续移动/缩放框，满意后点「确定识别」。
       const fm = frameModeRef.current;
       frameModeRef.current = null;
@@ -733,6 +748,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     if (reviewActiveIdx < 0) { alert("请先点一道题的「学生答案」框，把它设为目标，再框选原图区域。"); return; }
     setImgView({ zoom: 1, x: 0, y: 0 }); // 复位，框选坐标才对得上
     setFrameRect(null);
+    setFrameTool("draw");
     setFraming(true);
   };
 
@@ -760,6 +776,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
         setReviewItems((prev) => prev.map((x, j) => (j === reviewActiveIdx ? { ...x, studentAnswer: text, answerConfidence: "low" } : x)));
         setFraming(false);
         setFrameRect(null);
+        setImgView({ zoom: 1, x: 0, y: 0 }); // 退出全屏取景后复位
       } else {
         alert("没识别出内容，可调整框的位置/大小后再点「确定识别」。");
       }
@@ -1044,13 +1061,13 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
               <>
                 <div
                   ref={imgMainRef}
-                  className="pp-rv-imgmain"
+                  className={"pp-rv-imgmain" + (framing ? " framing-full" : "")}
                   onWheel={onImgWheel}
                   onMouseDown={onImgDown}
                   onMouseMove={onImgMove}
                   onMouseUp={onImgUp}
                   onMouseLeave={onImgUp}
-                  style={{ cursor: framing ? "crosshair" : imgDragRef.current ? "grabbing" : imgView.zoom > 1 ? "grab" : "default" }}
+                  style={{ cursor: framing ? (frameTool === "pan" ? (imgDragRef.current ? "grabbing" : "grab") : "crosshair") : imgDragRef.current ? "grabbing" : imgView.zoom > 1 ? "grab" : "default" }}
                 >
                   <div className="pp-rv-imgwrap" style={{ transform: `translate(${imgView.x}px, ${imgView.y}px) scale(${imgView.zoom})` }}>
                     <img ref={imgElRef} src={reviewImages[reviewImgIdx]} alt="原始图片" draggable={false} />
@@ -1090,8 +1107,13 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                       </>
                     ) : (
                       <>
+                        <button className={"pp-rv-fratool" + (frameTool === "draw" ? " on" : "")} title="画框工具：拖出/移动/缩放识别框" onClick={() => setFrameTool("draw")}>▭ 画框</button>
+                        <button className={"pp-rv-fratool" + (frameTool === "pan" ? " on" : "")} title="移动工具：拖动平移图片、滚轮缩放，去够到目标区域" onClick={() => setFrameTool("pan")}>✋ 移动图</button>
+                        <button title="放大" onClick={() => zoomImg(1.3)}>＋</button>
+                        <button title="缩小" onClick={() => zoomImg(1 / 1.3)}>－</button>
+                        <button title="复位" onClick={() => setImgView({ zoom: 1, x: 0, y: 0 })}>⟲</button>
                         <button className="pp-rv-fraok" disabled={!frameRect || regionBusy} onClick={commitFrame}>{regionBusy ? "识别中…" : "✓ 确定识别"}</button>
-                        <button className="pp-rv-fraback" disabled={regionBusy} onClick={() => { setFraming(false); setFrameRect(null); frameModeRef.current = null; }}>✕ 退出框选</button>
+                        <button className="pp-rv-fraback" disabled={regionBusy} onClick={() => { setFraming(false); setFrameRect(null); frameModeRef.current = null; setImgView({ zoom: 1, x: 0, y: 0 }); }}>✕ 退出</button>
                       </>
                     )}
                   </div>
@@ -1099,8 +1121,9 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                     <div className="pp-rv-frametip">
                       {regionBusy ? "正在识别框选区域…"
                         : reviewActiveIdx < 0 ? "请先选目标题"
+                        : frameTool === "pan" ? "移动图模式：拖动平移、滚轮缩放，把目标区域调清楚 → 再切回「▭ 画框」"
                         : frameRect ? `拖框内可移动、拖四角可缩放 → 满意后点「确定识别」填入 #${reviewItems[reviewActiveIdx]?.number || (reviewActiveIdx + 1)}`
-                        : `在原图上拖出一个框选中要识别的区域 → 填入 #${reviewItems[reviewActiveIdx]?.number || (reviewActiveIdx + 1)}`}
+                        : `全屏取景：拖出一个框选中要识别的区域（够不到就切「✋ 移动图」）→ 填入 #${reviewItems[reviewActiveIdx]?.number || (reviewActiveIdx + 1)}`}
                     </div>
                   )}
                 </div>
@@ -1136,7 +1159,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                     setFocusBox(null);
                   }
                 }}
-                onFrame={() => { setReviewActiveIdx(i); setImgView({ zoom: 1, x: 0, y: 0 }); setFrameRect(null); setFraming(true); }}
+                onFrame={() => { setReviewActiveIdx(i); setImgView({ zoom: 1, x: 0, y: 0 }); setFrameRect(null); setFrameTool("draw"); setFraming(true); }}
               />
             ))}
           </div>
