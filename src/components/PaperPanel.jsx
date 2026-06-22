@@ -421,7 +421,9 @@ math-field.em-mf{--primary:var(--brand)}
 .pp-mtb button:hover{border-color:var(--brand);color:var(--brand)}
 .pp-rvi textarea.pp-edit{min-height:40px;font-size:12px}
 .pp-rvi .pp-preview{margin-top:4px;padding:5px 8px;font-size:12px}
-.pp-rv-foot{display:flex;gap:8px;flex-shrink:0;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--line)}
+.pp-rv-foot{display:flex;gap:8px;flex-shrink:0;justify-content:flex-end;align-items:center;padding-top:6px;border-top:1px solid var(--line)}
+.pp-rv-redpen{margin-right:auto;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer;user-select:none}
+.pp-rv-redpen input{cursor:pointer}
 /* 图片灯箱 */
 .pp-lightbox{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out}
 .pp-lightbox img{max-width:92vw;max-height:92vh;object-fit:contain;border-radius:8px}
@@ -544,7 +546,7 @@ function MathField({ label, value, warn, onChange, onFocus, editExtra, emptyHint
   );
 }
 
-function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer, onFrame }) {
+function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer, onFrame, showRedPen = false }) {
   const hints = [(item.knowledge_points || []).join(" "), item.chapter || "", item.question || ""].join(" ");
   const matchedIdx = answers.findIndex((a) => (a.studentAnswer || "") === (item.studentAnswer || "") && (item.studentAnswer || "").trim());
   const dropdown = answers.length > 0 ? (
@@ -594,7 +596,7 @@ function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer, onFrame
             style={{ width: 110, padding: "3px 6px", border: "1px solid var(--line,#e7e8ef)", borderRadius: 6, fontSize: 12 }}
           />
         </label>
-        {(item.teacherScorePct != null || item.teacherMark) && (
+        {showRedPen && (item.teacherScorePct != null || item.teacherMark) && (
           <span style={{ color: "#be123c" }} title={item.teacherComment || ""}>
             🖊 检测到红笔：{item.teacherScorePct != null
               ? `${item.teacherScorePct}%`
@@ -634,6 +636,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const imgDragRef = useRef(null);
   const imgElRef = useRef(null);
   const imgMainRef = useRef(null);                    // 图片容器（含居中留白），框选用它的像素坐标
+  const [hasRedPen, setHasRedPen] = useState(false);  // 卷面是否有老师红笔批改（默认否）——只有勾选才按红笔判分，避免无红笔时误判
   const [framing, setFraming] = useState(false);     // 框选识别模式（全屏取景）
   const [frameTool, setFrameTool] = useState("draw"); // 框选时工具：'draw' 画框 / 'pan' 移动图
   const [frameRect, setFrameRect] = useState(null);   // 拖框中的矩形：相对 imgmain 的像素 {x0,y0,x1,y1}
@@ -904,9 +907,10 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
         reviewed: true,
         is_correct: null, // 仍交给「全部批改」生成参考答案/知识点；红笔分数下面单独存
         max_score: item.maxScore ?? null,
-        // 红笔批改（数字得分或打勾/打叉符号）→ 存为老师分，批改时不被 AI 覆盖
-        ...(teacherScoreFromMarks(item) != null ? { score_pct: teacherScoreFromMarks(item), score_source: "teacher" } : {}),
-        ...(item.teacherComment ? { teacher_comment: item.teacherComment } : {}),
+        // 红笔批改（数字得分或打勾/打叉符号）→ 存为老师分，批改时不被 AI 覆盖。
+        // 仅在用户勾选「卷面有红笔」时才采纳，否则一律按 AI 判分（默认），避免无红笔时被幻觉判分污染。
+        ...(hasRedPen && teacherScoreFromMarks(item) != null ? { score_pct: teacherScoreFromMarks(item), score_source: "teacher" } : {}),
+        ...(hasRedPen && item.teacherComment ? { teacher_comment: item.teacherComment } : {}),
       }));
       let saved;
       try { saved = await wb.insertItems(rows); }
@@ -1160,12 +1164,17 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                   }
                 }}
                 onFrame={() => { setReviewActiveIdx(i); setImgView({ zoom: 1, x: 0, y: 0 }); setFrameRect(null); setFrameTool("draw"); setFraming(true); }}
+                showRedPen={hasRedPen}
               />
             ))}
           </div>
         </div>
         <div className="pp-rv-foot">
           <button className="pp-btn" onClick={() => { setReviewPhase(false); setFocusBox(null); onReviewModeChange?.(false); }}>← 重新上传</button>
+          <label className="pp-rv-redpen" title="默认按 AI 判分。只有卷面确实有老师红笔批改时才勾选，勾选后按红笔的对错/得分判定。">
+            <input type="checkbox" checked={hasRedPen} onChange={(e) => setHasRedPen(e.target.checked)} />
+            卷面有老师红笔批改（按红笔判分）
+          </label>
           <button className="pp-btn primary" onClick={confirmReview}>确认识别，开始批改 →</button>
         </div>
         {/* 图片灯箱 */}

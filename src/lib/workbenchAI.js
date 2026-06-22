@@ -288,10 +288,11 @@ function pickScoreFields(it) {
   const out = {};
   const max = Number(it.maxScore);
   if (Number.isFinite(max) && max > 0) out.maxScore = max;
-  const ts = Number(it.teacherScorePct);
-  if (Number.isFinite(ts)) out.teacherScorePct = Math.max(0, Math.min(100, Math.round(ts)));
   const tc = String(it.teacherComment || "").trim();
   if (tc) out.teacherComment = tc;
+  const ts = Number(it.teacherScorePct);
+  // 防幻觉：模型在没有红笔时常默认回 0。裸的 0（没有红笔批注佐证）一律丢弃，不当作"老师给了 0 分"。
+  if (Number.isFinite(ts) && (ts > 0 || tc)) out.teacherScorePct = Math.max(0, Math.min(100, Math.round(ts)));
   const tm = String(it.teacherMark || "").trim().toLowerCase();
   if (tm) {
     if (/correct|right|tick|check|对|✓|√/.test(tm)) out.teacherMark = "correct";
