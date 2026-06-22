@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MathText from "../lib/MathText";
 import { makeWorkbenchApi } from "../lib/workbenchApi";
+import { mapLimit } from "../utils/concurrency";
 import {
   extractPaper,
   extractPaperFromText,
@@ -138,35 +139,35 @@ async function extractFromFiles(files, mode, onProgress, wb, userId) {
 // 返回 { answers, images }：answers 每条带 _img（来源图在 images 里的下标，无图为 -1）+ bbox，
 // images 是可直接展示的答案原图（dataURI），供校对时画框定位。
 async function extractAnswersFromFiles(files, onProgress, wb, userId, questionNumbers = []) {
-  let answers = [];
+  // 先把文件展开成有序的"识别单元"并登记展示图（这步是本地准备，快）；
+  // 真正慢的 OCR 调用随后限并发执行，明显提速。
+  const units = []; // {kind:'text', text} | {kind:'image', ocrUrl, imgIdx}
   const images = []; // 展示用原图（与 _img 下标对应）
-  // 把一批 OCR 出的答案打上来源图下标
-  const tag = (arr, imgIdx) => arr.map((a) => ({ ...a, _img: imgIdx }));
   for (const f of files) {
-    onProgress?.(`识别答案 ${f.name}…`);
+    onProgress?.(`准备 ${f.name}…`);
     if (f.type === "application/pdf") {
       const text = await pdfToText(f, onProgress);
       if (text.replace(/\s+/g, "").length >= MIN_TEXT_DENSITY) {
-        answers = answers.concat(tag(await extractAnswersFromText(text, questionNumbers), -1));
+        units.push({ kind: "text", text });
       } else {
         const uris = await pdfToImageURIs(f, onProgress);
-        for (const uri of uris) {
-          const imgIdx = images.push(uri) - 1; // pdfToImageURIs 已是 dataURI，可直接展示
-          answers = answers.concat(tag(await extractAnswersFromImage(uri, questionNumbers), imgIdx));
-        }
+        for (const uri of uris) units.push({ kind: "image", ocrUrl: uri, imgIdx: images.push(uri) - 1 });
       }
     } else {
-      onProgress?.(`处理手写答案 ${f.name}…`);
       const imgUrl = await getAnswerImageForAI(f, wb, userId);
       if (imgUrl) {
-        // OCR 用 imgUrl（可能是签名链接）；展示用本地压缩 dataURI，避免链接过期/CORS
         const displayUri = await fileToDataURI(f, { maxPx: 1100, quality: 0.85 }) || imgUrl;
-        const imgIdx = images.push(displayUri) - 1;
-        answers = answers.concat(tag(await extractAnswersFromImage(imgUrl, questionNumbers), imgIdx));
+        units.push({ kind: "image", ocrUrl: imgUrl, imgIdx: images.push(displayUri) - 1 });
       }
     }
   }
-  return { answers, images };
+  onProgress?.(`识别 ${units.length} 页答案…`);
+  // 限并发 3 路识别；mapLimit 保序，flat 后答案顺序与单元一致
+  const results = await mapLimit(units, 3, async (u) => {
+    if (u.kind === "text") return (await extractAnswersFromText(u.text, questionNumbers)).map((a) => ({ ...a, _img: -1 }));
+    return (await extractAnswersFromImage(u.ocrUrl, questionNumbers)).map((a) => ({ ...a, _img: u.imgIdx }));
+  });
+  return { answers: results.flat(), images };
 }
 
 // 题号归一化：让 "Q2(i)"、"2.(i)"、"2 (I)" 都映射到同一个 key "2-i"
@@ -599,11 +600,10 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   };
 
   const gradeAll = async () => {
-    report("AI 批改中…", 5);
-    const graded = [];
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      report(`批改 ${i + 1}/${items.length}：第 ${item.number} 题…`, Math.round(5 + (i / items.length) * 90));
+    report("AI 批改中…（并发处理）", 5);
+    let done = 0;
+    // 限并发 3 路批改：N 题不再逐题串行等待
+    const graded = await mapLimit(items, 3, async (item) => {
       try {
         const result = await gradeItem({ question: item.question, studentAnswer: item.student_answer });
         const patch = {
@@ -616,9 +616,14 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
           reviewed: true,
         };
         const updated = await wb.updateItem(item.id, patch);
-        graded.push(updated || { ...item, ...patch });
-      } catch { graded.push(item); }
-    }
+        return updated || { ...item, ...patch };
+      } catch {
+        return item;
+      } finally {
+        done += 1;
+        report(`批改中… ${done}/${items.length}`, Math.round(5 + (done / items.length) * 90));
+      }
+    });
     setItems(graded);
     await wb.bumpMastery(userId, graded);
     report(`批改完成：错 ${graded.filter((x) => x.is_correct === false).length} 题。点错题开始辅导。`, 100);
@@ -982,10 +987,10 @@ function SolvePanel({ supabase, userId }) {
       }
       if (!questions.length) { report("没有识别到题目，请检查文件"); setProgress(null); return; }
       setItems(questions.map((q) => ({ ...q, solution: null, knowledgePoints: [], chapter: "", solving: true, expanded: true, failed: false })));
-      report(`识别到 ${questions.length} 道题，AI 解题中…`, 30);
-      for (let i = 0; i < questions.length; i++) {
-        const q = questions[i];
-        report(`解题 ${i + 1}/${questions.length}：${q.number}…`, Math.round(30 + (i / questions.length) * 68));
+      report(`识别到 ${questions.length} 道题，AI 解题中…（并发）`, 30);
+      let solved = 0;
+      // 限并发 3 路解题；每题完成各自就地更新，不必等前一题
+      await mapLimit(questions, 3, async (q, i) => {
         try {
           const result = await solveQuestion(q.number, q.question);
           const ok = result?.solution && result.solution.trim().length > 10;
@@ -993,11 +998,12 @@ function SolvePanel({ supabase, userId }) {
             idx === i ? { ...x, solution: ok ? result.solution : null, knowledgePoints: result?.knowledgePoints || [], chapter: result?.chapter || "", solving: false, failed: !ok } : x
           ));
         } catch {
-          setItems((prev) => prev.map((x, idx) =>
-            idx === i ? { ...x, solving: false, failed: true } : x
-          ));
+          setItems((prev) => prev.map((x, idx) => (idx === i ? { ...x, solving: false, failed: true } : x)));
+        } finally {
+          solved += 1;
+          report(`解题中… ${solved}/${questions.length}`, Math.round(30 + (solved / questions.length) * 68));
         }
-      }
+      });
       report(`全部完成，共 ${questions.length} 道题。`, 100);
       setTimeout(() => setProgress(null), 800);
     } catch (err) { report("出错：" + (err.message || err)); setProgress(null); }

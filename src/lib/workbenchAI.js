@@ -86,8 +86,9 @@ export async function solveQuestion(number, question) {
   const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "AI 解题" });
   if (!raw) return null;
 
-  // 从末尾找元数据 JSON（只有一层花括号，包含 knowledgePoints 字段）
-  const metaMatch = raw.match(/\{[^{}]*"knowledgePoints"[^{}]*\}\s*$/);
+  // 取"最后一个"含 knowledgePoints 的小 JSON（不强求在结尾——模型常多带一句话/换行）
+  const metaMatches = [...raw.matchAll(/\{[^{}]*"knowledgePoints"[^{}]*\}/g)];
+  const metaMatch = metaMatches.length ? metaMatches[metaMatches.length - 1] : null;
   const meta = metaMatch ? (parseLooseJSON(metaMatch[0]) || {}) : {};
   const solution = metaMatch ? raw.slice(0, metaMatch.index).trim() : raw.trim();
 
@@ -305,7 +306,31 @@ export async function tutorReply({ item, history, userMessage }) {
   return await callGenerate(messages, { json: false, materialTitle: "错题辅导" });
 }
 
+// 知识点讲解缓存（localStorage）：同一个知识点不必每次点开都重调 AI，省时省钱。
+// 带教材资料(existingNote)时不走缓存，保证个性化讲解新鲜。
+const KP_CACHE_KEY = "mc_kp_explain_v1";
+function readKpCache() {
+  try { return JSON.parse(localStorage.getItem(KP_CACHE_KEY) || "{}") || {}; } catch { return {}; }
+}
+function writeKpCache(point, data) {
+  try {
+    const c = readKpCache();
+    c[point] = { data, at: Date.now() };
+    // 简单容量控制：超过 200 个时丢掉最旧的一半
+    const keys = Object.keys(c);
+    if (keys.length > 200) {
+      keys.sort((a, b) => (c[a].at || 0) - (c[b].at || 0)).slice(0, keys.length - 100).forEach((k) => delete c[k]);
+    }
+    localStorage.setItem(KP_CACHE_KEY, JSON.stringify(c));
+  } catch {}
+}
+
 export async function explainKnowledge({ point, existingNote }) {
+  // 命中缓存（仅无教材资料时）直接返回
+  if (point && !existingNote) {
+    const hit = readKpCache()[point];
+    if (hit && hit.data) return hit.data;
+  }
   // 用分段标记而非 JSON：讲解里全是 $LaTeX$，塞进 JSON 会被反斜杠破坏解析 → 整段空白。
   const prompt = `你是线性代数老师。请讲解知识点「${point}」，帮助学生彻底理解。
 ${existingNote ? `\n已有教材资料，优先参考：\n${existingNote}\n` : ""}
@@ -338,19 +363,41 @@ ${existingNote ? `\n已有教材资料，优先参考：\n${existingNote}\n` : "
     .filter(Boolean);
   // 完全没解析到分段时，退回把整段当详解，避免空白
   if (!summary && !detail && !keyPoints.length && !example) {
-    return { summary: "", detail: raw.trim(), keyPoints: [], example: "" };
+    const fallback = { summary: "", detail: raw.trim(), keyPoints: [], example: "" };
+    if (point && !existingNote && fallback.detail) writeKpCache(point, fallback);
+    return fallback;
   }
-  return { summary, detail, keyPoints, example };
+  const result = { summary, detail, keyPoints, example };
+  if (point && !existingNote) writeKpCache(point, result);
+  return result;
 }
 
 export async function generateVariant(item) {
+  // 分段标记替代 JSON：题目/答案/解析全是 $LaTeX$，塞 JSON 容易因反斜杠解析失败。
   const prompt = `根据这道学生做错的题，出一道同知识点、不同数字/情境的新题，让学生重新练。
 
 【原题】${item.question}
 【考的知识点】${(item.knowledge_points || []).join("、")}
 
-要求：难度相当，换数字或换情境，公式用 $...$。
-只输出 JSON：
-{"question":"新题$公式$","answer":"答案","explanation":"解析","knowledgePoints":${JSON.stringify(item.knowledge_points || [])}}`;
-  return await callGenerate([{ role: "user", content: prompt }], { json: true, materialTitle: "变式练习" });
+要求：难度相当，换数字或换情境，公式用 $...$。严格按以下分段输出（不要 JSON、不要代码块围栏）：
+@@题目@@
+（新题，含 $公式$）
+@@答案@@
+（最终答案）
+@@解析@@
+（简要解题过程，含 $公式$）`;
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "变式练习" });
+  if (!raw) return null;
+  const pick = (tag) => {
+    const m = raw.match(new RegExp(`@@${tag}@@\\s*([\\s\\S]*?)(?=@@[^@]+@@|$)`, "i"));
+    return m ? m[1].trim() : "";
+  };
+  const question = pick("题目");
+  const answer = pick("答案");
+  const explanation = pick("解析");
+  const knowledgePoints = item.knowledge_points || [];
+  if (!question && !answer && !explanation) {
+    return { question: raw.trim(), answer: "", explanation: "", knowledgePoints };
+  }
+  return { question, answer, explanation, knowledgePoints };
 }

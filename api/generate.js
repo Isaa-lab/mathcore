@@ -986,15 +986,11 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     return "";
   };
 
-  // ── Priority 0（仅视觉）：按"全球可达 + 质量"排序 ───────────────────────────
-  // 现实约束：Vercel 在大陆境外，豆包(北京)/Kimi(国内) 跨境传图常被重置(fetch failed)，
-  // 只能放最后试。真正可靠的是境外可达的 Gemini / Groq。
-  //   1) Gemini 官方 —— 质量最好，但免费层每天 200 次(RPD)用完会 429
-  //   2) Groq Llama-4 Scout —— 免费、美国机房、不跨境，作主力兜底
-  //   3) 豆包 / Kimi —— 国内，跨境多半连不上，最后试（失败也快）
+  // ── Priority 0（仅视觉）：只用全球可达的上游，避免跨境白等 ───────────────────
+  // Vercel 在大陆境外，豆包(北京)/Kimi(国内) 跨境传图基本必失败、每次还白等 ~10s，
+  // 已从视觉链移除。顺序：Qwen-VL（DashScope，质量最好）→ Gemini → Groq Llama-4。
   const GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
   if (hasVisionMessages) {
-    // Qwen-VL（国际站）若已配置则优先：中文/手写数学 OCR 最强，且全球可达。
     if (!responseText && QWEN_KEY) {
       responseText = await callOpenAICompat(QWEN_BASE, QWEN_KEY, QWEN_VISION_MODEL, `qwen(server):${QWEN_VISION_MODEL}`) || "";
     }
@@ -1003,12 +999,6 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     }
     if (!responseText && GROQ_KEY) {
       responseText = await callOpenAICompat("https://api.groq.com/openai/v1", GROQ_KEY, GROQ_VISION_MODEL, `groq(server):llama-4-scout`) || "";
-    }
-    if (!responseText && VOLCENGINE_KEY) {
-      responseText = await callOpenAICompat(VOLCENGINE_BASE, VOLCENGINE_KEY, VOLCENGINE_VISION_MODEL, `volcengine(server):${VOLCENGINE_VISION_MODEL}`) || "";
-    }
-    if (!responseText && KIMI_KEY) {
-      responseText = await callOpenAICompat("https://api.moonshot.cn/v1", KIMI_KEY, "moonshot-v1-vision-preview", "kimi(server)") || "";
     }
   }
 
