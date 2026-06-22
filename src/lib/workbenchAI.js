@@ -74,14 +74,19 @@ export async function extractRegion(dataURI) {
 - 【矩阵/向量要逐行逐列数清楚】先数清这个矩阵有几行几列，再逐个元素抄写，**行数列数必须和图里完全一致**——常见错误是把 4 行的列向量/矩阵少抄成 3 行、或把两个相邻元素合并。矩阵每一行用 \\\\ 分隔、同行元素用 & 分隔，务必核对行数。
 - 多行用 \\n 分隔，保持从上到下的顺序；字迹潦草也尽力辨认。
 只输出转写后的纯文本，不要 JSON、不要解释、不要代码块。`;
-  const raw = await callGenerate([{
+  const call = (model) => callGenerate([{
     role: "user",
     content: [
       { type: "text", text: prompt },
       { type: "image_url", image_url: { url: dataURI } },
     ],
-  }], { json: false, materialTitle: "区域识别", visionModel: "qwen-vl-max" }); // 局部小图用最强模型，精度优先
-  return normalizeNewlineEscapes(String(raw || "").trim());
+  }], { json: false, materialTitle: "区域识别", visionModel: model });
+  // 局部小图只一张、不怕慢，优先用新一代 qwen3-vl-plus（手写/矩阵更准）；
+  // 端点不支持或报错就回退到 qwen-vl-max。
+  let raw = "";
+  try { raw = String(await call("qwen3-vl-plus") || "").trim(); } catch { raw = ""; }
+  if (!raw) { try { raw = String(await call("qwen-vl-max") || "").trim(); } catch { raw = ""; } }
+  return normalizeNewlineEscapes(raw);
 }
 
 async function callVision(dataURI, promptText, { json = true } = {}) {
