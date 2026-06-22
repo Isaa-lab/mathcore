@@ -15,6 +15,7 @@ const CSS = `
 .kp-tabsbar{position:sticky;top:0;z-index:3;background:var(--card,#fff);padding:2px 0 8px;margin-bottom:6px;border-bottom:1px solid var(--line)}
 .kp-tabs{display:flex;gap:6px;flex-wrap:wrap}.kp-tab{font-size:12px;border:1px solid var(--line);background:#fff;color:#3a3f55;border-radius:8px;padding:6px 11px;cursor:pointer;font-family:ui-monospace,monospace}.kp-tab.on{background:var(--brand);border-color:var(--brand);color:#fff}
 .kp-tab-review{border-color:#f3c7d2;color:var(--rose)}.kp-tab-review.on{background:var(--rose);border-color:var(--rose);color:#fff}
+.kp-tab-ref{border-color:#c7ead8;color:var(--emerald)}.kp-tab-ref.on{background:var(--emerald);border-color:var(--emerald);color:#fff}
 .kp-sec{margin-bottom:18px}.kp-ey{font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;margin:0 0 8px}.kp-summary{font-size:15px;font-weight:600;line-height:1.5;margin-bottom:12px}.kp-detail{font-size:14px;line-height:1.75;color:#3a3f55}
 .kp-points{list-style:none;padding:0;margin:0;display:grid;gap:7px}.kp-points li{font-size:13px;padding:8px 11px 8px 28px;background:var(--soft);border-radius:8px;position:relative;line-height:1.75}.kp-points li::before{content:"▸";color:var(--brand);position:absolute;left:11px;top:8px}
 .kp-viz{background:var(--amber-soft);border-radius:11px;padding:13px 15px;font-size:13px;color:#7c5410;line-height:1.6}.kp-viz .vh{font-family:ui-monospace,monospace;font-size:11px;color:var(--amber);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
@@ -35,8 +36,10 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
   useCSS();
   // 过滤空字符串/重复，避免出现空白知识点标签
   const points = [...new Set((item?.knowledge_points || []).map((p) => String(p).trim()).filter(Boolean))];
-  // 错题才有"订正点评"标签（错因 + 正确答案），作为第一个标签页
-  const hasReview = item?.is_correct === false && Boolean(item?.error_detail || item?.error_type || item?.correct_answer);
+  // 第一个标签页：错题是"订正点评"（错因 + 参考答案）；判对的题也展示"参考答案"（哪怕对了也给标准解）
+  const isWrong = item?.is_correct === false;
+  const hasReview = item?.is_correct !== null && Boolean(item?.error_detail || item?.error_type || item?.correct_answer);
+  const reviewLabel = isWrong ? "订正点评" : "参考答案";
   const tabs = [...(hasReview ? [REVIEW_KEY] : []), ...points];
   const [active, setActive] = useState(tabs[0] || null);
   const [data, setData] = useState(null);
@@ -85,15 +88,15 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
       )}
       {tabs.length > 0 && (
         <div className="kp-tabsbar">
-          <p className="kp-ey" style={{ marginBottom: 8 }}>{hasReview ? "订正点评 · 知识点 · 点击切换" : "这道题考的知识点 · 点击查看"}</p>
+          <p className="kp-ey" style={{ marginBottom: 8 }}>{hasReview ? `${reviewLabel} · 知识点 · 点击切换` : "这道题考的知识点 · 点击查看"}</p>
           <div className="kp-tabs">
             {tabs.map((t) => (
               <span
                 key={t}
-                className={"kp-tab" + (active === t ? " on" : "") + (t === REVIEW_KEY ? " kp-tab-review" : "")}
+                className={"kp-tab" + (active === t ? " on" : "") + (t === REVIEW_KEY ? (isWrong ? " kp-tab-review" : " kp-tab-ref") : "")}
                 onClick={() => setActive(t)}
               >
-                {t === REVIEW_KEY ? "订正点评" : t}
+                {t === REVIEW_KEY ? reviewLabel : t}
               </span>
             ))}
           </div>
@@ -102,7 +105,7 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
 
       {active === REVIEW_KEY ? (
         <>
-          {(item.error_detail || item.error_type) && (
+          {isWrong && (item.error_detail || item.error_type) && (
             <div className="kp-sec">
               <div className="kp-err">
                 <div className="kp-err-h">✗ 错在哪里{item.error_type ? ` · ${item.error_type}错误` : ""}</div>
@@ -110,11 +113,13 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
               </div>
             </div>
           )}
-          {item.correct_answer && (
+          {item.correct_answer ? (
             <div className="kp-sec">
-              <p className="kp-ca-h">✓ 参考正确答案</p>
-              <div className="kp-correct"><MathText text={item.correct_answer} /></div>
+              <p className="kp-ca-h">{isWrong ? "✓ 参考正确答案" : "✓ 参考答案（标准解法）"}</p>
+              <div className="kp-correct"><MathText text={autoLatex(item.correct_answer)} /></div>
             </div>
+          ) : (
+            !isWrong && <div className="kp-sec"><div className="kp-correct">（这道题没有保存参考答案）</div></div>
           )}
         </>
       ) : (
