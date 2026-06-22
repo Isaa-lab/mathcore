@@ -444,6 +444,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const [focusBox, setFocusBox] = useState(null); // {img, bbox} 当前高亮的题在原图里的区域
   const [lightbox, setLightbox] = useState(null); // URL of enlarged image
   const [uploadCollapsed, setUploadCollapsed] = useState(false); // 有题目后收起上传区，给列表腾空间
+  const [pendingFiles, setPendingFiles] = useState([]); // 本次上传的原始文件，确认后归档到「以往记录」
   const fileRef = useRef(null);
   const qRef = useRef(null);
   const aRef = useRef(null);
@@ -463,6 +464,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     if (!userId) { alert("请先登录"); return; }
     const allFiles = [...files].filter((f) => f.type.startsWith("image/") || f.type === "application/pdf");
     if (!allFiles.length) { report("请上传图片或 PDF 文件"); return; }
+    setPendingFiles(allFiles); // 归档到「以往记录」用
     try {
       setProgress(5);
       let extracted = [];
@@ -532,6 +534,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const processSeparate = useCallback(async () => {
     if (!userId) { alert("请先登录"); return; }
     if (!qFiles.length || !aFiles.length) return;
+    setPendingFiles([...qFiles, ...aFiles]); // 归档到「以往记录」用
     try {
       report("提取题目…", 5);
       const questions = await extractFromFiles(qFiles, "questions", (msg) => report(msg, Math.min(35, (progress || 5) + 3)), wb, userId);
@@ -560,7 +563,10 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     try {
       report("保存中…", 92);
       setProgress(92);
-      const paper = await wb.createPaper({ userId, imageUrls: [] });
+      // 归档原始上传文件到「以往记录」（失败不阻断保存）
+      let archived = [];
+      try { if (pendingFiles.length) archived = await wb.uploadImages(pendingFiles, userId); } catch {}
+      const paper = await wb.createPaper({ userId, imageUrls: archived });
       const rows = reviewItems.map((item) => ({
         paper_id: paper.id,
         user_id: userId,
@@ -579,6 +585,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       setReviewAnswers([]);
       setReviewImages([]);
       setFocusBox(null);
+      setPendingFiles([]);
       onReviewModeChange?.(false);
       report(`保存完成，共 ${saved.length} 道题，点「全部批改」开始。`, 100);
       setTimeout(() => setProgress(null), 800);
@@ -935,6 +942,15 @@ function SolvePanel({ supabase, userId }) {
     if (!files?.length) return;
     const allFiles = [...files].filter((f) => f.type.startsWith("image/") || f.type === "application/pdf");
     if (!allFiles.length) { report("请上传图片或 PDF 文件"); return; }
+    // 归档原始文件到「以往记录」（仅登录时，失败不阻断解题）
+    if (userId) {
+      (async () => {
+        try {
+          const paths = await wb.uploadImages(allFiles, userId);
+          if (paths.length) await wb.createPaper({ userId, subject: "AI 解题", title: `AI 解题 ${new Date().toLocaleString()}`, imageUrls: paths });
+        } catch {}
+      })();
+    }
     try {
       setItems([]);
       let questions = [];

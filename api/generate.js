@@ -133,7 +133,7 @@ async function runHandler(req, res) {
   // 若是国际站 key，设 QWEN_BASE=https://dashscope-intl.aliyuncs.com/compatible-mode/v1。
   const QWEN_KEY  = process.env.QWEN_KEY || process.env.DASHSCOPE_KEY || process.env.qwen_key || "";
   const QWEN_BASE = String(process.env.QWEN_BASE || "https://dashscope.aliyuncs.com/compatible-mode/v1").trim().replace(/\/$/, "");
-  const QWEN_VISION_MODEL = process.env.QWEN_VISION_MODEL || "qwen-vl-plus";
+  const QWEN_VISION_MODEL = process.env.QWEN_VISION_MODEL || "qwen3-vl-plus";
   const QWEN_TEXT_MODEL   = process.env.QWEN_TEXT_MODEL   || "qwen-plus";
 
   // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底

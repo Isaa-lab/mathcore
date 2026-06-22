@@ -12,6 +12,7 @@ import AiGenerate from "./components/AiGenerate";
 import UploadSolve from "./components/UploadSolve";
 import MistakeWorkbench from "./components/MistakeWorkbench";
 import PaperNotebook from "./components/PaperNotebook";
+import PaperArchive from "./components/PaperArchive";
 import SprintWorkspace from "./layouts/SprintWorkspace";
 import { isEditableFocused } from "./utils/keyboard";
 import { detectVizIntent, logVizIntent } from "./utils/vizIntent";
@@ -16951,6 +16952,7 @@ export default function App() {
     if (tab === "小测") return <QuizPage setPage={handleSetPage} initialQuestion={retryQuestion} chapterFilter={chapterFilter} setChapterFilter={setChapterFilter} sessionAnswers={sessionAnswers} autoStartIntent={quizIntent} currentMaterial={currentMaterial} assessmentCourse={assessmentSession?.courseName || null} assessmentWeakConceptIds={assessmentSession?.weakConceptIds || []} assessmentForceWeakOnly={!!assessmentSession?.forceWeak} onAnswer={(qid, correct, chapter, payload) => { recordAnswer(qid, correct, chapter, payload); }} />;
     if (tab === "复习") return <ReviewPage currentMaterial={currentMaterial} switchStudyTab={switchStudyTab} setQuizIntent={setQuizIntent} setChapterFilter={setChapterFilter} />;
     if (tab === "错题本") return <NotebookSwitcher supabase={supabase} userId={session?.user?.id} wrongPageProps={{ setPage: handleSetPage, sessionAnswers, setChapterFilter, currentMaterial, embedded: true }} />;
+    if (tab === "以往记录") return <PaperArchive supabase={supabase} userId={session?.user?.id} />;
     return null;
   };
 
@@ -17056,6 +17058,7 @@ export default function App() {
                           { key: "工作台", label: "错题工作台" },
                           { key: "知识点", label: "知识点" },
                           { key: "错题本", label: "错题本" },
+                          { key: "以往记录", label: "以往记录" },
                         ].map((t) => {
                           const on = (studyTab || "工作台") === t.key;
                           return (

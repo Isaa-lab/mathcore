@@ -121,6 +121,27 @@ export function makeWorkbenchApi(supabase) {
     await supabase.from("paper_items").delete().eq("id", itemId);
   }
 
+  // ── 以往记录：列出用户上传过的卷子 + 取原文件下载链接 ──
+  async function listPapers(userId) {
+    const { data } = await supabase.from("papers")
+      .select("id,title,subject,image_urls,status,created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+    return data || [];
+  }
+
+  // 批量把存储路径换成带签名的下载 URL（2 小时有效）
+  async function signUrls(paths) {
+    const list = (paths || []).filter(Boolean);
+    if (!list.length) return [];
+    const { data } = await supabase.storage.from("papers").createSignedUrls(list, 7200);
+    return (data || []).map((d) => ({ path: d.path, url: d.signedUrl, name: (d.path || "").split("/").pop() }));
+  }
+
+  async function deletePaper(paperId) {
+    await supabase.from("papers").delete().eq("id", paperId);
+  }
+
   async function bumpMastery(userId, items) {
     const aggregate = {};
     for (const item of items) {
@@ -166,6 +187,9 @@ export function makeWorkbenchApi(supabase) {
     setStar,
     saveSolvedItem,
     deleteItem,
+    listPapers,
+    signUrls,
+    deletePaper,
     bumpMastery,
   };
 }
