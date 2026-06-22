@@ -811,9 +811,8 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     if (budget < 1500) { providerDiag.push(`${tag}: skipped(budget_exhausted)`); return null; }
     const t0 = Date.now();
     try {
-      // 视觉 OCR：满页手写数学（矩阵 + LaTeX）很占 token，输出上限太小会把 JSON 截断，
-      // 导致整页解析失败、只剩内容少的页幸存。给足额度。
-      const maxTok = hasVisionMessages ? 8000 : 4000;
+      // 视觉 OCR：要够大以免截断，但太大单页生成会超 55s 预算。5000 是折中。
+      const maxTok = hasVisionMessages ? 5000 : 4000;
       const body = isChatMode
         ? { model, messages, temperature: 0.6, max_tokens: maxTok }
         : { model, messages: [{ role: "user", content: prompt }], temperature: 0.5, max_tokens: maxTok };

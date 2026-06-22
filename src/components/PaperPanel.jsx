@@ -201,8 +201,9 @@ async function extractAnswersFromFiles(files, onProgress, wb, userId, questionNu
     }
   }
   onProgress?.(`识别 ${units.length} 页答案…`);
-  // 限并发 2 路识别：视觉调用重，2 路兼顾提速与避免 DashScope 限流/超时；mapLimit 保序
-  const results = await mapLimit(units, 2, async (u) => {
+  // 串行识别（并发=1）：DashScope 视觉对并发敏感，2 路会互相拖慢直至 55s 超时；
+  // 每页独占带宽更稳。慢一点但不失败。
+  const results = await mapLimit(units, 1, async (u) => {
     if (u.kind === "text") return (await extractAnswersFromText(u.text, questionNumbers)).map((a) => ({ ...a, _img: -1 }));
     return (await extractAnswersFromImage(u.ocrUrl, questionNumbers)).map((a) => ({ ...a, _img: u.imgIdx }));
   });
