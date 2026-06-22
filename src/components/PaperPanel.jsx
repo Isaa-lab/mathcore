@@ -12,6 +12,7 @@ import {
   extractAnswersFromText,
   alignAnswersToQuestions,
   gradeItem,
+  verifyGrade,
   solveQuestion,
   autoLatex,
   toLatex,
@@ -360,7 +361,8 @@ const CSS = `
 .pp-mf-view{display:flex;align-items:flex-start;gap:8px;background:var(--soft);border-radius:8px;padding:9px 11px;cursor:pointer}
 .pp-mf-view:hover{background:#eceef5}
 .pp-mf-rendered{flex:1;min-width:0;overflow-x:auto;font-size:14px;line-height:1.7}
-.pp-mf-edit{flex-shrink:0;font-size:11px;border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--brand);font-family:inherit}
+.pp-mf-btns{flex-shrink:0;display:flex;flex-direction:column;gap:4px}
+.pp-mf-edit{flex-shrink:0;font-size:11px;border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--brand);font-family:inherit;white-space:nowrap}
 .pp-mf-edit:hover{border-color:var(--brand)}
 .pp-mf-tools{display:flex;gap:8px;margin-bottom:5px}
 .em .em-math{cursor:pointer;border-radius:4px;padding:0 1px;transition:background .12s}
@@ -454,7 +456,7 @@ function MathToolbar({ taRef, onChange }) {
 
 // 数学字段：默认只显示「渲染后的公式」，点「✏️ 修改」才展开输入；
 // 改时可点「🤖 AI 帮我转成公式」——随便用普通写法敲，AI 转成规范 LaTeX 并渲染，全程不碰源码。
-function MathField({ label, value, warn, onChange, onFocus, editExtra, emptyHint }) {
+function MathField({ label, value, warn, onChange, onFocus, editExtra, emptyHint, hints, onFrame }) {
   const [editing, setEditing] = useState(false);
   const [converting, setConverting] = useState(false);
   const taRef = useRef(null);
@@ -473,10 +475,13 @@ function MathField({ label, value, warn, onChange, onFocus, editExtra, emptyHint
         <div className="pp-mf-view" onClick={() => onFocus?.()}>
           <div className="pp-mf-rendered">
             {has
-              ? <EditableMath value={autoLatex(value)} onChange={onChange} />
+              ? <EditableMath value={autoLatex(value)} onChange={onChange} hints={hints} />
               : <span className="pp-ans-empty">{emptyHint || "（空白）"}</span>}
           </div>
-          <button className="pp-mf-edit" onClick={(e) => { e.stopPropagation(); setEditing(true); }}>✏️ 全文改</button>
+          <div className="pp-mf-btns" onClick={(e) => e.stopPropagation()}>
+            {onFrame && <button className="pp-mf-edit" title="框选原图区域，AI 重新识别填入本题" onClick={onFrame}>✂︎ 框选</button>}
+            <button className="pp-mf-edit" onClick={() => setEditing(true)}>✏️ 全文改</button>
+          </div>
         </div>
       ) : (
         <>
@@ -494,7 +499,8 @@ function MathField({ label, value, warn, onChange, onFocus, editExtra, emptyHint
   );
 }
 
-function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer }) {
+function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer, onFrame }) {
+  const hints = [(item.knowledge_points || []).join(" "), item.chapter || "", item.question || ""].join(" ");
   const matchedIdx = answers.findIndex((a) => (a.studentAnswer || "") === (item.studentAnswer || "") && (item.studentAnswer || "").trim());
   const dropdown = answers.length > 0 ? (
     <select
@@ -520,13 +526,15 @@ function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer }) {
   return (
     <div className="pp-rvi">
       <div className="pp-rvi-num">#{item.number || "?"}</div>
-      <MathField label="题目" value={item.question} onChange={(v) => onChange({ ...item, question: v })} />
+      <MathField label="题目" value={item.question} hints={hints} onChange={(v) => onChange({ ...item, question: v })} />
       <MathField
         label="学生答案"
         warn={item.answerConfidence === "low" && (item.studentAnswer || "").trim() ? <span className="pp-rvi-warn"> · 字迹待确认</span> : null}
         value={item.studentAnswer}
+        hints={hints}
         onChange={(v) => onChange({ ...item, studentAnswer: v })}
         onFocus={() => onFocusAnswer?.(item)}
+        onFrame={onFrame}
         editExtra={dropdown}
         emptyHint="（未识别，点修改补充）"
       />
@@ -806,11 +814,31 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
         report(`批改中… ${done}/${items.length}`, Math.round(5 + (done / items.length) * 90));
       }
     });
-    setItems(graded);
+
+    // 关键题复核：对第一遍判"对"的题独立再核一次，抓"没做完却判对"这类假阳性
+    const toVerify = graded.filter((x) => x.is_correct === true && (x.student_answer || "").trim());
+    if (toVerify.length) {
+      report(`复核 ${toVerify.length} 道判对的题…`, 95);
+      await mapLimit(toVerify, 3, async (item) => {
+        try {
+          const ok = await verifyGrade({ question: item.question, studentAnswer: item.student_answer });
+          if (!ok) {
+            const patch = { is_correct: false, error_type: item.error_type || "计算", error_detail: item.error_detail || "复核发现答案未完成或最终结果不正确" };
+            const updated = await wb.updateItem(item.id, patch);
+            const merged = updated || { ...item, ...patch };
+            // 就地改 graded 里对应项
+            const gi = graded.findIndex((g) => g.id === item.id);
+            if (gi >= 0) graded[gi] = merged;
+          }
+        } catch {}
+      });
+    }
+
+    setItems([...graded]);
     await wb.bumpMastery(userId, graded);
     report(`批改完成：错 ${graded.filter((x) => x.is_correct === false).length} 题。点错题开始辅导。`, 100);
     setTimeout(() => setProgress(null), 800);
-    onItemsGraded?.(graded);
+    onItemsGraded?.([...graded]);
   };
 
   const flipCorrect = async (item) => {
@@ -940,6 +968,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                     setFocusBox(null);
                   }
                 }}
+                onFrame={() => { setReviewActiveIdx(i); setImgView({ zoom: 1, x: 0, y: 0 }); setFrameRect(null); setFraming(true); }}
               />
             ))}
           </div>

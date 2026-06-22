@@ -319,10 +319,15 @@ export async function gradeItem({ question, studentAnswer }) {
 【题目】${question}
 【学生答案】${studentAnswer || "(空白)"}
 
-判分原则（务必遵守）：
-- 这是学生订正后的答案，很可能是对的。只要**最终结论正确、关键步骤合理**，就判对（isCorrect=true），允许书写习惯、记号、排版差异。
-- 不要因为"和你的解法不完全一样"就判错；不要吹毛求疵。
-- 只有当结论确实错误、或关键步骤有实质错误、或学生空白时，才判错。
+判分原则（务必遵守，宁严勿松）：
+- 先**自己把题目完整解出来、得到最终结果**，再逐项核对学生答案。
+- 允许书写习惯、记号、排版差异；解法不同但结论与关键步骤都正确 → 判对。
+- 【以下一律判错 isCorrect=false】：
+  · 答案**没做完 / 中途中断**（例如写到 "= " 后面空着、最后一步没算出、缺最终数值或结论）；
+  · 最终结果与正确答案**不一致**（务必把学生的最终数值/表达式和你算出的对比，不要只看过程像就放过）；
+  · 关键步骤有实质错误（公式用错、积分/求导/化简出错导致结果变化）；
+  · 学生空白。
+- 判对前先自问："学生有没有给出和我一致的最终答案？" 答不上来就判错。
 
 输出格式（严格遵守，分两部分）：
 1. 先写「参考解答」：完整步骤，公式用 $...$ 包裹，可多段——这部分**不要放进 JSON**。
@@ -350,6 +355,24 @@ export async function gradeItem({ question, studentAnswer }) {
     knowledgePoints: Array.isArray(meta.knowledgePoints) ? meta.knowledgePoints : [],
     chapter: meta.chapter || "",
   };
+}
+
+// 关键题复核：对第一遍判"对"的题，独立再核一次"是否真的完整且正确"。
+// 返回 true=确认对 / false=其实不对（含未完成/结果错）。出错或拿不到结果时返回 true（不误伤）。
+export async function verifyGrade({ question, studentAnswer }) {
+  if (!studentAnswer || !String(studentAnswer).trim()) return false; // 空白必错
+  const prompt = `独立复核：先自己把题目解出最终结果，再判断学生答案是否**既完整又正确**。
+特别注意：没做完、缺最终结果、最终数值/表达式和正确答案不一致 → 都算"不正确"。
+
+【题目】${question}
+【学生答案】${studentAnswer}
+
+只回复一个词：正确  或  不正确（不要解释、不要公式）。`;
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "判分复核" });
+  const t = String(raw || "");
+  if (/不正确|错误|不对|incorrect|wrong|false/i.test(t)) return false;
+  if (/正确|对|correct|true/i.test(t)) return true;
+  return true; // 拿不准不误伤
 }
 
 export async function summarizeWeakness(wrongItems) {
