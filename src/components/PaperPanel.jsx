@@ -13,6 +13,7 @@ import {
   gradeItem,
   solveQuestion,
   autoLatex,
+  toLatex,
 } from "../lib/workbenchAI";
 
 // ── PDF helpers ──────────────────────────────────────────────────────────────
@@ -315,6 +316,12 @@ const CSS = `
 .pp-rvi-field{margin-bottom:8px}
 .pp-rvi-label{font-family:ui-monospace,monospace;font-size:10px;color:var(--faint);margin-bottom:3px}
 .pp-rvi-warn{color:var(--amber)}
+.pp-mf-view{display:flex;align-items:flex-start;gap:8px;background:var(--soft);border-radius:8px;padding:9px 11px;cursor:pointer}
+.pp-mf-view:hover{background:#eceef5}
+.pp-mf-rendered{flex:1;min-width:0;overflow-x:auto;font-size:14px;line-height:1.7}
+.pp-mf-edit{flex-shrink:0;font-size:11px;border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--brand);font-family:inherit}
+.pp-mf-edit:hover{border-color:var(--brand)}
+.pp-mf-tools{display:flex;gap:8px;margin-bottom:5px}
 .pp-rvi-pick{width:100%;border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;font-size:12px;margin-bottom:4px;background:#fff;color:var(--ink);cursor:pointer;outline:none}
 .pp-rvi-pick:focus{border-color:var(--brand)}
 .pp-mtb{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px}
@@ -400,50 +407,82 @@ function MathToolbar({ taRef, onChange }) {
   );
 }
 
+// 数学字段：默认只显示「渲染后的公式」，点「✏️ 修改」才展开输入；
+// 改时可点「🤖 AI 帮我转成公式」——随便用普通写法敲，AI 转成规范 LaTeX 并渲染，全程不碰源码。
+function MathField({ label, value, warn, onChange, onFocus, editExtra, emptyHint }) {
+  const [editing, setEditing] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const taRef = useRef(null);
+  const has = (value || "").trim();
+
+  const aiConvert = async () => {
+    if (!has) return;
+    setConverting(true);
+    try { const out = await toLatex(value); if (out) onChange(out); } finally { setConverting(false); }
+  };
+
+  return (
+    <div className="pp-rvi-field">
+      <div className="pp-rvi-label">{label}{warn}</div>
+      {!editing ? (
+        <div className="pp-mf-view" onClick={() => onFocus?.()}>
+          <div className="pp-mf-rendered">
+            {has ? <MathText text={autoLatex(value)} /> : <span className="pp-ans-empty">{emptyHint || "（空白）"}</span>}
+          </div>
+          <button className="pp-mf-edit" onClick={(e) => { e.stopPropagation(); setEditing(true); }}>✏️ 修改</button>
+        </div>
+      ) : (
+        <>
+          {editExtra}
+          <div className="pp-mf-tools">
+            <button className="pp-btn mini primary" disabled={converting || !has} onClick={aiConvert}>{converting ? "转换中…" : "🤖 AI 帮我转成公式"}</button>
+            <button className="pp-btn mini" onClick={() => setEditing(false)}>完成</button>
+          </div>
+          <MathToolbar taRef={taRef} onChange={onChange} />
+          <textarea ref={taRef} className="pp-edit" rows={2} value={value || ""} onFocus={() => onFocus?.()} onChange={(e) => onChange(e.target.value)} />
+          {has && <div className="pp-preview"><span className="pp-preview-label">渲染预览</span><MathText text={autoLatex(value)} /></div>}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer }) {
-  const ansRef = useRef(null);
-  // 当前答案对应原始 OCR 段的下标（-1 表示手动/未指认）
   const matchedIdx = answers.findIndex((a) => (a.studentAnswer || "") === (item.studentAnswer || "") && (item.studentAnswer || "").trim());
+  const dropdown = answers.length > 0 ? (
+    <select
+      className="pp-rvi-pick"
+      value={matchedIdx}
+      onChange={(e) => {
+        const idx = Number(e.target.value);
+        if (idx < 0) onChange({ ...item, studentAnswer: "", answerConfidence: "low", bbox: null, _img: -1 });
+        else {
+          const a = answers[idx];
+          onChange({ ...item, studentAnswer: a.studentAnswer || "", answerConfidence: a.answerConfidence || "low", bbox: a.bbox || null, _img: a._img ?? -1 });
+          onFocusAnswer?.({ ...item, bbox: a.bbox || null, _img: a._img ?? -1 });
+        }
+      }}
+    >
+      <option value={-1}>{matchedIdx < 0 ? "— 选对应的识别段 / 手动输入 —" : "— 清空 / 手动输入 —"}</option>
+      {answers.map((a, ai) => (
+        <option key={ai} value={ai}>识别段 #{a.number || "?"}：{answerSnippet(a.studentAnswer)}</option>
+      ))}
+    </select>
+  ) : null;
+
   return (
     <div className="pp-rvi">
       <div className="pp-rvi-num">#{item.number || "?"}</div>
-      <div className="pp-rvi-field">
-        <div className="pp-rvi-label">题目</div>
-        <textarea className="pp-edit" rows={3} value={item.question || ""} onChange={e => onChange({ ...item, question: e.target.value })} />
-        {(item.question || "").trim() && <div className="pp-preview"><span className="pp-preview-label">预览</span><MathText text={item.question} /></div>}
-      </div>
-      <div className="pp-rvi-field">
-        <div className="pp-rvi-label">
-          学生答案{item.answerConfidence === "low" && (item.studentAnswer || "").trim() && <span className="pp-rvi-warn"> · 字迹待确认</span>}
-        </div>
-        {answers.length > 0 && (
-          <select
-            className="pp-rvi-pick"
-            value={matchedIdx}
-            onChange={(e) => {
-              const idx = Number(e.target.value);
-              if (idx < 0) onChange({ ...item, studentAnswer: "", answerConfidence: "low", bbox: null, _img: -1 });
-              else {
-                const a = answers[idx];
-                onChange({ ...item, studentAnswer: a.studentAnswer || "", answerConfidence: a.answerConfidence || "low", bbox: a.bbox || null, _img: a._img ?? -1 });
-                onFocusAnswer?.({ ...item, bbox: a.bbox || null, _img: a._img ?? -1 });
-              }
-            }}
-          >
-            <option value={-1}>{matchedIdx < 0 ? "— 未指认，手动输入或选择对应答案 —" : "— 清空 / 手动输入 —"}</option>
-            {answers.map((a, ai) => (
-              <option key={ai} value={ai}>识别段 #{a.number || "?"}：{answerSnippet(a.studentAnswer)}</option>
-            ))}
-          </select>
-        )}
-        <MathToolbar taRef={ansRef} onChange={(v) => onChange({ ...item, studentAnswer: v })} />
-        <textarea ref={ansRef} className="pp-edit" rows={2} value={item.studentAnswer || ""}
-          onFocus={() => onFocusAnswer?.(item)}
-          onChange={e => onChange({ ...item, studentAnswer: e.target.value })} />
-        {(item.studentAnswer || "").trim()
-          ? <div className="pp-preview"><span className="pp-preview-label">预览</span><MathText text={autoLatex(item.studentAnswer)} /></div>
-          : <div className="pp-grade-warn">⚠ 未匹配到答案——请用上面的下拉选对应的识别段，或对照左侧原图手动补充</div>}
-      </div>
+      <MathField label="题目" value={item.question} onChange={(v) => onChange({ ...item, question: v })} />
+      <MathField
+        label="学生答案"
+        warn={item.answerConfidence === "low" && (item.studentAnswer || "").trim() ? <span className="pp-rvi-warn"> · 字迹待确认</span> : null}
+        value={item.studentAnswer}
+        onChange={(v) => onChange({ ...item, studentAnswer: v })}
+        onFocus={() => onFocusAnswer?.(item)}
+        editExtra={dropdown}
+        emptyHint="（未识别，点修改补充）"
+      />
     </div>
   );
 }

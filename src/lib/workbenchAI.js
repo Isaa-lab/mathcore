@@ -17,6 +17,22 @@ export function autoLatex(s) {
   }).join("\n");
 }
 
+// 把用户随便写的数学（如 "(X+Y)^2/(X-Y)^2 ~ F(1,1)"）转写成规范 LaTeX 并用 $...$ 包裹。
+// 让用户不必懂 LaTeX：敲普通写法 → AI 转 → 直接渲染。
+export async function toLatex(text) {
+  const t = String(text || "").trim();
+  if (!t) return t;
+  const prompt = `把下面的数学内容转写成规范 LaTeX：把所有数学符号/表达式用 $...$ 包裹（行内）或 $$...$$（独立成行的大公式）；普通中文/英文说明文字保留原样、不要包。
+矩阵用 $\\begin{pmatrix}...\\end{pmatrix}$，分数用 \\frac，上标 ^{}，下标 _{}，希腊字母用命令（\\sigma 等），服从用 \\sim。
+只输出转写后的文本本身，不要任何解释、不要代码块围栏。
+
+原始内容：
+${t}`;
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "公式转写" });
+  const out = String(raw || "").replace(/^```[a-z]*\s*/i, "").replace(/```$/i, "").trim();
+  return out || t;
+}
+
 async function callVision(dataURI, promptText, { json = true } = {}) {
   const content = await callGenerate([{
     role: "user",
