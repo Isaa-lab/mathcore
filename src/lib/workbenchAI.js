@@ -17,8 +17,21 @@ function _isMathTok(tk) {
   if (/^[-+()0-9.,]+$/.test(tk)) return true;          // 纯数字/括号
   return false;
 }
+// OCR 常把"换行"写成字面量反斜杠-n：JSON 路径里模型按提示写 \\n，JSON.parse 后变成两字符 \n（不是真换行）；
+// 纯文本路径模型直接写字面量 \n。这些会漏进渲染显示成乱码（\nso、\n⇒…）。
+// 这里把【数学 $...$ 之外】的字面量 \n / \r\n 还原成真换行；数学片段内保持原样，
+// 以保护 \nabla、\neq、\ni、矩阵换行 \\ 等真正的 LaTeX 命令。
+export function normalizeNewlineEscapes(s) {
+  const t = String(s || "");
+  if (!t || (!t.includes("\\n") && !t.includes("\\r"))) return t;
+  // 按 $$...$$ / $...$ 切成 [文本, 数学, 文本, 数学, …]，只在文本段还原换行
+  return t.split(/(\$\$[\s\S]*?\$\$|\$[^$]*\$)/)
+    .map((seg, i) => (i % 2 === 1 ? seg : seg.replace(/\\r\\n|\\r|\\n/g, "\n")))
+    .join("");
+}
+
 export function autoLatex(s) {
-  let t = String(s || "");
+  let t = normalizeNewlineEscapes(String(s || ""));
   if (!t) return t;
   // 先把 \(...\) / \[...\] 归一化成 $...$ / $$...$$
   t = t.replace(/\\[()]/g, "$").replace(/\\[[\]]/g, () => "$$");
@@ -67,7 +80,7 @@ export async function extractRegion(dataURI) {
       { type: "image_url", image_url: { url: dataURI } },
     ],
   }], { json: false, materialTitle: "区域识别", visionModel: "qwen-vl-max" }); // 局部小图用最强模型，精度优先
-  return String(raw || "").trim();
+  return normalizeNewlineEscapes(String(raw || "").trim());
 }
 
 async function callVision(dataURI, promptText, { json = true } = {}) {
@@ -105,7 +118,7 @@ ${layoutHint}
 ${textContent.slice(0, 8000)}`;
 
   const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "卷子文字提取" });
-  return parseLooseJSON(raw)?.items || [];
+  return (parseLooseJSON(raw)?.items || []).map((it) => ({ ...it, studentAnswer: normalizeNewlineEscapes(it.studentAnswer) }));
 }
 
 // 解题模式：只有题目，无学生答案，直接解题
@@ -192,7 +205,7 @@ ${layoutHint}
 只输出 JSON：
 {"items":[{"number":"1","question":"题目$公式$","studentAnswer":"学生答案","answerConfidence":"high"}]}`;
   const data = await callVision(dataURI, prompt);
-  return data?.items || [];
+  return (data?.items || []).map((it) => ({ ...it, studentAnswer: normalizeNewlineEscapes(it.studentAnswer) }));
 }
 
 // 从手写答案图片提取答案列表（分开模式专用）
@@ -251,7 +264,7 @@ ${rosterBlock}
         bbox = [Math.max(0, x0), Math.max(0, y0), Math.min(1, x1), Math.min(1, y1)];
       }
     }
-    return { ...it, bbox };
+    return { ...it, studentAnswer: normalizeNewlineEscapes(it.studentAnswer), bbox };
   });
 }
 
@@ -268,7 +281,7 @@ export async function extractAnswersFromText(text, questionNumbers = []) {
 文字内容：
 ${text.slice(0, 6000)}`;
   const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "答案提取" });
-  return parseLooseJSON(raw)?.items || [];
+  return (parseLooseJSON(raw)?.items || []).map((it) => ({ ...it, studentAnswer: normalizeNewlineEscapes(it.studentAnswer) }));
 }
 
 // 语义对齐：按"答案实际在解哪道题"的内容来配对，而不只看题号。
