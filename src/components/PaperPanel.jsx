@@ -568,8 +568,9 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const [imgView, setImgView] = useState({ zoom: 1, x: 0, y: 0 }); // 原图缩放/平移
   const imgDragRef = useRef(null);
   const imgElRef = useRef(null);
+  const imgMainRef = useRef(null);                    // 图片容器（含居中留白），框选用它的像素坐标
   const [framing, setFraming] = useState(false);     // 框选识别模式
-  const [frameRect, setFrameRect] = useState(null);   // 拖框中的矩形(0~1)
+  const [frameRect, setFrameRect] = useState(null);   // 拖框中的矩形：相对 imgmain 的像素 {x0,y0,x1,y1}
   const [regionBusy, setRegionBusy] = useState(false);
   const [reviewActiveIdx, setReviewActiveIdx] = useState(-1); // 框选结果填入哪道题
   const [uploadCollapsed, setUploadCollapsed] = useState(false); // 有题目后收起上传区，给列表腾空间
@@ -595,22 +596,18 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     return z === 1 ? { zoom: 1, x: 0, y: 0 } : { ...v, zoom: z };
   });
   const onImgWheel = (e) => { if (framing) return; e.preventDefault(); zoomImg(e.deltaY < 0 ? 1.15 : 1 / 1.15); };
-  // 相对当前显示图片的比例坐标(0~1)
-  const imgFrac = (e) => {
-    const el = imgElRef.current;
-    if (!el) return { x: 0, y: 0 };
-    const r = el.getBoundingClientRect();
-    return {
-      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
-    };
+  // 框选：相对 imgmain 容器的像素坐标（光标在哪框就在哪，不受居中留白影响）
+  const mainPx = (e) => {
+    const r = imgMainRef.current?.getBoundingClientRect();
+    if (!r) return { x: 0, y: 0 };
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
   const onImgDown = (e) => {
-    if (framing) { const f = imgFrac(e); setFrameRect({ x0: f.x, y0: f.y, x1: f.x, y1: f.y }); return; }
+    if (framing) { const p = mainPx(e); setFrameRect({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); return; }
     imgDragRef.current = { sx: e.clientX, sy: e.clientY, ox: imgView.x, oy: imgView.y };
   };
   const onImgMove = (e) => {
-    if (framing) { if (frameRect) { const f = imgFrac(e); setFrameRect((r) => ({ ...r, x1: f.x, y1: f.y })); } return; }
+    if (framing) { if (frameRect) { const p = mainPx(e); setFrameRect((r) => ({ ...r, x1: p.x, y1: p.y })); } return; }
     const d = imgDragRef.current;
     if (!d) return;
     setImgView((v) => ({ ...v, x: d.ox + (e.clientX - d.sx), y: d.oy + (e.clientY - d.sy) }));
@@ -631,8 +628,18 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     const r = frameRect;
     setFrameRect(null);
     if (!r) return;
-    const rect = { x: Math.min(r.x0, r.x1), y: Math.min(r.y0, r.y1), w: Math.abs(r.x1 - r.x0), h: Math.abs(r.y1 - r.y0) };
-    if (rect.w < 0.03 || rect.h < 0.02) return; // 框太小，忽略
+    // 像素框（相对 imgmain）→ 相对图片的比例：扣掉图片在容器里的居中偏移
+    const main = imgMainRef.current?.getBoundingClientRect();
+    const im = imgElRef.current?.getBoundingClientRect();
+    if (!main || !im || im.width < 2 || im.height < 2) return;
+    const offX = im.left - main.left, offY = im.top - main.top;
+    const fx0 = (Math.min(r.x0, r.x1) - offX) / im.width;
+    const fy0 = (Math.min(r.y0, r.y1) - offY) / im.height;
+    const fx1 = (Math.max(r.x0, r.x1) - offX) / im.width;
+    const fy1 = (Math.max(r.y0, r.y1) - offY) / im.height;
+    const clamp = (v) => Math.min(1, Math.max(0, v));
+    const rect = { x: clamp(fx0), y: clamp(fy0), w: clamp(fx1) - clamp(fx0), h: clamp(fy1) - clamp(fy0) };
+    if (rect.w < 0.02 || rect.h < 0.015) return; // 框太小或落在图片外，忽略
     setRegionBusy(true);
     try {
       const crop = await cropFractionDataUri(reviewImages[reviewImgIdx], rect);
@@ -890,13 +897,14 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
             {reviewImages.length > 0 ? (
               <>
                 <div
+                  ref={imgMainRef}
                   className="pp-rv-imgmain"
                   onWheel={onImgWheel}
                   onMouseDown={onImgDown}
                   onMouseMove={onImgMove}
                   onMouseUp={onImgUp}
                   onMouseLeave={onImgUp}
-                  style={{ cursor: imgDragRef.current ? "grabbing" : imgView.zoom > 1 ? "grab" : "default" }}
+                  style={{ cursor: framing ? "crosshair" : imgDragRef.current ? "grabbing" : imgView.zoom > 1 ? "grab" : "default" }}
                 >
                   <div className="pp-rv-imgwrap" style={{ transform: `translate(${imgView.x}px, ${imgView.y}px) scale(${imgView.zoom})` }}>
                     <img ref={imgElRef} src={reviewImages[reviewImgIdx]} alt="原始图片" draggable={false} />
@@ -908,15 +916,17 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                         height: `${(focusBox.bbox[3] - focusBox.bbox[1]) * 100}%`,
                       }} />
                     )}
-                    {framing && frameRect && (
+                  </div>
+                  {/* 框选叠加框：相对 imgmain 的像素，光标在哪框就在哪 */}
+                  {framing && frameRect && (
                       <div className="pp-rv-box pp-rv-frame" style={{
-                        left: `${Math.min(frameRect.x0, frameRect.x1) * 100}%`,
-                        top: `${Math.min(frameRect.y0, frameRect.y1) * 100}%`,
-                        width: `${Math.abs(frameRect.x1 - frameRect.x0) * 100}%`,
-                        height: `${Math.abs(frameRect.y1 - frameRect.y0) * 100}%`,
+                        position: "absolute",
+                        left: `${Math.min(frameRect.x0, frameRect.x1)}px`,
+                        top: `${Math.min(frameRect.y0, frameRect.y1)}px`,
+                        width: `${Math.abs(frameRect.x1 - frameRect.x0)}px`,
+                        height: `${Math.abs(frameRect.y1 - frameRect.y0)}px`,
                       }} />
                     )}
-                  </div>
                   <div className="pp-rv-zoom" onMouseDown={(e) => e.stopPropagation()}>
                     {!framing ? (
                       <>
