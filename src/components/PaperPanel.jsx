@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import MathText from "../lib/MathText";
 import { makeWorkbenchApi } from "../lib/workbenchApi";
 import { mapLimit } from "../utils/concurrency";
+import FileEditModal from "./FileEditModal";
 import {
   extractPaper,
   extractPaperFromText,
@@ -243,7 +244,9 @@ const CSS = `
 .pp-drop-sm{padding:12px 10px;font-size:12px}
 .pp-flist{margin-top:6px;display:flex;flex-direction:column;gap:3px}
 .pp-fitem{font-size:11px;font-family:ui-monospace,monospace;color:var(--mut);background:var(--soft);border-radius:5px;padding:3px 7px;display:flex;align-items:center;gap:5px}
-.pp-fitem .rm{cursor:pointer;color:var(--rose);font-size:13px;line-height:1;margin-left:auto}
+.pp-fitem .fname{cursor:pointer;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pp-fitem .fname:hover{color:var(--brand);text-decoration:underline}
+.pp-fitem .rm{cursor:pointer;color:var(--rose);font-size:13px;line-height:1;margin-left:8px}
 .pp-zones{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px}
 .pp-zone-hd{font-size:11px;font-family:ui-monospace,monospace;color:var(--mut);margin-bottom:5px}
 .pp-status{font-family:ui-monospace,monospace;font-size:12px;color:var(--brand);padding:5px 0 3px;text-align:center}
@@ -471,6 +474,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const [lightbox, setLightbox] = useState(null); // URL of enlarged image
   const [uploadCollapsed, setUploadCollapsed] = useState(false); // 有题目后收起上传区，给列表腾空间
   const [pendingFiles, setPendingFiles] = useState([]); // 本次上传的原始文件，确认后归档到「以往记录」
+  const [editing2, setEditing2] = useState(null); // { which: 'q'|'a', idx, file } 点文件名打开的编辑器
   const fileRef = useRef(null);
   const qRef = useRef(null);
   const aRef = useRef(null);
@@ -702,6 +706,15 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const removeQFile = (idx) => setQFiles((prev) => prev.filter((_, i) => i !== idx));
   const removeAFile = (idx) => setAFiles((prev) => prev.filter((_, i) => i !== idx));
 
+  // 编辑器保存：用旋转/裁剪后的图片替换原文件（PDF 可能拆成多页图片）
+  const applyEdit = (newFiles) => {
+    if (!editing2 || !newFiles?.length) { setEditing2(null); return; }
+    const { which, idx } = editing2;
+    const setter = which === "q" ? setQFiles : setAFiles;
+    setter((prev) => prev.flatMap((f, i) => (i === idx ? newFiles : [f])));
+    setEditing2(null);
+  };
+
   const needGrade = items.length > 0 && items.some((x) => x.is_correct === null);
   const isSep = paperLayout === "separate";
 
@@ -842,7 +855,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                 <div className="pp-flist">
                   {qFiles.map((f, i) => (
                     <div key={i} className="pp-fitem">
-                      <span>📄</span>{f.name}
+                      <span>📄</span>
+                      <span className="fname" title="点击旋转/裁剪" onClick={() => setEditing2({ which: "q", idx: i, file: f })}>{f.name}</span>
                       <span className="rm" onClick={() => removeQFile(i)}>×</span>
                     </div>
                   ))}
@@ -865,7 +879,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                 <div className="pp-flist">
                   {aFiles.map((f, i) => (
                     <div key={i} className="pp-fitem">
-                      <span>✏️</span>{f.name}
+                      <span>✏️</span>
+                      <span className="fname" title="点击旋转/裁剪" onClick={() => setEditing2({ which: "a", idx: i, file: f })}>{f.name}</span>
                       <span className="rm" onClick={() => removeAFile(i)}>×</span>
                     </div>
                   ))}
@@ -873,6 +888,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
               )}
             </div>
           </div>
+          {(qFiles.length > 0 || aFiles.length > 0) && (
+            <div style={{ fontSize: 11, color: "var(--faint)", textAlign: "center", padding: "2px 0 4px" }}>
+              💡 图片方向不对？点文件名可旋转 / 裁剪后再识别
+            </div>
+          )}
           {qFiles.length > 0 && aFiles.length > 0 && (
             <button className="pp-btn primary" onClick={processSeparate}>
               识别并匹配 ({qFiles.length} 题目文件 + {aFiles.length} 答案文件)
@@ -886,6 +906,10 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
         </>
       )}
       </>
+      )}
+
+      {editing2 && (
+        <FileEditModal file={editing2.file} onSave={applyEdit} onClose={() => setEditing2(null)} />
       )}
 
       {status && <div className="pp-status">{status}</div>}
