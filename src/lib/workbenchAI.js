@@ -314,65 +314,62 @@ ${aList}
 export async function gradeItem({ question, studentAnswer }) {
   // 关键：不把含 LaTeX 的"正确答案"塞进 JSON（反斜杠会破坏 JSON 解析，导致解析失败→默认判错）。
   // 仿 solveQuestion：正文输出参考解答（带公式），最后一行只输出"不含公式/反斜杠"的小 JSON。
-  const prompt = `你是严谨而公正的线性代数老师，给学生的"订正答案"批改。
+  const prompt = `你是公正的线性代数老师，给学生的"订正答案"批改。先自己把题目完整解出最终结果，再对照学生答案，**按数学正确性公正判分，既不放水也不吹毛求疵**。
 
 【题目】${question}
 【学生答案】${studentAnswer || "(空白)"}
 
-判分原则（务必遵守，宁严勿松）：
-- 先**自己把题目完整解出来、得到最终结果**，再逐项核对学生答案。
-- 允许书写习惯、记号、排版差异；解法不同但结论与关键步骤都正确 → 判对。
-- 【以下一律判错 isCorrect=false】：
-  · 答案**没做完 / 中途中断**（例如写到 "= " 后面空着、最后一步没算出、缺最终数值或结论）；
-  · 最终结果与正确答案**不一致**（务必把学生的最终数值/表达式和你算出的对比，不要只看过程像就放过）；
-  · 关键步骤有实质错误（公式用错、积分/求导/化简出错导致结果变化）；
-  · 学生空白。
-- 判对前先自问："学生有没有给出和我一致的最终答案？" 答不上来就判错。
+判分档位（三选一，写进 verdict）：
+- "correct"（判对）：最终结果/结论正确，核心步骤合理。**解法不同、记号差异、排版不同、明显的笔误或拼写错（如 define↔definite）、把变量名标反但实际计算正确——都仍判 correct**。证明题只要逻辑主线成立即 correct。
+- "minor"（基本正确，有小瑕疵）：最终结果对、主线对，但有**不影响结论的小问题**（如个别记号写错、漏写一句过渡、某个等价号用得不严谨）。这种也算学生掌握了，note 里一句话点出小瑕疵。
+- "wrong"（判错）：仅当**最终结果确实错误 / 缺少题目要求的部分（如漏解、漏证某方向）/ 有实质概念或计算错误 / 没做完 / 空白**。
+重要：**不要因为"写法不够规范""不是你的解法""有笔误"就判 wrong**——只看数学对不对。判 wrong 前先确认：学生的最终答案是不是真的和正确答案不一致？
 
-输出格式（严格遵守，分两部分）：
-1. 先写「参考解答」：完整步骤，公式用 $...$ 包裹，可多段——这部分**不要放进 JSON**。
-2. 最后**单独一行**输出元数据 JSON（放在整个回复的**最末尾**，后面不要再加任何文字/标点/换行）。该 JSON 里**绝对不能出现 LaTeX、反斜杠、美元符号或公式**，errorDetail 用纯中文口语说明错在哪：
-{"isCorrect": true, "errorType": "", "errorDetail": "", "knowledgePoints": ["最小二乘法","正规方程"], "chapter": "Ch.3"}
-说明：
-- isCorrect 为布尔值（true/false）；
-- errorType 仅在判错时给（"概念"/"计算"/"方法" 三选一），判对时留空字符串；
-- **knowledgePoints 必填，给 1~3 个这道题考查的具体知识点名称（中文），不能是空数组**；
-- chapter 形如 Ch.1~Ch.7。`;
+输出格式（分两部分）：
+1. 先写「参考解答」：完整步骤，公式用 $...$ 包裹——不要放进 JSON。
+2. 最后**单独一行**输出元数据 JSON（放回复最末尾，之后不要再有任何字符）。JSON 里**禁止 LaTeX/反斜杠/美元符号/公式**，note 与 errorDetail 用纯中文口语：
+{"verdict": "correct", "note": "", "errorType": "", "errorDetail": "", "knowledgePoints": ["最小二乘法","正规方程"], "chapter": "Ch.3"}
+- verdict 取 "correct"/"minor"/"wrong"；
+- note 仅 minor 时给（一句话点小瑕疵），其余留空；
+- errorType+errorDetail 仅 wrong 时给（errorType 取 "概念"/"计算"/"方法"），errorDetail 说清错在哪一步、最终结果应是什么；
+- knowledgePoints 必填 1~3 个中文知识点，不能空；chapter 形如 Ch.1~Ch.7。`;
 
   const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "错题批改" });
   if (!raw) return null;
-  // 抓"最后一个"含 isCorrect 的小 JSON（无嵌套花括号）。不强求在结尾——
-  // 模型常在 JSON 后多带一句话/换行，旧的 \s*$ 锚点会整体匹配失败 → 元数据全丢 → 误判错 + 知识点空。
-  const metaMatches = [...raw.matchAll(/\{[^{}]*"isCorrect"[^{}]*\}/g)];
+  const metaMatches = [...raw.matchAll(/\{[^{}]*"verdict"[^{}]*\}/g)];
   const metaMatch = metaMatches.length ? metaMatches[metaMatches.length - 1] : null;
   const meta = metaMatch ? (parseLooseJSON(metaMatch[0]) || {}) : {};
   const correctAnswer = metaMatch ? raw.slice(0, metaMatch.index).trim() : raw.trim();
+  const verdict = String(meta.verdict || "").toLowerCase();
+  const isWrong = verdict === "wrong";
   return {
     correctAnswer,
-    isCorrect: meta.isCorrect === true || meta.isCorrect === "true",
-    errorType: meta.errorType || "",
-    errorDetail: meta.errorDetail || "",
+    isCorrect: !isWrong,                          // correct 与 minor 都算对
+    minorNote: verdict === "minor" ? (meta.note || "有小瑕疵，已基本掌握") : "",
+    errorType: isWrong ? (meta.errorType || "计算") : "",
+    errorDetail: isWrong ? (meta.errorDetail || "") : "",
     knowledgePoints: Array.isArray(meta.knowledgePoints) ? meta.knowledgePoints : [],
     chapter: meta.chapter || "",
   };
 }
 
-// 关键题复核：对第一遍判"对"的题，独立再核一次"是否真的完整且正确"。
-// 返回 true=确认对 / false=其实不对（含未完成/结果错）。出错或拿不到结果时返回 true（不误伤）。
+// 关键题复核：只兜底抓"明显没做完 / 最终结果明显错"这类硬伤，**不做严格性挑刺**。
+// 返回 { ok, reason }：ok=false 时 reason 是一句话原因（用于翻转后填错因，避免"未给出具体说明"）。
 export async function verifyGrade({ question, studentAnswer }) {
-  if (!studentAnswer || !String(studentAnswer).trim()) return false; // 空白必错
-  const prompt = `独立复核：先自己把题目解出最终结果，再判断学生答案是否**既完整又正确**。
-特别注意：没做完、缺最终结果、最终数值/表达式和正确答案不一致 → 都算"不正确"。
+  if (!studentAnswer || !String(studentAnswer).trim()) return { ok: false, reason: "未作答（空白）" };
+  const prompt = `复核一道已被判"对"的题，只判断它有没有**硬伤**：是否没做完（缺最终结果/写到一半中断）、或最终结果与正确答案明显不一致。
+注意：解法不同、记号差异、笔误、写法不规范都**不算硬伤**，这些仍算 OK。只有"没做完"或"最终结果确实错"才算有硬伤。
 
 【题目】${question}
 【学生答案】${studentAnswer}
 
-只回复一个词：正确  或  不正确（不要解释、不要公式）。`;
+只输出一行 JSON（禁止公式/反斜杠）：{"ok": true, "reason": ""}
+ok=true 表示没硬伤（保持判对）；ok=false 表示确有硬伤，reason 用一句纯中文说明（如"只算到第二步就没了，缺最终结果"）。`;
   const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "判分复核" });
-  const t = String(raw || "");
-  if (/不正确|错误|不对|incorrect|wrong|false/i.test(t)) return false;
-  if (/正确|对|correct|true/i.test(t)) return true;
-  return true; // 拿不准不误伤
+  const m = [...String(raw || "").matchAll(/\{[^{}]*"ok"[^{}]*\}/g)];
+  const meta = m.length ? (parseLooseJSON(m[m.length - 1].toString ? m[m.length - 1][0] : m[m.length - 1][0]) || {}) : {};
+  if (meta.ok === false || meta.ok === "false") return { ok: false, reason: meta.reason || "复核发现答案未完成或最终结果不正确" };
+  return { ok: true, reason: "" }; // 拿不准不误伤
 }
 
 export async function summarizeWeakness(wrongItems) {

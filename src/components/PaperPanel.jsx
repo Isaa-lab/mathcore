@@ -800,7 +800,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
           correct_answer: result?.correctAnswer || "",
           is_correct: !!result?.isCorrect,
           error_type: result?.isCorrect ? null : (result?.errorType || "计算"),
-          error_detail: result?.errorDetail || "",
+          // 判对时 error_detail 存"小瑕疵提示"（minor 档），判错时存错因
+          error_detail: result?.isCorrect ? (result?.minorNote || "") : (result?.errorDetail || ""),
           knowledge_points: result?.knowledgePoints || [],
           chapter: result?.chapter || "Ch.?",
           reviewed: true,
@@ -821,12 +822,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       report(`复核 ${toVerify.length} 道判对的题…`, 95);
       await mapLimit(toVerify, 3, async (item) => {
         try {
-          const ok = await verifyGrade({ question: item.question, studentAnswer: item.student_answer });
-          if (!ok) {
-            const patch = { is_correct: false, error_type: item.error_type || "计算", error_detail: item.error_detail || "复核发现答案未完成或最终结果不正确" };
+          const v = await verifyGrade({ question: item.question, studentAnswer: item.student_answer });
+          if (v && v.ok === false) {
+            const patch = { is_correct: false, error_type: item.error_type || "计算", error_detail: v.reason || "复核发现答案未完成或最终结果不正确" };
             const updated = await wb.updateItem(item.id, patch);
             const merged = updated || { ...item, ...patch };
-            // 就地改 graded 里对应项
             const gi = graded.findIndex((g) => g.id === item.id);
             if (gi >= 0) graded[gi] = merged;
           }
