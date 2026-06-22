@@ -1,22 +1,40 @@
 import { callGenerate, parseLooseJSON } from "./aiClient";
 
-// 兜底：OCR/用户偶尔把数学写成纯文本（没 $ 包裹），渲染就成原始文本。
-// 这里把"整行就是数学、且不含中文/英文长单词"的行补上 $...$；含散文的行保持原样不破坏。
-const _MATH_WORDS = /^(sin|cos|tan|cot|sec|csc|log|ln|exp|lim|det|rank|tr|dim|var|cov|span|max|min|sup|inf|mod|gcd|lcm|diag|re|im|so|let|set|if|and|then)$/i;
+// 兜底：OCR/用户偶尔把数学写成裸 LaTeX 或纯符号（没 $ 包裹），渲染就成原始文本。
+// 这里按"数学片段"分段包裹：把连续的数学 token 包进 $...$，散文 token 原样留下。
+const _MATH_WORDS = /^(sin|cos|tan|cot|sec|csc|log|ln|exp|lim|det|rank|tr|dim|var|cov|span|max|min|sup|inf|mod|gcd|lcm|diag|re|im)$/i;
+// 判断一个 token 是不是"数学"（不含空格的片段）
+function _isMathTok(tk) {
+  if (!tk || !tk.trim()) return false;
+  if (tk.includes("%")) return false;                 // % 在数学模式是注释 → 当文本
+  if (/^[一-龥]/.test(tk)) return false;        // 中文 → 文本
+  if (/\\[a-zA-Z]+/.test(tk)) return true;             // 含 LaTeX 命令（\frac \sigma \Rightarrow…）
+  // 去掉 LaTeX 命令后看是否还有英文长单词 → 有则当散文
+  const bare = tk.replace(/\\[a-zA-Z]+/g, "");
+  if (/[A-Za-z]{4,}/.test(bare) && !_MATH_WORDS.test(bare)) return false;
+  if (/[=~<>≤≥≠^_{}\\∑∫√±→/]|[a-zA-Z]\^|\d[+\-*/]|[（(][^)]*[=^_]/.test(tk)) return true;
+  if (/^[A-Za-z]$/.test(tk)) return true;              // 单字母变量
+  if (/^[-+()0-9.,]+$/.test(tk)) return true;          // 纯数字/括号
+  return false;
+}
 export function autoLatex(s) {
   let t = String(s || "");
   if (!t) return t;
-  // 先把 \(...\) / \[...\] 这种定界符归一化成 $...$ / $$...$$（模型有时这么输出，否则原样不渲染）
+  // 先把 \(...\) / \[...\] 归一化成 $...$ / $$...$$
   t = t.replace(/\\[()]/g, "$").replace(/\\[[\]]/g, () => "$$");
   if (t.includes("$")) return t; // 已有 LaTeX 包裹就别动
-  const hasMathSym = (l) => /[=~<>≤≥≠^_/]|\\[a-zA-Z]+|\^|\bN\(|\bF\(|σ|λ|∑|∫|√|±|→/.test(l);
   return t.split("\n").map((line) => {
-    const ln = line.trim();
-    if (!ln || /[一-龥]/.test(ln)) return line;   // 空行 / 含中文 → 不动
-    if (!hasMathSym(ln)) return line;
-    const words = ln.match(/[A-Za-z]{2,}/g) || [];
-    const hasProse = words.some((w) => w.length >= 4 && !_MATH_WORDS.test(w)); // 有英文长单词 → 当散文，不包
-    return hasProse ? line : `$${ln}$`;
+    if (!line.trim()) return line;
+    const tokens = line.split(/(\s+)/); // 保留空白
+    let out = "", buf = [];
+    const flush = () => { if (buf.length) { out += "$" + buf.join("").trim() + "$"; buf = []; } };
+    for (const tk of tokens) {
+      if (!tk.trim()) { if (buf.length) buf.push(tk); else out += tk; continue; } // 空白：数学串内保留
+      if (_isMathTok(tk)) buf.push(tk);
+      else { flush(); out += tk; }
+    }
+    flush();
+    return out;
   }).join("\n");
 }
 
