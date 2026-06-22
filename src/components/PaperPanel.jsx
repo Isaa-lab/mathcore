@@ -29,9 +29,23 @@ async function getPdfjs() {
   return lib;
 }
 
-async function pdfToImageURIs(file, onProgress) {
+// 打开 PDF；遇到加密/密码保护时抛出清晰的中文错误，而不是含糊的"识别失败"
+async function loadPdfDoc(file) {
   const pdfjs = await getPdfjs();
-  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  try {
+    return await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  } catch (e) {
+    const name = e?.name || "";
+    const msg = e?.message || "";
+    if (name === "PasswordException" || /password|encrypt/i.test(msg)) {
+      throw new Error(`「${file.name}」有密码/加密保护，浏览器无法读取。请先去掉 PDF 密码（用阅读器「另存为/打印成 PDF」即可生成无密码版），或把题目截图成图片上传。`);
+    }
+    throw e;
+  }
+}
+
+async function pdfToImageURIs(file, onProgress) {
+  const pdf = await loadPdfDoc(file);
   const uris = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     onProgress?.(`${file.name} 第 ${i}/${pdf.numPages} 页渲染…`);
@@ -49,8 +63,7 @@ async function pdfToImageURIs(file, onProgress) {
 }
 
 async function pdfToText(file, onProgress) {
-  const pdfjs = await getPdfjs();
-  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const pdf = await loadPdfDoc(file);
   const parts = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     onProgress?.(`${file.name} 第 ${i}/${pdf.numPages} 页文字提取…`);
