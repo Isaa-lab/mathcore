@@ -105,7 +105,11 @@ function MathFieldInline({ latex, hints, onCommit, onCancel }) {
     }
     try { el.value = latex; el.mathVirtualKeyboardPolicy = "manual"; } catch {}
     const onKey = (e) => {
-      if (e.key === "Enter") { e.preventDefault(); finish(true); }
+      // Shift+Enter：在矩阵里加一行（不提交）。普通 Enter 才提交写回。
+      if (e.key === "Enter" && (e.shiftKey || e.altKey)) {
+        e.preventDefault();
+        try { el.executeCommand("addRowAfter"); } catch {}
+      } else if (e.key === "Enter") { e.preventDefault(); finish(true); }
       else if (e.key === "Escape") { e.preventDefault(); finish(false); }
     };
     // 点面板按钮会让 math-field 失焦 → 别立刻提交：palette 用 onMouseDown preventDefault 防失焦
@@ -118,6 +122,8 @@ function MathFieldInline({ latex, hints, onCommit, onCancel }) {
   }, []);
 
   const insert = (ins) => { try { ref.current?.insert(ins, { focus: true }); ref.current?.focus(); } catch {} };
+  // 矩阵增删行列：MathLive 命令，只在光标位于矩阵内才生效（否则无操作）
+  const exec = (cmd) => { try { ref.current?.executeCommand(cmd); ref.current?.focus(); } catch {} };
   const { common, subject } = symbolsFor(hints);
 
   return (
@@ -128,6 +134,12 @@ function MathFieldInline({ latex, hints, onCommit, onCancel }) {
         style={{ display: "inline-block", minWidth: "70px", fontSize: "17px", padding: "2px 6px", border: "1.5px solid var(--brand, #4338ca)", borderRadius: "6px", background: "#fff" }}
       />
       <span className="em-palette" onMouseDown={(e) => e.preventDefault()}>
+        <span className="lab">矩阵</span>
+        <button type="button" title="在光标所在矩阵下方加一行（也可按 Shift+Enter）" onClick={() => exec("addRowAfter")}>＋行</button>
+        <button type="button" title="在光标所在矩阵右侧加一列" onClick={() => exec("addColumnAfter")}>＋列</button>
+        <button type="button" title="删除光标所在的矩阵行" onClick={() => exec("removeRow")}>－行</button>
+        <button type="button" title="删除光标所在的矩阵列" onClick={() => exec("removeColumn")}>－列</button>
+        <span className="lab">·</span>
         {common.map((s) => <button key={s.l} type="button" onClick={() => insert(s.ins)}>{s.l}</button>)}
         {subject && <span className="lab">· {subject.name}</span>}
         {subject && subject.syms.map((s) => <button key={s.l} type="button" onClick={() => insert(s.ins)}>{s.l}</button>)}
