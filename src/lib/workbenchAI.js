@@ -1,5 +1,22 @@
 import { callGenerate, parseLooseJSON } from "./aiClient";
 
+// 兜底：OCR/用户偶尔把数学写成纯文本（没 $ 包裹），渲染就成原始文本。
+// 这里把"整行就是数学、且不含中文/英文长单词"的行补上 $...$；含散文的行保持原样不破坏。
+const _MATH_WORDS = /^(sin|cos|tan|cot|sec|csc|log|ln|exp|lim|det|rank|tr|dim|var|cov|span|max|min|sup|inf|mod|gcd|lcm|diag|re|im|so|let|set|if|and|then)$/i;
+export function autoLatex(s) {
+  const t = String(s || "");
+  if (!t || t.includes("$")) return t; // 已有 LaTeX 包裹就别动
+  const hasMathSym = (l) => /[=~<>≤≥≠^_/]|\\[a-zA-Z]+|\^|\bN\(|\bF\(|σ|λ|∑|∫|√|±|→/.test(l);
+  return t.split("\n").map((line) => {
+    const ln = line.trim();
+    if (!ln || /[一-龥]/.test(ln)) return line;   // 空行 / 含中文 → 不动
+    if (!hasMathSym(ln)) return line;
+    const words = ln.match(/[A-Za-z]{2,}/g) || [];
+    const hasProse = words.some((w) => w.length >= 4 && !_MATH_WORDS.test(w)); // 有英文长单词 → 当散文，不包
+    return hasProse ? line : `$${ln}$`;
+  }).join("\n");
+}
+
 async function callVision(dataURI, promptText, { json = true } = {}) {
   const content = await callGenerate([{
     role: "user",
@@ -151,26 +168,32 @@ ${rosterBlock}
 2. 题号 number：${list.length > 0 ? "从上面【已知题号清单】里选" : '**原样保留学生写的编号**，如 "1"、"2(i)"、"3(b)"，不要自己加 "Q" 前缀'}。
 3. 答案 studentAnswer：把该题号下学生写的**全部手写过程**都放进来——每一步推导、每个中间式、最终结论，一步都不要省。
    - 多行内容用 \\n 分隔，保留学生的推导顺序。
-   - 数学符号/公式用 $...$ LaTeX；矩阵用 $\\begin{pmatrix}...\\end{pmatrix}$，行列式用 $\\begin{vmatrix}...\\end{vmatrix}$。
+   - 【数学一律用 LaTeX 并用 $...$ 包裹，这条是硬性要求】行内公式 $...$，矩阵 $\\begin{pmatrix}...\\end{pmatrix}$，
+     行列式 $\\begin{vmatrix}...\\end{vmatrix}$，分数 $\\frac{a}{b}$，上标 $x^2$，下标 $x_1$，
+     希腊字母 $\\sigma$、$\\lambda$，服从 $\\sim$，正态 $N(0,\\sigma^2)$，分布 $F(1,1)$。
+   - 【反例（禁止这样输出纯文本）】❌ "(X+Y)^2 / (X-Y)^2 ~ F(1,1)"
+     【正例】✅ "$\\frac{(X+Y)^2}{(X-Y)^2} \\sim F(1,1)$"
+   - 普通中文/英文说明文字不用包 $；只把数学符号/表达式包进 $...$。
    - 字迹潦草也要尽力辨认，猜出大意也比空白好；完全没作答才填 ""。
 4. 【绝对禁止】不要凭手写过程反推、编造或补全"题目"——你的任务只有识别学生写了什么，question 字段一律不要输出。
 5. 置信度 answerConfidence：清晰易读 → "high"；潦草但能辨认 → "low"；空白 → "low"。
-6. 区域坐标 bbox：给出这一题解答在图片中占据的矩形区域，格式 [x0, y0, x1, y1]，
-   全部用**相对比例**（0~1，左上角为原点，x 向右、y 向下）。x0,y0 是左上角，x1,y1 是右下角。
-   尽量贴合该题所有手写行；估不准就给大致范围。无法确定就省略 bbox 字段。
+6. 【区域定位 bbox — 用整数 0~1000 坐标系】给出该题所有手写行的**紧致外接框**（刚好框住，不要框到别题）：
+   格式 [x0, y0, x1, y1]，整数，范围 0~1000，左上角 (0,0)、右下角 (1000,1000)，x 向右、y 向下。
+   x0,y0 左上角，x1,y1 右下角，必须 x1>x0、y1>y0。这是你擅长的视觉定位，请尽量精确贴合。无法确定才省略 bbox。
 
 【重要】即使只有一道题，也要输出 items 数组。不要输出任何多余解释。
 
 只输出 JSON：
-{"items":[{"number":"1","studentAnswer":"$C X = Y$\\n$X^T X C = X^T Y$\\n... 最终 $C_0=6/7,\\ C_1=15/14$","answerConfidence":"high","bbox":[0.05,0.08,0.95,0.32]},{"number":"2(i)","studentAnswer":"...","answerConfidence":"low","bbox":[0.05,0.34,0.95,0.6]}]}`;
+{"items":[{"number":"1","studentAnswer":"$CX = Y$\\n$X^T X C = X^T Y$\\n最终 $C_0=\\frac{6}{7},\\ C_1=\\frac{15}{14}$","answerConfidence":"high","bbox":[50,80,950,320]},{"number":"2(i)","studentAnswer":"$X,Y \\sim N(0,\\sigma^2)$，所以 $\\frac{(X+Y)^2}{(X-Y)^2} \\sim F(1,1)$","answerConfidence":"low","bbox":[50,340,950,600]}]}`;
   const data = await callVision(dataURI, prompt);
-  // 归一化 bbox：容错模型偶尔给 0~100 或像素值（简单按 >1 判定为百分制）
+  // 归一化 bbox：模型可能给 0~1000（Qwen 原生）/ 0~100 / 0~1；按量级判断
   return (data?.items || []).map((it) => {
     const b = Array.isArray(it.bbox) && it.bbox.length === 4 ? it.bbox.map(Number) : null;
     let bbox = null;
     if (b && b.every((n) => Number.isFinite(n))) {
-      const scaled = b.some((n) => n > 1.5) ? b.map((n) => n / 100) : b;
-      const [x0, y0, x1, y1] = scaled;
+      const mx = Math.max(...b.map(Math.abs));
+      const div = mx > 100 ? 1000 : mx > 1.5 ? 100 : 1;
+      const [x0, y0, x1, y1] = b.map((n) => n / div);
       if (x1 > x0 && y1 > y0 && x0 >= 0 && y0 >= 0 && x1 <= 1.2 && y1 <= 1.2) {
         bbox = [Math.max(0, x0), Math.max(0, y0), Math.min(1, x1), Math.min(1, y1)];
       }

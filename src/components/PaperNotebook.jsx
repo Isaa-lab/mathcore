@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import MathText from "../lib/MathText";
 import { makeWorkbenchApi } from "../lib/workbenchApi";
-import { explainKnowledge, generateVariant } from "../lib/workbenchAI";
+import { explainKnowledge, generateVariant, autoLatex } from "../lib/workbenchAI";
 
 const CSS = `
 .nb{--ink:#0f1220;--mut:#6b7184;--faint:#9aa0b4;--line:#e7e8ef;--soft:#f0f1f6;--card:#fff;--brand:#4338ca;--brand-soft:#eef0ff;--rose:#be123c;--rose-soft:#fdeaef;--emerald:#047857;--emerald-soft:#e7f6ef;--amber:#d97706;--amber-soft:#fef3e2;color:var(--ink)}
@@ -97,7 +97,7 @@ function NotebookCard({ item, existingNote, onUnstar }) {
       {item.student_answer && (
         <div className="nb-sec">
           <div className="nb-lab">我的{isWrong ? "错误" : ""}解答过程</div>
-          <div className="nb-mine"><MathText text={item.student_answer} /></div>
+          <div className="nb-mine"><MathText text={autoLatex(item.student_answer)} /></div>
         </div>
       )}
 

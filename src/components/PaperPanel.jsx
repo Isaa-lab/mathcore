@@ -12,6 +12,7 @@ import {
   alignAnswersToQuestions,
   gradeItem,
   solveQuestion,
+  autoLatex,
 } from "../lib/workbenchAI";
 
 // ── PDF helpers ──────────────────────────────────────────────────────────────
@@ -440,7 +441,7 @@ function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer }) {
           onFocus={() => onFocusAnswer?.(item)}
           onChange={e => onChange({ ...item, studentAnswer: e.target.value })} />
         {(item.studentAnswer || "").trim()
-          ? <div className="pp-preview"><span className="pp-preview-label">预览</span><MathText text={item.studentAnswer} /></div>
+          ? <div className="pp-preview"><span className="pp-preview-label">预览</span><MathText text={autoLatex(item.studentAnswer)} /></div>
           : <div className="pp-grade-warn">⚠ 未匹配到答案——请用上面的下拉选对应的识别段，或对照左侧原图手动补充</div>}
       </div>
     </div>
@@ -469,8 +470,6 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const [reviewImages, setReviewImages] = useState([]);
   const [reviewImgIdx, setReviewImgIdx] = useState(0);
   const [focusBox, setFocusBox] = useState(null); // {img, bbox} 当前高亮的题在原图里的区域
-  const [reviewQNumbers, setReviewQNumbers] = useState([]); // 已知题号清单，重识别时再喂给 OCR
-  const [reocrBusy, setReocrBusy] = useState(false); // 正在旋转/重识别某页
   const [lightbox, setLightbox] = useState(null); // URL of enlarged image
   const [uploadCollapsed, setUploadCollapsed] = useState(false); // 有题目后收起上传区，给列表腾空间
   const [pendingFiles, setPendingFiles] = useState([]); // 本次上传的原始文件，确认后归档到「以往记录」
@@ -551,7 +550,6 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       if (!extracted.length) { report("没识别出题目，请检查文件"); setProgress(null); return; }
       // 进入校对阶段，而不是立即保存
       setReviewItems(extracted.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low" })));
-      setReviewQNumbers(extracted.map((x) => x.number).filter(Boolean));
       setReviewImages(collectedImages);
       setReviewImgIdx(0);
       setReviewPhase(true);
@@ -572,7 +570,6 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       if (!questions.length) { report("题目识别失败，请检查题目文件"); setProgress(null); return; }
       report(`提取到 ${questions.length} 道题，识别学生答案…`, 40);
       const questionNumbers = questions.map((q) => q.number).filter(Boolean);
-      setReviewQNumbers(questionNumbers);
       const { answers, images } = await extractAnswersFromFiles(aFiles, (msg) => report(msg, Math.min(75, (progress || 40) + 3)), wb, userId, questionNumbers);
       report("AI 按内容对齐题目和答案…", 80);
       // 语义对齐：按答案内容判断它解的是哪道题（解决手写编号和官方题号对不上）；失败则回退题号匹配
@@ -617,39 +614,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       setReviewAnswers([]);
       setReviewImages([]);
       setFocusBox(null);
-      setReviewQNumbers([]);
       setPendingFiles([]);
       onReviewModeChange?.(false);
       report(`保存完成，共 ${saved.length} 道题，点「全部批改」开始。`, 100);
       setTimeout(() => setProgress(null), 800);
     } catch (err) { report("保存失败：" + (err.message || err)); setProgress(null); }
-  };
-
-  // 校对：把当前显示的原图顺时针转 90°（真旋转像素，转完旧框失效，清掉高亮）
-  const rotateCurrentImage = async () => {
-    const idx = reviewImgIdx;
-    if (!reviewImages[idx]) return;
-    setReocrBusy(true);
-    try {
-      const rotated = await rotateDataUri(reviewImages[idx], 90);
-      setReviewImages((prev) => prev.map((u, i) => (i === idx ? rotated : u)));
-      setFocusBox(null);
-    } finally { setReocrBusy(false); }
-  };
-
-  // 校对：用（已转正的）当前页重新识别，新结果替换该页的识别段，供下拉重新指认
-  const reOcrCurrentImage = async () => {
-    const idx = reviewImgIdx;
-    if (!reviewImages[idx]) return;
-    setReocrBusy(true);
-    try {
-      const segs = (await extractAnswersFromImage(reviewImages[idx], reviewQNumbers)).map((a) => ({ ...a, _img: idx }));
-      // 替换该页旧的识别段
-      setReviewAnswers((prev) => [...prev.filter((a) => a._img !== idx), ...segs]);
-      alert(segs.length ? `已重新识别此页，得到 ${segs.length} 段。请在右侧用「对应答案」下拉重新指认。` : "此页没识别出内容，可再转一次方向或手动补充。");
-    } catch (e) {
-      alert("重新识别失败：" + (e.message || e));
-    } finally { setReocrBusy(false); }
   };
 
   const saveAnswer = async (item) => {
@@ -751,10 +720,6 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                     )}
                   </div>
                 </div>
-                <div className="pp-rv-imgtools">
-                  <button className="pp-btn mini" disabled={reocrBusy} onClick={rotateCurrentImage}>↻ 旋转 90°</button>
-                  <button className="pp-btn mini primary" disabled={reocrBusy} onClick={reOcrCurrentImage}>{reocrBusy ? "处理中…" : "转正后重新识别此页"}</button>
-                </div>
                 {reviewImages.length > 1 && (
                   <div className="pp-rv-thumbs">
                     {reviewImages.map((img, i) => (
@@ -762,7 +727,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                     ))}
                   </div>
                 )}
-                <div className="pp-rv-hint">原图躺倒/方向不对？点「↻ 旋转」转正，再「重新识别此页」。点右侧题目的答案框可在原图定位。</div>
+                <div className="pp-rv-hint">点右侧某道题的答案框，左图会跳到它所在的原卷页并框出大致位置。方向不对请在上传时点文件名旋转。</div>
               </>
             ) : (
               <div style={{ color: "var(--faint)", fontSize: 12, textAlign: "center", padding: 20 }}>（PDF 文字版无图片预览）</div>
@@ -969,7 +934,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                       {draft.trim() && (
                         <div className="pp-preview">
                           <span className="pp-preview-label">渲染预览</span>
-                          <MathText text={draft} />
+                          <MathText text={autoLatex(draft)} />
                         </div>
                       )}
                       <div className="pp-actions">
@@ -983,7 +948,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                       onClick={(e) => { e.stopPropagation(); setEditing(item.id); setDraft(item.student_answer || ""); }}
                     >
                       {item.student_answer
-                        ? <MathText text={item.student_answer} />
+                        ? <MathText text={autoLatex(item.student_answer)} />
                         : <span className="pp-ans-empty">空白，点击补充</span>
                       }
                       <span className="pp-edit-hint">✏ 点击修改</span>
