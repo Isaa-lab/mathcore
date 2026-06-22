@@ -7,7 +7,7 @@ import { summarizeWeakness } from "../lib/workbenchAI";
 const CSS = `
 .mw{--ink:#0f1220;--mut:#6b7184;--line:#e7e8ef;--soft:#f0f1f6;--card:#fff;--brand:#4338ca;--brand-soft:#eef0ff;color:var(--ink)}
 .mw-weak{background:var(--brand-soft);border:1px solid #dfe2ff;border-radius:12px;padding:13px 16px;margin-bottom:16px;font-size:13px;color:#3730a3;line-height:1.6}
-.mw-cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;height:calc(100vh - 150px);max-height:100%;min-height:520px}
+.mw-cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;height:calc(100vh - 150px);min-height:520px}
 .mw-cols.review{grid-template-columns:1fr}
 .mw-col{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;overflow:hidden;display:flex;flex-direction:column}
 .mw-coltitle{font-size:13px;font-weight:600;color:var(--mut);margin:0 0 12px;font-family:ui-monospace,monospace;letter-spacing:.02em}

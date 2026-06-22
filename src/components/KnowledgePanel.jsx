@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import MathText from "../lib/MathText";
-import { explainKnowledge } from "../lib/workbenchAI";
+import { explainKnowledge, autoLatex } from "../lib/workbenchAI";
 
 const REVIEW_KEY = "__review__"; // "订正点评"标签的内部 key
 
@@ -99,7 +99,7 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
             <div className="kp-sec">
               <div className="kp-err">
                 <div className="kp-err-h">✗ 错在哪里{item.error_type ? ` · ${item.error_type}错误` : ""}</div>
-                <div className="kp-err-b"><MathText text={item.error_detail || "（未给出具体说明）"} /></div>
+                <div className="kp-err-b"><MathText text={autoLatex(item.error_detail || "（未给出具体说明）")} /></div>
               </div>
             </div>
           )}

@@ -94,7 +94,10 @@ function MathFieldInline({ latex, hints, onCommit, onCancel }) {
     let done = false;
     const finish = (commit) => {
       if (done) return; done = true;
-      if (commit) onCommit(el.value); else onCancel();
+      const v = el.value;
+      // 防误删：math-field 还没就绪/读到空值时，blur 不要用空值覆盖原公式
+      if (commit && typeof v === "string" && v.trim()) onCommit(v);
+      else onCancel();
     };
     const apply = () => { try { el.value = latex; el.focus(); } catch {} };
     if (window.customElements?.whenDefined) {
