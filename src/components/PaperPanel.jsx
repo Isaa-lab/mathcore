@@ -382,6 +382,8 @@ const CSS = `
 /* 框选时整块取景区铺满全屏，图更大、可缩放/平移取景 */
 .pp-rv-imgmain.framing-full{position:fixed;inset:0;z-index:9998;max-width:none;border:none;border-radius:0;background:rgba(15,18,32,.92)}
 .pp-rv-imgmain.framing-full .pp-rv-zoom{flex-wrap:wrap;max-width:70vw;justify-content:flex-end}
+/* 关键：全屏下按视口尺寸约束整张图（百分比 max-height 在自动高度的包裹层里会失效，导致竖图溢出底部）→ 用 vw/vh 让整页完整可见，再滚轮放大 */
+.pp-rv-imgmain.framing-full .pp-rv-imgwrap,.pp-rv-imgmain.framing-full .pp-rv-imgwrap img{max-width:100vw;max-height:100vh}
 .pp-rv-fratool{width:auto!important;padding:0 10px!important;font-size:12px!important}
 .pp-rv-fratool.on{background:var(--brand)!important;border-color:var(--brand)!important;color:#fff!important}
 .pp-rv-imgwrap{position:relative;display:inline-block;max-width:100%;max-height:100%;line-height:0;transform-origin:center center}
