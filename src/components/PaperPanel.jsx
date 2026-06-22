@@ -314,9 +314,12 @@ const CSS = `
 .pp-rv-hd span{font-size:11px;font-weight:400;color:var(--mut);margin-left:8px}
 .pp-rv-body{display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1;min-height:0}
 .pp-rv-imgs{display:flex;flex-direction:column;gap:8px;overflow:hidden}
-.pp-rv-imgmain{flex:1;min-height:0;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:#f8f8fb;display:flex;align-items:center;justify-content:center}
-.pp-rv-imgwrap{position:relative;display:inline-block;max-width:100%;max-height:100%;line-height:0}
-.pp-rv-imgwrap img{max-width:100%;max-height:100%;object-fit:contain;display:block;cursor:zoom-in}
+.pp-rv-imgmain{position:relative;flex:1;min-height:0;overflow:hidden;border:1px solid var(--line);border-radius:10px;background:#f8f8fb;display:flex;align-items:center;justify-content:center}
+.pp-rv-imgwrap{position:relative;display:inline-block;max-width:100%;max-height:100%;line-height:0;transform-origin:center center}
+.pp-rv-imgwrap img{max-width:100%;max-height:100%;object-fit:contain;display:block;user-select:none;-webkit-user-drag:none}
+.pp-rv-zoom{position:absolute;top:8px;right:8px;display:flex;gap:4px;z-index:3}
+.pp-rv-zoom button{width:28px;height:28px;border:1px solid var(--line);background:rgba(255,255,255,.92);border-radius:6px;cursor:pointer;font-size:14px;line-height:1;color:#3a3f55}
+.pp-rv-zoom button:hover{border-color:var(--brand);color:var(--brand)}
 .pp-rv-box{position:absolute;border:2px solid var(--brand);background:rgba(67,56,202,.12);border-radius:3px;pointer-events:none;transition:all .15s ease}
 .pp-rv-hint{flex-shrink:0;font-size:11px;color:var(--faint);text-align:center}
 .pp-rv-imgtools{flex-shrink:0;display:flex;gap:8px;justify-content:center;margin-top:4px}
@@ -523,6 +526,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const [reviewImgIdx, setReviewImgIdx] = useState(0);
   const [focusBox, setFocusBox] = useState(null); // {img, bbox} 当前高亮的题在原图里的区域
   const [lightbox, setLightbox] = useState(null); // URL of enlarged image
+  const [imgView, setImgView] = useState({ zoom: 1, x: 0, y: 0 }); // 原图缩放/平移
+  const imgDragRef = useRef(null);
   const [uploadCollapsed, setUploadCollapsed] = useState(false); // 有题目后收起上传区，给列表腾空间
   const [pendingFiles, setPendingFiles] = useState([]); // 本次上传的原始文件，确认后归档到「以往记录」
   const [editing2, setEditing2] = useState(null); // { which: 'q'|'a', idx, file } 点文件名打开的编辑器
@@ -538,6 +543,21 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   // 识别/批改出题目后，自动收起上面的上传区，把空间让给题目列表
   const hasItems = items.length > 0;
   useEffect(() => { if (hasItems) setUploadCollapsed(true); }, [hasItems]);
+
+  // 切换原图页时复位缩放/平移
+  useEffect(() => { setImgView({ zoom: 1, x: 0, y: 0 }); }, [reviewImgIdx]);
+  const zoomImg = (factor) => setImgView((v) => {
+    const z = Math.min(6, Math.max(1, v.zoom * factor));
+    return z === 1 ? { zoom: 1, x: 0, y: 0 } : { ...v, zoom: z };
+  });
+  const onImgWheel = (e) => { e.preventDefault(); zoomImg(e.deltaY < 0 ? 1.15 : 1 / 1.15); };
+  const onImgDown = (e) => { imgDragRef.current = { sx: e.clientX, sy: e.clientY, ox: imgView.x, oy: imgView.y }; };
+  const onImgMove = (e) => {
+    const d = imgDragRef.current;
+    if (!d) return;
+    setImgView((v) => ({ ...v, x: d.ox + (e.clientX - d.sx), y: d.oy + (e.clientY - d.sy) }));
+  };
+  const onImgUp = () => { imgDragRef.current = null; };
 
   // ── 在一起模式：单区上传 ──
   const handleTogether = useCallback(async (files) => {
@@ -759,9 +779,17 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
           <div className="pp-rv-imgs">
             {reviewImages.length > 0 ? (
               <>
-                <div className="pp-rv-imgmain">
-                  <div className="pp-rv-imgwrap">
-                    <img src={reviewImages[reviewImgIdx]} alt="原始图片" onClick={() => setLightbox(reviewImages[reviewImgIdx])} />
+                <div
+                  className="pp-rv-imgmain"
+                  onWheel={onImgWheel}
+                  onMouseDown={onImgDown}
+                  onMouseMove={onImgMove}
+                  onMouseUp={onImgUp}
+                  onMouseLeave={onImgUp}
+                  style={{ cursor: imgDragRef.current ? "grabbing" : imgView.zoom > 1 ? "grab" : "default" }}
+                >
+                  <div className="pp-rv-imgwrap" style={{ transform: `translate(${imgView.x}px, ${imgView.y}px) scale(${imgView.zoom})` }}>
+                    <img src={reviewImages[reviewImgIdx]} alt="原始图片" draggable={false} />
                     {focusBox && focusBox.img === reviewImgIdx && Array.isArray(focusBox.bbox) && (
                       <div className="pp-rv-box" style={{
                         left: `${focusBox.bbox[0] * 100}%`,
@@ -771,6 +799,12 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                       }} />
                     )}
                   </div>
+                  <div className="pp-rv-zoom" onMouseDown={(e) => e.stopPropagation()}>
+                    <button title="放大" onClick={() => zoomImg(1.3)}>＋</button>
+                    <button title="缩小" onClick={() => zoomImg(1 / 1.3)}>－</button>
+                    <button title="复位" onClick={() => setImgView({ zoom: 1, x: 0, y: 0 })}>⟲</button>
+                    <button title="全屏查看" onClick={() => setLightbox(reviewImages[reviewImgIdx])}>⛶</button>
+                  </div>
                 </div>
                 {reviewImages.length > 1 && (
                   <div className="pp-rv-thumbs">
@@ -779,7 +813,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                     ))}
                   </div>
                 )}
-                <div className="pp-rv-hint">点右侧某道题的答案框，左图会跳到它所在的原卷页并框出大致位置。方向不对请在上传时点文件名旋转。</div>
+                <div className="pp-rv-hint">原图可滚轮/＋－缩放、按住拖动平移、⟲ 复位、⛶ 全屏。点右侧答案框会跳到对应页并框出位置。</div>
               </>
             ) : (
               <div style={{ color: "var(--faint)", fontSize: 12, textAlign: "center", padding: 20 }}>（PDF 文字版无图片预览）</div>
