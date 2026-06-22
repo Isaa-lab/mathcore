@@ -345,7 +345,15 @@ const CSS = `
 .pp-rv-zoom button:hover{border-color:var(--brand);color:var(--brand)}
 .pp-rv-box{position:absolute;border:2px solid var(--brand);background:rgba(67,56,202,.12);border-radius:3px;pointer-events:none;transition:all .15s ease}
 .pp-rv-frame{border-style:dashed;border-color:var(--emerald);background:rgba(4,120,87,.14);transition:none}
-.pp-rv-fraback{width:auto!important;padding:0 10px!important}
+.pp-rv-handle{position:absolute;width:14px;height:14px;background:#fff;border:2px solid var(--emerald);border-radius:50%;pointer-events:auto;z-index:4}
+.pp-rv-handle-nw{left:-8px;top:-8px;cursor:nwse-resize}
+.pp-rv-handle-ne{right:-8px;top:-8px;cursor:nesw-resize}
+.pp-rv-handle-sw{left:-8px;bottom:-8px;cursor:nesw-resize}
+.pp-rv-handle-se{right:-8px;bottom:-8px;cursor:nwse-resize}
+.pp-rv-fraback,.pp-rv-fraok{width:auto!important;padding:0 10px!important}
+.pp-rv-fraok{background:var(--emerald)!important;border-color:var(--emerald)!important;color:#fff!important;font-weight:600}
+.pp-rv-fraok:disabled{opacity:.5;cursor:not-allowed}
+.pp-rv-fraback:disabled{opacity:.5;cursor:not-allowed}
 .pp-rv-frametip{position:absolute;left:8px;bottom:8px;z-index:3;background:rgba(15,18,32,.82);color:#fff;font-size:12px;padding:5px 10px;border-radius:8px;pointer-events:none}
 .pp-rv-hint{flex-shrink:0;font-size:11px;color:var(--faint);text-align:center}
 .pp-rv-imgtools{flex-shrink:0;display:flex;gap:8px;justify-content:center;margin-top:4px}
@@ -571,6 +579,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const imgMainRef = useRef(null);                    // 图片容器（含居中留白），框选用它的像素坐标
   const [framing, setFraming] = useState(false);     // 框选识别模式
   const [frameRect, setFrameRect] = useState(null);   // 拖框中的矩形：相对 imgmain 的像素 {x0,y0,x1,y1}
+  const frameModeRef = useRef(null);                  // 框选交互：{ mode:'draw'|'move'|'resize', handle?, sx, sy, orig }
   const [regionBusy, setRegionBusy] = useState(false);
   const [reviewActiveIdx, setReviewActiveIdx] = useState(-1); // 框选结果填入哪道题
   const [uploadCollapsed, setUploadCollapsed] = useState(false); // 有题目后收起上传区，给列表腾空间
@@ -602,18 +611,69 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     if (!r) return { x: 0, y: 0 };
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
+  // 归一化矩形（x0<x1, y0<y1），命中测试和拖动都用它
+  const normRect = (r) => ({
+    x0: Math.min(r.x0, r.x1), y0: Math.min(r.y0, r.y1),
+    x1: Math.max(r.x0, r.x1), y1: Math.max(r.y0, r.y1),
+  });
+  const insideRect = (p, r) => {
+    const n = normRect(r);
+    return p.x >= n.x0 && p.x <= n.x1 && p.y >= n.y0 && p.y <= n.y1;
+  };
   const onImgDown = (e) => {
-    if (framing) { const p = mainPx(e); setFrameRect({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); return; }
+    if (framing) {
+      const p = mainPx(e);
+      // 已有框且点在框内 → 移动整框；否则在空白处按下 → 重新画框
+      if (frameRect && insideRect(p, frameRect)) {
+        frameModeRef.current = { mode: "move", sx: p.x, sy: p.y, orig: normRect(frameRect) };
+      } else {
+        frameModeRef.current = { mode: "draw" };
+        setFrameRect({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+      }
+      return;
+    }
     imgDragRef.current = { sx: e.clientX, sy: e.clientY, ox: imgView.x, oy: imgView.y };
   };
+  // 角点拖拽：在叠加框的把手上按下时调用（阻止冒泡到 onImgDown）
+  const onHandleDown = (handle) => (e) => {
+    e.stopPropagation();
+    if (!frameRect) return;
+    frameModeRef.current = { mode: "resize", handle, orig: normRect(frameRect) };
+  };
   const onImgMove = (e) => {
-    if (framing) { if (frameRect) { const p = mainPx(e); setFrameRect((r) => ({ ...r, x1: p.x, y1: p.y })); } return; }
+    if (framing) {
+      const fm = frameModeRef.current;
+      if (!fm) return;
+      const p = mainPx(e);
+      if (fm.mode === "draw") {
+        setFrameRect((r) => (r ? { ...r, x1: p.x, y1: p.y } : r));
+      } else if (fm.mode === "move") {
+        const dx = p.x - fm.sx, dy = p.y - fm.sy, o = fm.orig;
+        setFrameRect({ x0: o.x0 + dx, y0: o.y0 + dy, x1: o.x1 + dx, y1: o.y1 + dy });
+      } else if (fm.mode === "resize") {
+        const o = fm.orig, h = fm.handle;
+        setFrameRect({
+          x0: h.includes("w") ? p.x : o.x0,
+          y0: h.includes("n") ? p.y : o.y0,
+          x1: h.includes("e") ? p.x : o.x1,
+          y1: h.includes("s") ? p.y : o.y1,
+        });
+      }
+      return;
+    }
     const d = imgDragRef.current;
     if (!d) return;
     setImgView((v) => ({ ...v, x: d.ox + (e.clientX - d.sx), y: d.oy + (e.clientY - d.sy) }));
   };
-  const onImgUp = async () => {
-    if (framing) { await commitFrame(); return; }
+  const onImgUp = () => {
+    if (framing) {
+      // 框选模式下松开鼠标只结束本次拖动/画框，不立即识别；
+      // 用户可继续移动/缩放框，满意后点「确定识别」。
+      const fm = frameModeRef.current;
+      frameModeRef.current = null;
+      if (fm) setFrameRect((r) => (r ? normRect(r) : r));
+      return;
+    }
     imgDragRef.current = null;
   };
 
@@ -626,7 +686,6 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
 
   const commitFrame = async () => {
     const r = frameRect;
-    setFrameRect(null);
     if (!r) return;
     // 像素框（相对 imgmain）→ 相对图片的比例：扣掉图片在容器里的居中偏移
     const main = imgMainRef.current?.getBoundingClientRect();
@@ -639,7 +698,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     const fy1 = (Math.max(r.y0, r.y1) - offY) / im.height;
     const clamp = (v) => Math.min(1, Math.max(0, v));
     const rect = { x: clamp(fx0), y: clamp(fy0), w: clamp(fx1) - clamp(fx0), h: clamp(fy1) - clamp(fy0) };
-    if (rect.w < 0.02 || rect.h < 0.015) return; // 框太小或落在图片外，忽略
+    if (rect.w < 0.02 || rect.h < 0.015) { alert("框太小或落在图片外，请重新拖框或调整大小。"); return; } // 保留当前框，便于继续调整
     setRegionBusy(true);
     try {
       const crop = await cropFractionDataUri(reviewImages[reviewImgIdx], rect);
@@ -648,8 +707,9 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       if (text) {
         setReviewItems((prev) => prev.map((x, j) => (j === reviewActiveIdx ? { ...x, studentAnswer: text, answerConfidence: "low" } : x)));
         setFraming(false);
+        setFrameRect(null);
       } else {
-        alert("没识别出内容，可重新框选更紧的区域。");
+        alert("没识别出内容，可调整框的位置/大小后再点「确定识别」。");
       }
     } catch (e) {
       alert("区域识别失败：" + (e.message || e));
@@ -917,7 +977,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                       }} />
                     )}
                   </div>
-                  {/* 框选叠加框：相对 imgmain 的像素，光标在哪框就在哪 */}
+                  {/* 框选叠加框：相对 imgmain 的像素，光标在哪框就在哪。
+                      画完后可拖框内部移动、拖四角把手缩放，确认后再识别。 */}
                   {framing && frameRect && (
                       <div className="pp-rv-box pp-rv-frame" style={{
                         position: "absolute",
@@ -925,7 +986,12 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                         top: `${Math.min(frameRect.y0, frameRect.y1)}px`,
                         width: `${Math.abs(frameRect.x1 - frameRect.x0)}px`,
                         height: `${Math.abs(frameRect.y1 - frameRect.y0)}px`,
-                      }} />
+                        cursor: "move",
+                      }}>
+                        {["nw", "ne", "sw", "se"].map((h) => (
+                          <span key={h} className={`pp-rv-handle pp-rv-handle-${h}`} onMouseDown={onHandleDown(h)} />
+                        ))}
+                      </div>
                     )}
                   <div className="pp-rv-zoom" onMouseDown={(e) => e.stopPropagation()}>
                     {!framing ? (
@@ -937,12 +1003,18 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                         <button title="框选某块重新识别填入选中题" onClick={startFraming}>✂︎</button>
                       </>
                     ) : (
-                      <button className="pp-rv-fraback" onClick={() => { setFraming(false); setFrameRect(null); }}>{regionBusy ? "识别中…" : "✕ 退出框选"}</button>
+                      <>
+                        <button className="pp-rv-fraok" disabled={!frameRect || regionBusy} onClick={commitFrame}>{regionBusy ? "识别中…" : "✓ 确定识别"}</button>
+                        <button className="pp-rv-fraback" disabled={regionBusy} onClick={() => { setFraming(false); setFrameRect(null); frameModeRef.current = null; }}>✕ 退出框选</button>
+                      </>
                     )}
                   </div>
                   {framing && (
                     <div className="pp-rv-frametip">
-                      {regionBusy ? "正在识别框选区域…" : (reviewActiveIdx >= 0 ? `拖框选中要识别的区域 → 填入 #${reviewItems[reviewActiveIdx]?.number || (reviewActiveIdx + 1)}` : "请先选目标题")}
+                      {regionBusy ? "正在识别框选区域…"
+                        : reviewActiveIdx < 0 ? "请先选目标题"
+                        : frameRect ? `拖框内可移动、拖四角可缩放 → 满意后点「确定识别」填入 #${reviewItems[reviewActiveIdx]?.number || (reviewActiveIdx + 1)}`
+                        : `在原图上拖出一个框选中要识别的区域 → 填入 #${reviewItems[reviewActiveIdx]?.number || (reviewActiveIdx + 1)}`}
                     </div>
                   )}
                 </div>
