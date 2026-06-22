@@ -200,7 +200,7 @@ ${layoutHint}
    - 【全部写完，不要中途截断】把该题学生写的全部过程都识别进来；若一道题内部分成 ①②③ / (a)(b)(c) / 多个小证明，必须把每个小部分都识别全，一直到该题最后一行——只写开头一两步就停是常见错误，禁止
    - 数学公式用 $...$ LaTeX
 4. 识别置信度 answerConfidence：清晰可读 → "high"，潦草但辨认出内容 → "low"，完全未作答 → "low"
-5. 【满分与老师红笔批改 — 没有就一律省略这些字段】maxScore：题目附近印着该题分值（如 "(10 marks)"、"[5分]"）时填数字；teacherScorePct/teacherComment：有**红笔批改**（红色打勾打叉/圈错/得分/扣分/批注）时，把老师给分换算成 0~100 填 teacherScorePct、红笔文字填 teacherComment（黑色学生原笔迹不算）。没有就都省略。
+5. 【满分与老师红笔批改 — 没有就省略；只认红色笔迹】maxScore：题目印着分值时填数字。teacherMark：红笔对该题的整体判定——大红叉/划掉="wrong"，打勾="correct"，只圈出部分="partial"。teacherScorePct：仅当红笔写了数字得分/扣分时填（0~100）。teacherComment：红笔文字批注。没有红笔则全省略。
 
 跳过非题目内容（姓名、班级、页码、说明）。不要输出多余解释。
 
@@ -249,9 +249,15 @@ ${rosterBlock}
 6. 【区域定位 bbox — 用整数 0~1000 坐标系】给出该题所有手写行的**紧致外接框**（刚好框住，不要框到别题）：
    格式 [x0, y0, x1, y1]，整数，范围 0~1000，左上角 (0,0)、右下角 (1000,1000)，x 向右、y 向下。
    x0,y0 左上角，x1,y1 右下角，必须 x1>x0、y1>y0。这是你擅长的视觉定位，请尽量精确贴合。无法确定才省略 bbox。
-7. 【满分与老师红笔批改 — 没有就一律省略这些字段】
-   - maxScore：如果题目附近**印着该题分值**（如 "(10 marks)"、"[5分]"、"（8 分）"），填这个数字；没印就省略。
-   - teacherScorePct / teacherComment：如果这道题上有**老师红笔批改**（红色的打勾打叉、圈错、写的得分或扣分、批注），把老师给的得分换算成 0~100 的百分比填 teacherScorePct（例如满分 10 给了 8 分→80；只写"-2"且满分 10→80），红笔文字批注填 teacherComment。**只有确实看到红笔批改才填，黑色的学生原笔迹不算**；没有红笔就两个都省略。
+7. 【满分与老师红笔批改 — 没有就一律省略这些字段；只认红色笔迹，黑色学生原笔迹不算】
+   - maxScore：题目附近**印着该题分值**（如 "(10 marks)"、"[5分]"）时填数字，否则省略。
+   - teacherMark：老师红笔对这道题的**整体判定**，看红笔符号判断——
+       整道题被**大红叉/红线划掉/打 ✗** → "wrong"；
+       红笔**打勾 ✓/√** → "correct"；
+       只**圈出或划掉其中一部分、或个别地方标错**（其余没动） → "partial"。
+   - teacherScorePct：**只有老师真的用红笔写了数字得分/扣分**才填（换算成 0~100，如满分 10 给 8→80，只写"-2"且满分 10→80）；只打符号没写数字就**不要填这个字段**，用 teacherMark 即可。
+   - teacherComment：红笔的文字批注原文（如有）。
+   - 没有任何红笔批改 → 以上 teacher* 字段全部省略。
 
 【重要】即使只有一道题，也要输出 items 数组。不要输出任何多余解释。
 
@@ -274,7 +280,9 @@ ${rosterBlock}
   });
 }
 
-// 从 OCR item 里取出"满分 / 老师红笔得分"字段并归一化（缺失则不带这些键）
+// 从 OCR item 里取出"满分 / 老师红笔批改"字段并归一化（缺失则不带这些键）
+// 关键：老师红笔常常是符号标记（打叉/圈错/打勾/划掉），不是分数。teacherMark 捕获这种"整体判定"，
+// teacherScorePct 只在老师真写了数字时才有。
 function pickScoreFields(it) {
   const out = {};
   const max = Number(it.maxScore);
@@ -283,6 +291,12 @@ function pickScoreFields(it) {
   if (Number.isFinite(ts)) out.teacherScorePct = Math.max(0, Math.min(100, Math.round(ts)));
   const tc = String(it.teacherComment || "").trim();
   if (tc) out.teacherComment = tc;
+  const tm = String(it.teacherMark || "").trim().toLowerCase();
+  if (tm) {
+    if (/correct|right|tick|check|对|✓|√/.test(tm)) out.teacherMark = "correct";
+    else if (/partial|part|部分|半/.test(tm)) out.teacherMark = "partial";
+    else if (/wrong|incorrect|cross|错|✗|✘|x|×/.test(tm)) out.teacherMark = "wrong";
+  }
   return out;
 }
 

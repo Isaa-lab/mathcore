@@ -157,6 +157,18 @@ const stripScoreCols = (row) => {
 };
 const isMissingColumnErr = (e) => /column|score_pct|max_score|score_source|teacher_comment/i.test(String(e?.message || e));
 
+// 老师红笔 → 得分百分比：写了数字用数字，否则按符号判定（✓→95 / 部分→55 / ✗→20）；没红笔返回 null。
+function teacherScoreFromMarks(item) {
+  const num = Number(item?.teacherScorePct);
+  if (Number.isFinite(num)) return Math.max(0, Math.min(100, Math.round(num)));
+  switch (item?.teacherMark) {
+    case "correct": return 95;
+    case "partial": return 55;
+    case "wrong": return 20;
+    default: return null;
+  }
+}
+
 // 分数展示标签：有满分 → "8/10"，否则 → "85%"。无分数返回 null。
 function scoreLabel(item) {
   const pct = Number(item?.score_pct);
@@ -577,9 +589,12 @@ function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer, onFrame
             style={{ width: 110, padding: "3px 6px", border: "1px solid var(--line,#e7e8ef)", borderRadius: 6, fontSize: 12 }}
           />
         </label>
-        {item.teacherScorePct != null && (
+        {(item.teacherScorePct != null || item.teacherMark) && (
           <span style={{ color: "#be123c" }} title={item.teacherComment || ""}>
-            🖊 检测到红笔批改：{item.teacherScorePct}%{item.teacherComment ? `（${answerSnippet(item.teacherComment)}）` : ""}
+            🖊 检测到红笔：{item.teacherScorePct != null
+              ? `${item.teacherScorePct}%`
+              : item.teacherMark === "correct" ? "判对 ✓" : item.teacherMark === "partial" ? "部分对" : "判错 ✗"}
+            {item.teacherComment ? `（${answerSnippet(item.teacherComment)}）` : ""}
           </span>
         )}
       </div>
@@ -815,7 +830,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       }
       if (!extracted.length) { report("没识别出题目，请检查文件"); setProgress(null); return; }
       // 进入校对阶段，而不是立即保存
-      setReviewItems(extracted.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low", maxScore: x.maxScore ?? null, teacherScorePct: x.teacherScorePct ?? null, teacherComment: x.teacherComment || "" })));
+      setReviewItems(extracted.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low", maxScore: x.maxScore ?? null, teacherScorePct: x.teacherScorePct ?? null, teacherComment: x.teacherComment || "", teacherMark: x.teacherMark || null })));
       setReviewImages(collectedImages);
       setReviewImgIdx(0);
       setReviewPhase(true);
@@ -845,7 +860,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       setReviewAnswers(answers); // 原始 OCR 答案段（带 bbox/_img），供手动指认 + 画框定位
       // 校对左侧用答案原图（带坐标），让每道题能高亮回原图区域
       setReviewImages(images);
-      setReviewItems(merged.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low", bbox: x.bbox || null, _img: x._img ?? -1, maxScore: x.maxScore ?? null, teacherScorePct: x.teacherScorePct ?? null, teacherComment: x.teacherComment || "" })));
+      setReviewItems(merged.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low", bbox: x.bbox || null, _img: x._img ?? -1, maxScore: x.maxScore ?? null, teacherScorePct: x.teacherScorePct ?? null, teacherComment: x.teacherComment || "", teacherMark: x.teacherMark || null })));
       setReviewImgIdx(0);
       setReviewPhase(true);
       onReviewModeChange?.(true);
@@ -870,10 +885,10 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
         student_answer: item.studentAnswer || "",
         answer_confidence: "high", // 用户已确认
         reviewed: true,
-        is_correct: null,
+        is_correct: null, // 仍交给「全部批改」生成参考答案/知识点；红笔分数下面单独存
         max_score: item.maxScore ?? null,
-        // 红笔已给分：直接作为初始分数存下，批改时不被 AI 估分覆盖
-        ...(item.teacherScorePct != null ? { score_pct: item.teacherScorePct, score_source: "teacher" } : {}),
+        // 红笔批改（数字得分或打勾/打叉符号）→ 存为老师分，批改时不被 AI 覆盖
+        ...(teacherScoreFromMarks(item) != null ? { score_pct: teacherScoreFromMarks(item), score_source: "teacher" } : {}),
         ...(item.teacherComment ? { teacher_comment: item.teacherComment } : {}),
       }));
       let saved;
@@ -918,14 +933,16 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     const graded = await mapLimit(items, 3, async (item) => {
       try {
         const result = await gradeItem({ question: item.question, studentAnswer: item.student_answer });
-        // 红笔已给分的题：保留老师分数，AI 只负责判定/错因/知识点，不覆盖分数
+        // 红笔已给分的题：判定和分数以老师为准，AI 只补参考答案/错因/知识点
         const hasTeacherScore = item.score_source === "teacher" && item.score_pct != null;
+        const teacherCorrect = hasTeacherScore ? Number(item.score_pct) >= 60 : null;
+        const isCorrect = hasTeacherScore ? teacherCorrect : !!result?.isCorrect;
         const patch = {
           correct_answer: result?.correctAnswer || "",
-          is_correct: !!result?.isCorrect,
-          error_type: result?.isCorrect ? null : (result?.errorType || "计算"),
+          is_correct: isCorrect,
+          error_type: isCorrect ? null : (result?.errorType || "计算"),
           // 判对时 error_detail 存"小瑕疵提示"（minor 档），判错时存错因
-          error_detail: result?.isCorrect ? (result?.minorNote || "") : (result?.errorDetail || ""),
+          error_detail: isCorrect ? (result?.minorNote || "") : (result?.errorDetail || item.teacher_comment || ""),
           knowledge_points: result?.knowledgePoints || [],
           chapter: result?.chapter || "Ch.?",
           reviewed: true,
@@ -942,7 +959,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     });
 
     // 关键题复核：对第一遍判"对"的题独立再核一次，抓"没做完却判对"这类假阳性
-    const toVerify = graded.filter((x) => x.is_correct === true && (x.student_answer || "").trim());
+    const toVerify = graded.filter((x) => x.is_correct === true && x.score_source !== "teacher" && (x.student_answer || "").trim());
     if (toVerify.length) {
       report(`复核 ${toVerify.length} 道判对的题…`, 95);
       await mapLimit(toVerify, 3, async (item) => {
@@ -972,12 +989,12 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
 
   const flipCorrect = async (item) => {
     const next = !item.is_correct;
-    // 手动翻转时同步调整分数（红笔老师分不动），让分数和判定自洽
-    const keepTeacher = item.score_source === "teacher" && item.score_pct != null;
+    // 用户手动翻转 = 最终裁决，分数也同步并标记为 manual（连老师红笔分也覆盖）
     const cur = Number(item.score_pct);
     const patch = {
       is_correct: next, error_type: next ? null : (item.error_type || "计算"),
-      ...(keepTeacher ? {} : { score_pct: next ? Math.max(Number.isFinite(cur) ? cur : 0, 90) : Math.min(Number.isFinite(cur) ? cur : 45, 45), score_source: "manual" }),
+      score_pct: next ? Math.max(Number.isFinite(cur) ? cur : 0, 90) : Math.min(Number.isFinite(cur) ? cur : 45, 45),
+      score_source: "manual",
     };
     const updated = await safeUpdateItem(item.id, patch);
     setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, ...updated } : x)));
