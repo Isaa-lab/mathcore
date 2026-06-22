@@ -4,8 +4,11 @@ import { callGenerate, parseLooseJSON } from "./aiClient";
 // 这里把"整行就是数学、且不含中文/英文长单词"的行补上 $...$；含散文的行保持原样不破坏。
 const _MATH_WORDS = /^(sin|cos|tan|cot|sec|csc|log|ln|exp|lim|det|rank|tr|dim|var|cov|span|max|min|sup|inf|mod|gcd|lcm|diag|re|im|so|let|set|if|and|then)$/i;
 export function autoLatex(s) {
-  const t = String(s || "");
-  if (!t || t.includes("$")) return t; // 已有 LaTeX 包裹就别动
+  let t = String(s || "");
+  if (!t) return t;
+  // 先把 \(...\) / \[...\] 这种定界符归一化成 $...$ / $$...$$（模型有时这么输出，否则原样不渲染）
+  t = t.replace(/\\[()]/g, "$").replace(/\\[[\]]/g, () => "$$");
+  if (t.includes("$")) return t; // 已有 LaTeX 包裹就别动
   const hasMathSym = (l) => /[=~<>≤≥≠^_/]|\\[a-zA-Z]+|\^|\bN\(|\bF\(|σ|λ|∑|∫|√|±|→/.test(l);
   return t.split("\n").map((line) => {
     const ln = line.trim();
@@ -31,6 +34,22 @@ ${t}`;
   const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "公式转写" });
   const out = String(raw || "").replace(/^```[a-z]*\s*/i, "").replace(/```$/i, "").trim();
   return out || t;
+}
+
+// 识别一张"局部截图"（用户在原图上框选出来的一块）：逐行转写其中手写内容。
+export async function extractRegion(dataURI) {
+  const prompt = `这是一张手写数学的**局部截图**（只是某道题答案的一部分）。请把图中所有手写内容逐行转写出来：
+- 数学一律用 $...$ LaTeX 包裹（分数 \\frac、上下标 ^{}/_{}、希腊字母、矩阵 \\begin{pmatrix}...\\end{pmatrix} 等），普通中英文说明保留、不包；
+- 多行用 \\n 分隔，保持从上到下的顺序；字迹潦草也尽力辨认。
+只输出转写后的纯文本，不要 JSON、不要解释、不要代码块。`;
+  const raw = await callGenerate([{
+    role: "user",
+    content: [
+      { type: "text", text: prompt },
+      { type: "image_url", image_url: { url: dataURI } },
+    ],
+  }], { json: false, materialTitle: "区域识别" });
+  return String(raw || "").trim();
 }
 
 async function callVision(dataURI, promptText, { json = true } = {}) {

@@ -15,6 +15,7 @@ import {
   solveQuestion,
   autoLatex,
   toLatex,
+  extractRegion,
 } from "../lib/workbenchAI";
 
 // ── PDF helpers ──────────────────────────────────────────────────────────────
@@ -92,6 +93,25 @@ function rotateDataUri(uri, deg = 90) {
       ctx.rotate((d * Math.PI) / 180);
       ctx.drawImage(img, -img.width / 2, -img.height / 2);
       res(canvas.toDataURL("image/jpeg", 0.85));
+    };
+    img.src = uri;
+  });
+}
+
+// 按 0~1 比例矩形裁剪一张 dataURI 图片，返回裁剪后的 dataURI（用于"框选某区域重识别"）。
+function cropFractionDataUri(uri, rect) {
+  return new Promise((res) => {
+    const img = new Image();
+    img.onerror = () => res(null);
+    img.onload = () => {
+      const sx = Math.max(0, Math.round(rect.x * img.width));
+      const sy = Math.max(0, Math.round(rect.y * img.height));
+      const sw = Math.max(1, Math.round(rect.w * img.width));
+      const sh = Math.max(1, Math.round(rect.h * img.height));
+      const c = document.createElement("canvas");
+      c.width = sw; c.height = sh;
+      c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      res(c.toDataURL("image/jpeg", 0.9));
     };
     img.src = uri;
   });
@@ -323,6 +343,9 @@ const CSS = `
 .pp-rv-zoom button{width:28px;height:28px;border:1px solid var(--line);background:rgba(255,255,255,.92);border-radius:6px;cursor:pointer;font-size:14px;line-height:1;color:#3a3f55}
 .pp-rv-zoom button:hover{border-color:var(--brand);color:var(--brand)}
 .pp-rv-box{position:absolute;border:2px solid var(--brand);background:rgba(67,56,202,.12);border-radius:3px;pointer-events:none;transition:all .15s ease}
+.pp-rv-frame{border-style:dashed;border-color:var(--emerald);background:rgba(4,120,87,.14);transition:none}
+.pp-rv-fraback{width:auto!important;padding:0 10px!important}
+.pp-rv-frametip{position:absolute;left:8px;bottom:8px;z-index:3;background:rgba(15,18,32,.82);color:#fff;font-size:12px;padding:5px 10px;border-radius:8px;pointer-events:none}
 .pp-rv-hint{flex-shrink:0;font-size:11px;color:var(--faint);text-align:center}
 .pp-rv-imgtools{flex-shrink:0;display:flex;gap:8px;justify-content:center;margin-top:4px}
 .pp-rv-thumbs{display:flex;gap:6px;overflow-x:auto;flex-shrink:0;padding-bottom:4px}
@@ -536,6 +559,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const [lightbox, setLightbox] = useState(null); // URL of enlarged image
   const [imgView, setImgView] = useState({ zoom: 1, x: 0, y: 0 }); // 原图缩放/平移
   const imgDragRef = useRef(null);
+  const imgElRef = useRef(null);
+  const [framing, setFraming] = useState(false);     // 框选识别模式
+  const [frameRect, setFrameRect] = useState(null);   // 拖框中的矩形(0~1)
+  const [regionBusy, setRegionBusy] = useState(false);
+  const [reviewActiveIdx, setReviewActiveIdx] = useState(-1); // 框选结果填入哪道题
   const [uploadCollapsed, setUploadCollapsed] = useState(false); // 有题目后收起上传区，给列表腾空间
   const [pendingFiles, setPendingFiles] = useState([]); // 本次上传的原始文件，确认后归档到「以往记录」
   const [editing2, setEditing2] = useState(null); // { which: 'q'|'a', idx, file } 点文件名打开的编辑器
@@ -558,14 +586,60 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     const z = Math.min(6, Math.max(1, v.zoom * factor));
     return z === 1 ? { zoom: 1, x: 0, y: 0 } : { ...v, zoom: z };
   });
-  const onImgWheel = (e) => { e.preventDefault(); zoomImg(e.deltaY < 0 ? 1.15 : 1 / 1.15); };
-  const onImgDown = (e) => { imgDragRef.current = { sx: e.clientX, sy: e.clientY, ox: imgView.x, oy: imgView.y }; };
+  const onImgWheel = (e) => { if (framing) return; e.preventDefault(); zoomImg(e.deltaY < 0 ? 1.15 : 1 / 1.15); };
+  // 相对当前显示图片的比例坐标(0~1)
+  const imgFrac = (e) => {
+    const el = imgElRef.current;
+    if (!el) return { x: 0, y: 0 };
+    const r = el.getBoundingClientRect();
+    return {
+      x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+      y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+    };
+  };
+  const onImgDown = (e) => {
+    if (framing) { const f = imgFrac(e); setFrameRect({ x0: f.x, y0: f.y, x1: f.x, y1: f.y }); return; }
+    imgDragRef.current = { sx: e.clientX, sy: e.clientY, ox: imgView.x, oy: imgView.y };
+  };
   const onImgMove = (e) => {
+    if (framing) { if (frameRect) { const f = imgFrac(e); setFrameRect((r) => ({ ...r, x1: f.x, y1: f.y })); } return; }
     const d = imgDragRef.current;
     if (!d) return;
     setImgView((v) => ({ ...v, x: d.ox + (e.clientX - d.sx), y: d.oy + (e.clientY - d.sy) }));
   };
-  const onImgUp = () => { imgDragRef.current = null; };
+  const onImgUp = async () => {
+    if (framing) { await commitFrame(); return; }
+    imgDragRef.current = null;
+  };
+
+  const startFraming = () => {
+    if (reviewActiveIdx < 0) { alert("请先点一道题的「学生答案」框，把它设为目标，再框选原图区域。"); return; }
+    setImgView({ zoom: 1, x: 0, y: 0 }); // 复位，框选坐标才对得上
+    setFrameRect(null);
+    setFraming(true);
+  };
+
+  const commitFrame = async () => {
+    const r = frameRect;
+    setFrameRect(null);
+    if (!r) return;
+    const rect = { x: Math.min(r.x0, r.x1), y: Math.min(r.y0, r.y1), w: Math.abs(r.x1 - r.x0), h: Math.abs(r.y1 - r.y0) };
+    if (rect.w < 0.03 || rect.h < 0.02) return; // 框太小，忽略
+    setRegionBusy(true);
+    try {
+      const crop = await cropFractionDataUri(reviewImages[reviewImgIdx], rect);
+      if (!crop) throw new Error("裁剪失败");
+      const text = await extractRegion(crop);
+      if (text) {
+        setReviewItems((prev) => prev.map((x, j) => (j === reviewActiveIdx ? { ...x, studentAnswer: text, answerConfidence: "low" } : x)));
+        setFraming(false);
+      } else {
+        alert("没识别出内容，可重新框选更紧的区域。");
+      }
+    } catch (e) {
+      alert("区域识别失败：" + (e.message || e));
+    } finally { setRegionBusy(false); }
+  };
 
   // ── 在一起模式：单区上传 ──
   const handleTogether = useCallback(async (files) => {
@@ -797,8 +871,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                   style={{ cursor: imgDragRef.current ? "grabbing" : imgView.zoom > 1 ? "grab" : "default" }}
                 >
                   <div className="pp-rv-imgwrap" style={{ transform: `translate(${imgView.x}px, ${imgView.y}px) scale(${imgView.zoom})` }}>
-                    <img src={reviewImages[reviewImgIdx]} alt="原始图片" draggable={false} />
-                    {focusBox && focusBox.img === reviewImgIdx && Array.isArray(focusBox.bbox) && (
+                    <img ref={imgElRef} src={reviewImages[reviewImgIdx]} alt="原始图片" draggable={false} />
+                    {focusBox && focusBox.img === reviewImgIdx && Array.isArray(focusBox.bbox) && !framing && (
                       <div className="pp-rv-box" style={{
                         left: `${focusBox.bbox[0] * 100}%`,
                         top: `${focusBox.bbox[1] * 100}%`,
@@ -806,13 +880,33 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                         height: `${(focusBox.bbox[3] - focusBox.bbox[1]) * 100}%`,
                       }} />
                     )}
+                    {framing && frameRect && (
+                      <div className="pp-rv-box pp-rv-frame" style={{
+                        left: `${Math.min(frameRect.x0, frameRect.x1) * 100}%`,
+                        top: `${Math.min(frameRect.y0, frameRect.y1) * 100}%`,
+                        width: `${Math.abs(frameRect.x1 - frameRect.x0) * 100}%`,
+                        height: `${Math.abs(frameRect.y1 - frameRect.y0) * 100}%`,
+                      }} />
+                    )}
                   </div>
                   <div className="pp-rv-zoom" onMouseDown={(e) => e.stopPropagation()}>
-                    <button title="放大" onClick={() => zoomImg(1.3)}>＋</button>
-                    <button title="缩小" onClick={() => zoomImg(1 / 1.3)}>－</button>
-                    <button title="复位" onClick={() => setImgView({ zoom: 1, x: 0, y: 0 })}>⟲</button>
-                    <button title="全屏查看" onClick={() => setLightbox(reviewImages[reviewImgIdx])}>⛶</button>
+                    {!framing ? (
+                      <>
+                        <button title="放大" onClick={() => zoomImg(1.3)}>＋</button>
+                        <button title="缩小" onClick={() => zoomImg(1 / 1.3)}>－</button>
+                        <button title="复位" onClick={() => setImgView({ zoom: 1, x: 0, y: 0 })}>⟲</button>
+                        <button title="全屏查看" onClick={() => setLightbox(reviewImages[reviewImgIdx])}>⛶</button>
+                        <button title="框选某块重新识别填入选中题" onClick={startFraming}>✂︎</button>
+                      </>
+                    ) : (
+                      <button className="pp-rv-fraback" onClick={() => { setFraming(false); setFrameRect(null); }}>{regionBusy ? "识别中…" : "✕ 退出框选"}</button>
+                    )}
                   </div>
+                  {framing && (
+                    <div className="pp-rv-frametip">
+                      {regionBusy ? "正在识别框选区域…" : (reviewActiveIdx >= 0 ? `拖框选中要识别的区域 → 填入 #${reviewItems[reviewActiveIdx]?.number || (reviewActiveIdx + 1)}` : "请先选目标题")}
+                    </div>
+                  )}
                 </div>
                 {reviewImages.length > 1 && (
                   <div className="pp-rv-thumbs">
@@ -836,6 +930,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
                 answers={reviewAnswers}
                 onChange={(updated) => setReviewItems(prev => prev.map((x, j) => j === i ? updated : x))}
                 onFocusAnswer={(it) => {
+                  setReviewActiveIdx(i); // 框选识别的目标题
                   // 只要知道来源图就先跳到那页（靠我们记的页码，一定有效）；
                   // 模型给了 bbox 才额外画框。
                   if (it && it._img >= 0) {

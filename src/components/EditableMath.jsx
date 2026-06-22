@@ -6,7 +6,18 @@ import "katex/dist/katex.min.css";
 // 失焦/回车写回并重新渲染；文字段保持纯文本。无需懂 LaTeX。
 let _mlLoading = null;
 function ensureMathLive() {
-  if (!_mlLoading) _mlLoading = import("mathlive").catch(() => {});
+  if (!_mlLoading) {
+    _mlLoading = import("mathlive").then((m) => {
+      // npm 打包版默认找不到字体/音效(404)，会导致符号和虚拟键盘渲染异常 → 指到 CDN
+      try {
+        const E = m.MathfieldElement;
+        if (E) {
+          E.fontsDirectory = "https://cdn.jsdelivr.net/npm/mathlive/dist/fonts";
+          E.soundsDirectory = null;
+        }
+      } catch {}
+    }).catch(() => {});
+  }
   return _mlLoading;
 }
 
