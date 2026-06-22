@@ -100,6 +100,8 @@ function rotateDataUri(uri, deg = 90) {
 }
 
 // 按 0~1 比例矩形裁剪一张 dataURI 图片，返回裁剪后的 dataURI（用于"框选某区域重识别"）。
+// 关键：框小区域时裁出来的块可能很小（如 250px），视觉模型拿到的 token 太少 → 读不清堆叠的数字/矩阵。
+// 这里把小裁块放大到长边 ~1400px（最多 3x）并轻度增强对比，让 qwen-vl-max 看清每一行。
 function cropFractionDataUri(uri, rect) {
   return new Promise((res) => {
     const img = new Image();
@@ -109,10 +111,17 @@ function cropFractionDataUri(uri, rect) {
       const sy = Math.max(0, Math.round(rect.y * img.height));
       const sw = Math.max(1, Math.round(rect.w * img.width));
       const sh = Math.max(1, Math.round(rect.h * img.height));
+      const longSide = Math.max(sw, sh);
+      const scale = Math.min(3, Math.max(1, 1400 / longSide)); // 只放大、不缩小，最多 3x
+      const dw = Math.round(sw * scale), dh = Math.round(sh * scale);
       const c = document.createElement("canvas");
-      c.width = sw; c.height = sh;
-      c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-      res(c.toDataURL("image/jpeg", 0.9));
+      c.width = dw; c.height = dh;
+      const ctx = c.getContext("2d");
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.filter = "contrast(1.25) brightness(1.03)"; // 轻度增强，手写笔迹更分明
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
+      res(c.toDataURL("image/jpeg", 0.92));
     };
     img.src = uri;
   });
