@@ -3,6 +3,7 @@ import MathText from "../lib/MathText";
 import { makeWorkbenchApi } from "../lib/workbenchApi";
 import { mapLimit } from "../utils/concurrency";
 import FileEditModal from "./FileEditModal";
+import EditableMath from "./EditableMath";
 import {
   extractPaper,
   extractPaperFromText,
@@ -338,6 +339,10 @@ const CSS = `
 .pp-mf-edit{flex-shrink:0;font-size:11px;border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--brand);font-family:inherit}
 .pp-mf-edit:hover{border-color:var(--brand)}
 .pp-mf-tools{display:flex;gap:8px;margin-bottom:5px}
+.em .em-math{cursor:pointer;border-radius:4px;padding:0 1px;transition:background .12s}
+.em .em-math:hover{background:#eef0ff;outline:1px dashed var(--brand)}
+.em-empty{color:var(--faint)}
+math-field.em-mf{--primary:var(--brand)}
 .pp-rvi-pick{width:100%;border:1px solid var(--line);border-radius:8px;padding:5px 8px;font:inherit;font-size:12px;margin-bottom:4px;background:#fff;color:var(--ink);cursor:pointer;outline:none}
 .pp-rvi-pick:focus{border-color:var(--brand)}
 .pp-mtb{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px}
@@ -443,9 +448,11 @@ function MathField({ label, value, warn, onChange, onFocus, editExtra, emptyHint
       {!editing ? (
         <div className="pp-mf-view" onClick={() => onFocus?.()}>
           <div className="pp-mf-rendered">
-            {has ? <MathText text={autoLatex(value)} /> : <span className="pp-ans-empty">{emptyHint || "（空白）"}</span>}
+            {has
+              ? <EditableMath value={autoLatex(value)} onChange={onChange} />
+              : <span className="pp-ans-empty">{emptyHint || "（空白）"}</span>}
           </div>
-          <button className="pp-mf-edit" onClick={(e) => { e.stopPropagation(); setEditing(true); }}>✏️ 修改</button>
+          <button className="pp-mf-edit" onClick={(e) => { e.stopPropagation(); setEditing(true); }}>✏️ 全文改</button>
         </div>
       ) : (
         <>
@@ -772,7 +779,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       <div className="pp-rv">
         <div className="pp-rv-hd">
           识别校对
-          <span>对照原图核对 AI 识别的题目和答案，确认后再批改</span>
+          <span>对照原图核对 AI 识别的题目和答案 · 点任意公式可直接可视化修改，确认后再批改</span>
         </div>
         <div className="pp-rv-body">
           {/* 左：原图查看（点选右侧某题 → 在原图上画框定位该题） */}
