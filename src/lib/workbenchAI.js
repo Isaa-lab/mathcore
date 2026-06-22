@@ -66,7 +66,7 @@ export async function extractRegion(dataURI) {
       { type: "text", text: prompt },
       { type: "image_url", image_url: { url: dataURI } },
     ],
-  }], { json: false, materialTitle: "区域识别" });
+  }], { json: false, materialTitle: "区域识别", visionModel: "qwen-vl-max" }); // 局部小图用最强模型，精度优先
   return String(raw || "").trim();
 }
 

@@ -71,7 +71,7 @@ async function postGenerate(question, { materialTitle = "题库 AI", conversatio
   return extractText(data).trim();
 }
 
-export async function callGenerate(input, { json = false, materialTitle = "题库 AI", signal } = {}) {
+export async function callGenerate(input, { json = false, materialTitle = "题库 AI", signal, visionModel } = {}) {
   if (Array.isArray(input)) {
     const hasVision = input.some((m) => Array.isArray(m?.content) && m.content.some((p) => p?.type === "image_url"));
     // 视觉请求：用户自己配了 volcengine key 则直接用，否则让后端 fallback 链决定（Gemini → 豆包 → Kimi）
@@ -92,6 +92,7 @@ export async function callGenerate(input, { json = false, materialTitle = "题�
         materialTitle,
         messages: input,
         stream: false,
+        ...(hasVision && visionModel ? { qwenVisionModel: visionModel } : {}),
         ...(hasVision ? visionConfig() : getUserAIConfig()),
       }),
       signal,

@@ -101,6 +101,7 @@ async function runHandler(req, res) {
     vizIntent,       // { wantsViz: bool, reason: string } —— 前端已做关键词检测，后端据此分流 prompt
     dialogueMode,    // "socratic" | "exposition" —— 前端根据答题状态 + 用户意图推导
     // dialogueModeReason, quizState —— 仅日志用，不参与 prompt 构造
+    qwenVisionModel, // 可选：本次视觉请求覆盖默认 Qwen 视觉模型（如框选精修用 qwen-vl-max）
     userProvider, userKey, userCustomUrl,
   } = body;
 
@@ -135,7 +136,9 @@ async function runHandler(req, res) {
   const QWEN_BASE = String(process.env.QWEN_BASE || "https://dashscope.aliyuncs.com/compatible-mode/v1").trim().replace(/\/$/, "");
   // 默认用 qwen-vl-plus：实测又快又准，满页手写也能在 55s 预算内返回。
   // qwen3-vl-plus 更强但带"思考"、输出更慢，满页多图常超时——想用可设 QWEN_VISION_MODEL=qwen3-vl-plus。
-  const QWEN_VISION_MODEL = process.env.QWEN_VISION_MODEL || "qwen-vl-plus";
+  // 默认 qwen-vl-plus；前端可按请求覆盖（如框选精修传 qwen-vl-max 求最高精度）。
+  const _qvmReq = String(qwenVisionModel || "").trim();
+  const QWEN_VISION_MODEL = (/^qwen[\w.-]*$/i.test(_qvmReq) ? _qvmReq : null) || process.env.QWEN_VISION_MODEL || "qwen-vl-plus";
   const QWEN_TEXT_MODEL   = process.env.QWEN_TEXT_MODEL   || "qwen-plus";
 
   // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底
