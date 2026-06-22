@@ -184,8 +184,8 @@ async function extractAnswersFromFiles(files, onProgress, wb, userId, questionNu
     }
   }
   onProgress?.(`识别 ${units.length} 页答案…`);
-  // 限并发 3 路识别；mapLimit 保序，flat 后答案顺序与单元一致
-  const results = await mapLimit(units, 3, async (u) => {
+  // 限并发 2 路识别：视觉调用重，2 路兼顾提速与避免 DashScope 限流/超时；mapLimit 保序
+  const results = await mapLimit(units, 2, async (u) => {
     if (u.kind === "text") return (await extractAnswersFromText(u.text, questionNumbers)).map((a) => ({ ...a, _img: -1 }));
     return (await extractAnswersFromImage(u.ocrUrl, questionNumbers)).map((a) => ({ ...a, _img: u.imgIdx }));
   });
