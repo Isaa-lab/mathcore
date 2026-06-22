@@ -11,10 +11,11 @@ const CSS = `
 .kp-err-b{font-size:13px;color:#7c2030;line-height:1.75}
 .kp-correct{background:var(--emerald-soft);border:1px solid #c7ead8;border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.8;color:var(--ink)}
 .kp-ca-h{font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.12em;color:var(--emerald);text-transform:uppercase;margin:0 0 8px}
-.kp-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}.kp-tab{font-size:12px;border:1px solid var(--line);background:#fff;color:#3a3f55;border-radius:8px;padding:6px 11px;cursor:pointer;font-family:ui-monospace,monospace}.kp-tab.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.kp-tabsbar{position:sticky;top:0;z-index:3;background:var(--card,#fff);padding:2px 0 8px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+.kp-tabs{display:flex;gap:6px;flex-wrap:wrap}.kp-tab{font-size:12px;border:1px solid var(--line);background:#fff;color:#3a3f55;border-radius:8px;padding:6px 11px;cursor:pointer;font-family:ui-monospace,monospace}.kp-tab.on{background:var(--brand);border-color:var(--brand);color:#fff}
 .kp-tab-review{border-color:#f3c7d2;color:var(--rose)}.kp-tab-review.on{background:var(--rose);border-color:var(--rose);color:#fff}
 .kp-sec{margin-bottom:18px}.kp-ey{font-family:ui-monospace,monospace;font-size:10px;letter-spacing:.12em;color:var(--faint);text-transform:uppercase;margin:0 0 8px}.kp-summary{font-size:15px;font-weight:600;line-height:1.5;margin-bottom:12px}.kp-detail{font-size:14px;line-height:1.75;color:#3a3f55}
-.kp-points{list-style:none;padding:0;margin:0;display:grid;gap:7px}.kp-points li{font-size:13px;padding:8px 11px;background:var(--soft);border-radius:8px;display:flex;gap:8px}.kp-points li::before{content:"▸";color:var(--brand)}
+.kp-points{list-style:none;padding:0;margin:0;display:grid;gap:7px}.kp-points li{font-size:13px;padding:8px 11px 8px 28px;background:var(--soft);border-radius:8px;position:relative;line-height:1.75}.kp-points li::before{content:"▸";color:var(--brand);position:absolute;left:11px;top:8px}
 .kp-viz{background:var(--amber-soft);border-radius:11px;padding:13px 15px;font-size:13px;color:#7c5410;line-height:1.6}.kp-viz .vh{font-family:ui-monospace,monospace;font-size:11px;color:var(--amber);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
 .kp-example{background:#fbfbfe;border:1px dashed var(--line);border-radius:10px;padding:12px 14px;font-size:13px;color:#3a3f55;line-height:1.7}.kp-loading{text-align:center;color:var(--brand);font-family:ui-monospace,monospace;font-size:13px;padding:40px}.kp-empty{text-align:center;color:var(--faint);font-size:14px;padding:40px;line-height:1.8}.kp-src{font-size:11px;color:var(--faint);margin-top:4px}
 `;
@@ -76,7 +77,7 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
   return (
     <div className="kp">
       {tabs.length > 0 && (
-        <>
+        <div className="kp-tabsbar">
           <p className="kp-ey" style={{ marginBottom: 8 }}>{hasReview ? "订正点评 · 知识点 · 点击切换" : "这道题考的知识点 · 点击查看"}</p>
           <div className="kp-tabs">
             {tabs.map((t) => (
@@ -89,7 +90,7 @@ export default function KnowledgePanel({ item, existingNotes = {} }) {
               </span>
             ))}
           </div>
-        </>
+        </div>
       )}
 
       {active === REVIEW_KEY ? (
