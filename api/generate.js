@@ -793,10 +793,10 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
   // ── Timeout budget ─────────────────────────────────────────────────────────
   // Vercel Hobby = 10s 硬超时，超过会返回 HTML 错误页（前端解析失败就全归到 5xx）。
   // 这里每个 provider 最多 8s；整个 handler 用 startedAt 追剩余预算，绝不超出。
-  const HANDLER_BUDGET_MS = 57000; // Pro plan 60s 硬上限，留 3s 余量
-  // 满页手写 OCR 给 ~55s。文本类也别太抠：题目提取/批改/解题虽走 chat 管线，
-  // 却是"整份卷子转 JSON"的重活，8s 经常不够（题目识别时好时坏就是卡在这），给到 20s。
-  const PER_PROVIDER_MS = hasVisionMessages ? 55000 : 20000;
+  const HANDLER_BUDGET_MS = 58500; // 60s 硬上限，留 1.5s 余量给收尾返回
+  // 满页手写 OCR 用 qwen-vl-max（更准但更慢），尽量顶满预算；图已在前端压到 2000px。
+  // 文本类（题目提取/批改/解题）是"整份卷子转 JSON"的重活，给到 20s。
+  const PER_PROVIDER_MS = hasVisionMessages ? 58000 : 20000;
   const startedAt = Date.now();
   const remainingBudget = () => Math.max(0, HANDLER_BUDGET_MS - (Date.now() - startedAt));
   const providerDiag = []; // 每个 provider 的诊断信息，失败时一并返回给前端

@@ -1,5 +1,28 @@
 import { callGenerate, parseLooseJSON, AUX_TEXT_MODEL, SOLVE_TEXT_MODEL } from "./aiClient";
 
+// 把 dataURI 等比缩到长边 <= maxPx（已更小则原样返回）。只用于"送整页 OCR 的副本"，
+// 让 qwen-vl-max 满页也能在 55~60s 预算内返回；校对展示/框选裁剪仍用原始高清图。
+function shrinkDataUri(uri, maxPx = 2000) {
+  return new Promise((res) => {
+    if (typeof document === "undefined" || !/^data:image\//.test(String(uri || ""))) { res(uri); return; }
+    const img = new Image();
+    img.onerror = () => res(uri);
+    img.onload = () => {
+      const long = Math.max(img.width, img.height);
+      if (!long || long <= maxPx) { res(uri); return; }
+      const s = maxPx / long;
+      const w = Math.round(img.width * s), h = Math.round(img.height * s);
+      const c = document.createElement("canvas");
+      c.width = w; c.height = h;
+      const ctx = c.getContext("2d");
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, 0, 0, w, h);
+      res(c.toDataURL("image/jpeg", 0.9));
+    };
+    img.src = uri;
+  });
+}
+
 // 兜底：OCR/用户偶尔把数学写成裸 LaTeX 或纯符号（没 $ 包裹），渲染就成原始文本。
 // 这里按"数学片段"分段包裹：把连续的数学 token 包进 $...$，散文 token 原样留下。
 const _MATH_WORDS = /^(sin|cos|tan|cot|sec|csc|log|ln|exp|lim|det|rank|tr|dim|var|cov|span|max|min|sup|inf|mod|gcd|lcm|diag|re|im)$/i;
@@ -95,7 +118,7 @@ async function callVision(dataURI, promptText, { json = true } = {}) {
       { type: "text", text: promptText },
       { type: "image_url", image_url: { url: dataURI } },
     ],
-  }], { json: false, materialTitle: "卷子视觉提取", visionModel: "qwen-vl-plus" }); // 整页用 qwen-vl-plus：max 满页常超 55s 预算；精修交给框选(qwen-vl-max)
+  }], { json: false, materialTitle: "卷子视觉提取", visionModel: "qwen-vl-max" }); // 整页也用 qwen-vl-max（手写更准）；配合 shrinkDataUri 压到 2000px 才进得了预算
   return json ? parseLooseJSON(content) : content;
 }
 
@@ -211,7 +234,7 @@ ${layoutHint}
 
 只输出 JSON：
 {"items":[{"number":"1","question":"题目$公式$","studentAnswer":"学生答案","answerConfidence":"high"}]}`;
-  const data = await callVision(dataURI, prompt);
+  const data = await callVision(await shrinkDataUri(dataURI), prompt);
   return (data?.items || []).map((it) => ({ ...it, studentAnswer: normalizeNewlineEscapes(it.studentAnswer), ...pickScoreFields(it) }));
 }
 
@@ -268,7 +291,7 @@ ${rosterBlock}
 
 只输出 JSON：
 {"items":[{"number":"1","studentAnswer":"$CX = Y$\\n$X^T X C = X^T Y$\\n最终 $C_0=\\frac{6}{7},\\ C_1=\\frac{15}{14}$","answerConfidence":"high","bbox":[50,80,950,320]},{"number":"2(i)","studentAnswer":"$X,Y \\sim N(0,\\sigma^2)$，所以 $\\frac{(X+Y)^2}{(X-Y)^2} \\sim F(1,1)$","answerConfidence":"low","bbox":[50,340,950,600]}]}`;
-  const data = await callVision(dataURI, prompt);
+  const data = await callVision(await shrinkDataUri(dataURI), prompt);
   // 归一化 bbox：模型可能给 0~1000（Qwen 原生）/ 0~100 / 0~1；按量级判断
   return (data?.items || []).map((it) => {
     const b = Array.isArray(it.bbox) && it.bbox.length === 4 ? it.bbox.map(Number) : null;
