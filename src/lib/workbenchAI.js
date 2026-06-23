@@ -58,11 +58,13 @@ export function autoLatex(s) {
   if (!t) return t;
   // 先把 \(...\) / \[...\] 归一化成 $...$ / $$...$$
   t = t.replace(/\\[()]/g, "$").replace(/\\[[\]]/g, () => "$$");
-  // 裸的 \begin{matrix/pmatrix/...}…\end{…}（没被 $ 包裹，常见于 OCR 直接吐 LaTeX）整体包成 $$…$$，
-  // 否则下面按行拆会把跨行矩阵拆碎、渲染成原始码（如 Q4 的 \begin{bmatrix}）。仅在全文无 $ 时处理，避免重复包裹。
-  if (!t.includes("$")) {
-    t = t.replace(/\\begin\{(pmatrix|bmatrix|vmatrix|Vmatrix|matrix|cases|array|aligned|align)\*?\}[\s\S]*?\\end\{\1\*?\}/g, (m) => `$$${m}$$`);
-  }
+  // 裸的 \begin{matrix/pmatrix/…}…\end{…}（没被 $ 包裹，常见于 OCR 直接吐 LaTeX）整体包成 $$…$$。
+  // 只处理【$...$ 之外】的，所以能和已有 $ 公式混排（如"B=A^4 …$λ$…"后面跟一段裸 \begin{bmatrix}），
+  // 避免被下面按行拆碎、渲染成原始码（Q2(ii)/Q4 的 \begin{bmatrix} 就是这种）。
+  t = t.split(/(\$\$[\s\S]*?\$\$|\$[^$]*\$)/)
+    .map((seg, i) => (i % 2 === 1 ? seg
+      : seg.replace(/\\begin\{(pmatrix|bmatrix|vmatrix|Vmatrix|matrix|cases|array|aligned|align)\*?\}[\s\S]*?\\end\{\1\*?\}/g, (m) => `$$${m}$$`)))
+    .join("");
   if (t.includes("$")) return t; // 已有 LaTeX 包裹就别动
   return t.split("\n").map((line) => {
     if (!line.trim()) return line;
