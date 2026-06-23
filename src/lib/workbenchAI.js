@@ -112,13 +112,18 @@ export async function extractRegion(dataURI) {
 }
 
 async function callVision(dataURI, promptText, { json = true } = {}) {
-  const content = await callGenerate([{
+  const call = (model) => callGenerate([{
     role: "user",
     content: [
       { type: "text", text: promptText },
       { type: "image_url", image_url: { url: dataURI } },
     ],
-  }], { json: false, materialTitle: "卷子视觉提取", visionModel: "qwen-vl-max" }); // 整页也用 qwen-vl-max（手写更准）；配合 shrinkDataUri 压到 2000px 才进得了预算
+  }], { json: false, materialTitle: "卷子视觉提取", visionModel: model });
+  // Vercel Hobby 60s 上限：整页优先 qwen-vl-max（更准，配合 shrinkDataUri 压到 2000px）；
+  // 若满页太慢超时/出错，自动用 qwen-vl-plus 重试一次（快、稳），保证至少能识别出来、不丢结果。
+  let content = "";
+  try { content = String(await call("qwen-vl-max") || "").trim(); } catch { content = ""; }
+  if (!content) { try { content = String(await call("qwen-vl-plus") || "").trim(); } catch { content = ""; } }
   return json ? parseLooseJSON(content) : content;
 }
 
