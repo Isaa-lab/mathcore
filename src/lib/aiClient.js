@@ -73,9 +73,10 @@ async function postGenerate(question, { materialTitle = "题库 AI", conversatio
   return extractText(data).trim();
 }
 
-// 辅助类文本功能（辅导/讲解/变式/出题/对齐/转写/总结）统一用的轻量 Qwen 文本模型。
-// 改这一个常量即可全局切换；后端 /^qwen[\w.-]*$/ 校验后透传给 DashScope。
-export const AUX_TEXT_MODEL = "qwen2.0";
+// 辅助类文本功能（辅导/讲解/变式/出题/对齐/转写/总结）统一用的 Qwen 文本模型。
+// 改这一个常量即可全局切换；后端 /^qwen[\w.-]*$/ 校验后透传给 DashScope（须是百炼里真实可用的 ID）。
+// 选 qwen3.7-plus：通用强、覆盖数学生成 + JSON 提取 + 中文总结这批混合任务。
+export const AUX_TEXT_MODEL = "qwen3.7-plus";
 
 export async function callGenerate(input, { json = false, materialTitle = "题库 AI", signal, visionModel, textProvider, textModel } = {}) {
   if (Array.isArray(input)) {
