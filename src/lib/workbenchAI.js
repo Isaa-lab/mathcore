@@ -58,6 +58,11 @@ export function autoLatex(s) {
   if (!t) return t;
   // 先把 \(...\) / \[...\] 归一化成 $...$ / $$...$$
   t = t.replace(/\\[()]/g, "$").replace(/\\[[\]]/g, () => "$$");
+  // 裸的 \begin{matrix/pmatrix/...}…\end{…}（没被 $ 包裹，常见于 OCR 直接吐 LaTeX）整体包成 $$…$$，
+  // 否则下面按行拆会把跨行矩阵拆碎、渲染成原始码（如 Q4 的 \begin{bmatrix}）。仅在全文无 $ 时处理，避免重复包裹。
+  if (!t.includes("$")) {
+    t = t.replace(/\\begin\{(pmatrix|bmatrix|vmatrix|Vmatrix|matrix|cases|array|aligned|align)\*?\}[\s\S]*?\\end\{\1\*?\}/g, (m) => `$$${m}$$`);
+  }
   if (t.includes("$")) return t; // 已有 LaTeX 包裹就别动
   return t.split("\n").map((line) => {
     if (!line.trim()) return line;
@@ -359,8 +364,8 @@ export async function alignAnswersToQuestions(questions, answers) {
   const qList = questions.map((q, i) => `Q${i}「${q.number || "?"}」: ${clip(q.question)}`).join("\n");
   const aList = answers.map((a, i) => `A${i}「${a.number || "?"}」: ${clip(a.studentAnswer)}`).join("\n");
   const prompt = `你是阅卷助手。下面是一份卷子的"官方题目"和学生的"手写答案段"。
-学生的编号常和官方编号对不上（如学生写 ②③，官方是 Q2(ii)/Q3(i)）。
-请**按数学内容判断**每段答案到底在解哪道题（例如：答案在用对角化算 A^7，就对应"求 X、Λ 并计算 A^7"那道题；答案在证明 A^T 可对角化，就对应那道证明题），**不要只看编号**。
+学生的编号常和官方编号对不上、还常分散在多页，且**一道题的答案可能被切成了好几段**（如学生把 Q2(i) 写成 ①②③ 三段、或同一题跨页续写）。
+请**只按数学内容判断**每段答案在解哪道官方题（例：用对角化算 A^7 → "求 X、Λ 并计算 A^7"那题；证明 A^T 可对角化 → 那道证明题；求某个具体矩阵的特征值/特征空间 → 对应那题，它的 B=A^k、C=… 子部分都算同一题），**绝对不要只看编号**。
 
 【官方题目】
 ${qList}
@@ -368,25 +373,30 @@ ${qList}
 【学生答案段】
 ${aList}
 
-只输出一个 JSON 数组，元素是 [题目下标, 答案下标]（即上面 Q/A 后面的整数）：
-- 一段答案最多配一道题，一道题最多配一段答案；
-- 配不上的就不出现；
-- 数组里**只能有整数**，禁止任何公式、文字、反斜杠。
-示例：[[0,0],[1,3],[2,1]]`;
+输出规则：
+- 只输出一个 JSON 数组，元素是 [题目下标, 答案下标]（上面 Q/A 后的整数）。
+- **一道题可以配多段答案**（该题被拆成多段时，把这些段都配给它，按答案先后顺序）；但**每段答案最多只配一道题**。
+- 配不上任何题的答案段就不出现。
+- 数组里**只能有整数**，禁止公式/文字/反斜杠。
+示例（Q0 由 A0,A1 两段组成，Q1 配 A3）：[[0,0],[0,1],[1,3]]`;
 
-  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "答案语义对齐", textModel: AUX_TEXT_MODEL });
+  // 对齐是"判断哪段解哪题"的推理活，交给 DeepSeek（更强）；不通回退默认文本模型。
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "答案语义对齐", textProvider: "deepseek" });
   const parsed = parseLooseJSON(raw);
   if (!Array.isArray(parsed)) return null;
-  const map = {};
+  const map = {};        // 题目下标 → [答案下标,…]
   const usedA = new Set();
   for (const pair of parsed) {
     if (!Array.isArray(pair) || pair.length < 2) continue;
     const qi = Number(pair[0]); const ai = Number(pair[1]);
     if (!Number.isInteger(qi) || !Number.isInteger(ai)) continue;
     if (qi < 0 || qi >= questions.length || ai < 0 || ai >= answers.length) continue;
-    if (qi in map || usedA.has(ai)) continue; // 保持一对一
-    map[qi] = ai; usedA.add(ai);
+    if (usedA.has(ai)) continue;          // 一段答案只用一次
+    (map[qi] || (map[qi] = [])).push(ai); // 一道题可收多段
+    usedA.add(ai);
   }
+  // 每题内部按答案出现顺序排，保证 ①②③ 拼接顺序正确
+  for (const k of Object.keys(map)) map[k].sort((a, b) => a - b);
   return Object.keys(map).length ? map : null;
 }
 

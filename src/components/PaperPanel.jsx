@@ -293,19 +293,25 @@ function mergeQuestionsAnswers(questions, answers, alignMap = null) {
     if (key && key !== "?" && !(key in ansMap)) ansMap[key] = a;
   }
   return questions.map((q, qi) => {
-    let ans = null;
-    if (alignMap && Number.isInteger(alignMap[qi]) && answers[alignMap[qi]]) {
-      ans = answers[alignMap[qi]];                 // 语义对齐优先
+    // 语义对齐优先：alignMap[qi] 是该题的答案段下标数组（一题可由多段拼成，如 ①②③）
+    let segs = [];
+    if (alignMap && Array.isArray(alignMap[qi]) && alignMap[qi].length) {
+      segs = alignMap[qi].map((ai) => answers[ai]).filter(Boolean);
     } else {
-      ans = ansMap[canonicalNumber(q.number)] || null; // 退回题号匹配
+      const m = ansMap[canonicalNumber(q.number)]; // 退回题号匹配
+      if (m) segs = [m];
     }
+    const first = segs[0] || null;
+    const studentAnswer = segs.length
+      ? segs.map((s) => s.studentAnswer || "").filter(Boolean).join("\n")
+      : (q.studentAnswer || "");
     return {
       number: q.number,
       question: q.question,
-      studentAnswer: ans ? (ans.studentAnswer || "") : (q.studentAnswer || ""),
-      answerConfidence: ans ? (ans.answerConfidence || "high") : (q.answerConfidence || "low"),
-      bbox: ans ? (ans.bbox || null) : null,
-      _img: ans ? (ans._img ?? -1) : -1,
+      studentAnswer,
+      answerConfidence: first ? (first.answerConfidence || "high") : (q.answerConfidence || "low"),
+      bbox: first ? (first.bbox || null) : null,
+      _img: first ? (first._img ?? -1) : -1,
     };
   });
 }
