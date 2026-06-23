@@ -81,11 +81,10 @@ export async function extractRegion(dataURI) {
       { type: "image_url", image_url: { url: dataURI } },
     ],
   }], { json: false, materialTitle: "区域识别", visionModel: model });
-  // 局部小图只一张、不怕慢，优先用新一代 qwen3-vl-plus（手写/矩阵更准）；
-  // 端点不支持或报错就回退到 qwen-vl-max。
+  // 笔记检测统一用 qwen-vl-max；若不通再退到 qwen3-vl-plus 兜底。
   let raw = "";
-  try { raw = String(await call("qwen3-vl-plus") || "").trim(); } catch { raw = ""; }
-  if (!raw) { try { raw = String(await call("qwen-vl-max") || "").trim(); } catch { raw = ""; } }
+  try { raw = String(await call("qwen-vl-max") || "").trim(); } catch { raw = ""; }
+  if (!raw) { try { raw = String(await call("qwen3-vl-plus") || "").trim(); } catch { raw = ""; } }
   return normalizeNewlineEscapes(raw);
 }
 
@@ -96,7 +95,7 @@ async function callVision(dataURI, promptText, { json = true } = {}) {
       { type: "text", text: promptText },
       { type: "image_url", image_url: { url: dataURI } },
     ],
-  }], { json: false, materialTitle: "卷子视觉提取" });
+  }], { json: false, materialTitle: "卷子视觉提取", visionModel: "qwen-vl-max" }); // 笔记检测统一用 qwen-vl-max（手写更准）
   return json ? parseLooseJSON(content) : content;
 }
 
@@ -392,7 +391,8 @@ export async function gradeItem({ question, studentAnswer }) {
 - errorType+errorDetail 仅 wrong 时给（errorType 取 "概念"/"计算"/"方法"），errorDetail 说清错在哪一步、最终结果应是什么；
 - knowledgePoints 必填 1~3 个中文知识点，不能空；chapter 形如 Ch.1~Ch.7。`;
 
-  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "错题批改" });
+  // 批改判断优先走 DeepSeek（数学推理更强，避免 qwen-plus 自相矛盾乱判）；deepseek 不通时后端自动回退 qwen。
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "错题批改", textProvider: "deepseek" });
   if (!raw) return null;
   const metaMatches = [...raw.matchAll(/\{[^{}]*"verdict"[^{}]*\}/g)];
   const metaMatch = metaMatches.length ? metaMatches[metaMatches.length - 1] : null;
@@ -428,7 +428,7 @@ export async function verifyGrade({ question, studentAnswer }) {
 
 只输出一行 JSON（禁止公式/反斜杠）：{"ok": true, "reason": ""}
 ok=true 表示没硬伤（保持判对）；ok=false 表示确有硬伤，reason 用一句纯中文说明（如"只算到第二步就没了，缺最终结果"）。`;
-  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "判分复核" });
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "判分复核", textProvider: "deepseek" });
   const m = [...String(raw || "").matchAll(/\{[^{}]*"ok"[^{}]*\}/g)];
   const meta = m.length ? (parseLooseJSON(m[m.length - 1].toString ? m[m.length - 1][0] : m[m.length - 1][0]) || {}) : {};
   if (meta.ok === false || meta.ok === "false") return { ok: false, reason: meta.reason || "复核发现答案未完成或最终结果不正确" };

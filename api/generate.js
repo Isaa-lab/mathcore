@@ -102,6 +102,7 @@ async function runHandler(req, res) {
     dialogueMode,    // "socratic" | "exposition" —— 前端根据答题状态 + 用户意图推导
     // dialogueModeReason, quizState —— 仅日志用，不参与 prompt 构造
     qwenVisionModel, // 可选：本次视觉请求覆盖默认 Qwen 视觉模型（如框选精修用 qwen-vl-max）
+    preferTextProvider, // 可选：本次纯文本请求优先用的 provider（如批改判断强制走 deepseek 推理更强）
     userProvider, userKey, userCustomUrl,
   } = body;
 
@@ -1004,6 +1005,15 @@ Q6 是否同时给出了中文主版本 + 英文辅版本？
     if (!responseText && GROQ_KEY) {
       responseText = await callOpenAICompat("https://api.groq.com/openai/v1", GROQ_KEY, GROQ_VISION_MODEL, `groq(server):llama-4-scout`) || "";
     }
+  }
+
+  // ── Priority 0.4（仅文本）：调用方显式指定的文本 provider 优先 ──────────────
+  // 例如"批改判断"希望用 DeepSeek（数学推理更强、不像 qwen-plus 那样自相矛盾乱判）。
+  // 该 provider 有平台 Key 才用；失败/返回空则继续往下走 qwen 兜底，不阻断主流程。
+  const _ptp = String(preferTextProvider || "").trim().toLowerCase();
+  if (!hasVisionMessages && !responseText && _ptp && _ptp !== "server" && SERVER_KEY_FOR[_ptp]) {
+    providerDiag.push(`prefer text provider: ${_ptp}`);
+    responseText = await callProviderWithKey(_ptp, SERVER_KEY_FOR[_ptp], "server");
   }
 
   // ── Priority 0.5（仅文本）：Qwen 文本若配置则优先 ───────────────────────────

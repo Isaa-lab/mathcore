@@ -45,7 +45,7 @@ export function parseLooseJSON(raw) {
   return null;
 }
 
-async function postGenerate(question, { materialTitle = "题库 AI", conversationHistory = [], signal } = {}) {
+async function postGenerate(question, { materialTitle = "题库 AI", conversationHistory = [], signal, textProvider } = {}) {
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -55,6 +55,7 @@ async function postGenerate(question, { materialTitle = "题库 AI", conversatio
       conversationHistory,
       materialTitle,
       stream: false,
+      ...(textProvider ? { preferTextProvider: textProvider } : {}),
       ...getUserAIConfig(),
     }),
     signal,
@@ -71,7 +72,7 @@ async function postGenerate(question, { materialTitle = "题库 AI", conversatio
   return extractText(data).trim();
 }
 
-export async function callGenerate(input, { json = false, materialTitle = "题库 AI", signal, visionModel } = {}) {
+export async function callGenerate(input, { json = false, materialTitle = "题库 AI", signal, visionModel, textProvider } = {}) {
   if (Array.isArray(input)) {
     const hasVision = input.some((m) => Array.isArray(m?.content) && m.content.some((p) => p?.type === "image_url"));
     // 视觉请求：用户自己配了 volcengine key 则直接用，否则让后端 fallback 链决定（Gemini → 豆包 → Kimi）
@@ -93,6 +94,7 @@ export async function callGenerate(input, { json = false, materialTitle = "题�
         messages: input,
         stream: false,
         ...(hasVision && visionModel ? { qwenVisionModel: visionModel } : {}),
+        ...(!hasVision && textProvider ? { preferTextProvider: textProvider } : {}),
         ...(hasVision ? visionConfig() : getUserAIConfig()),
       }),
       signal,
@@ -106,7 +108,7 @@ export async function callGenerate(input, { json = false, materialTitle = "题�
     const content = extractText(data).trim();
     return json ? parseLooseJSON(content) : content;
   }
-  const content = await postGenerate(String(input || ""), { materialTitle, signal });
+  const content = await postGenerate(String(input || ""), { materialTitle, signal, textProvider });
   return json ? parseLooseJSON(content) : content;
 }
 
