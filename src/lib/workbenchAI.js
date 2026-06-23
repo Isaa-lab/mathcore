@@ -1,4 +1,4 @@
-import { callGenerate, parseLooseJSON, AUX_TEXT_MODEL } from "./aiClient";
+import { callGenerate, parseLooseJSON, AUX_TEXT_MODEL, SOLVE_TEXT_MODEL } from "./aiClient";
 
 // 兜底：OCR/用户偶尔把数学写成裸 LaTeX 或纯符号（没 $ 包裹），渲染就成原始文本。
 // 这里按"数学片段"分段包裹：把连续的数学 token 包进 $...$，散文 token 原样留下。
@@ -171,7 +171,7 @@ export async function solveQuestion(number, question) {
 - 每步都写清楚，推导不跳步
 - 章节：Ch.1 行列式 / Ch.2 矩阵 / Ch.3 线性方程组 / Ch.4 向量空间 / Ch.5 特征值 / Ch.6 内积空间 / Ch.7 二次型`;
 
-  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "AI 解题" });
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "AI 解题", textModel: SOLVE_TEXT_MODEL });
   if (!raw) return null;
 
   // 取"最后一个"含 knowledgePoints 的小 JSON（不强求在结尾——模型常多带一句话/换行）

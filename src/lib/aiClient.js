@@ -78,6 +78,9 @@ async function postGenerate(question, { materialTitle = "题库 AI", conversatio
 // 选 qwen3.7-plus：通用强、覆盖数学生成 + JSON 提取 + 中文总结这批混合任务。
 export const AUX_TEXT_MODEL = "qwen3.7-plus";
 
+// AI 解题专用：数学专精模型，纯解题更准。
+export const SOLVE_TEXT_MODEL = "qwen-math-turbo";
+
 export async function callGenerate(input, { json = false, materialTitle = "题库 AI", signal, visionModel, textProvider, textModel } = {}) {
   if (Array.isArray(input)) {
     const hasVision = input.some((m) => Array.isArray(m?.content) && m.content.some((p) => p?.type === "image_url"));
@@ -172,6 +175,6 @@ ${questionText}
 JSON 格式：
 {"chapter":"Ch.?","type":"计算","difficulty":"基础","answer":"完整分步解析，每步都写清楚，公式用$包裹","theorems":["定理1"],"explanation":"一句话总结"}`;
 
-  const raw = await postGenerate(prompt, { materialTitle: "上传题目求解" });
+  const raw = await postGenerate(prompt, { materialTitle: "上传题目求解", textModel: SOLVE_TEXT_MODEL });
   return parseLooseJSON(raw);
 }
