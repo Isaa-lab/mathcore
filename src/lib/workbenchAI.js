@@ -95,7 +95,7 @@ async function callVision(dataURI, promptText, { json = true } = {}) {
       { type: "text", text: promptText },
       { type: "image_url", image_url: { url: dataURI } },
     ],
-  }], { json: false, materialTitle: "卷子视觉提取", visionModel: "qwen-vl-max" }); // 笔记检测统一用 qwen-vl-max（手写更准）
+  }], { json: false, materialTitle: "卷子视觉提取", visionModel: "qwen-vl-plus" }); // 整页用 qwen-vl-plus：max 满页常超 55s 预算；精修交给框选(qwen-vl-max)
   return json ? parseLooseJSON(content) : content;
 }
 
