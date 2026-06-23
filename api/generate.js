@@ -102,6 +102,7 @@ async function runHandler(req, res) {
     dialogueMode,    // "socratic" | "exposition" —— 前端根据答题状态 + 用户意图推导
     // dialogueModeReason, quizState —— 仅日志用，不参与 prompt 构造
     qwenVisionModel, // 可选：本次视觉请求覆盖默认 Qwen 视觉模型（如框选精修用 qwen-vl-max）
+    qwenTextModel,   // 可选：本次纯文本请求覆盖默认 Qwen 文本模型（如辅导/讲解/出题用 qwen2.0）
     preferTextProvider, // 可选：本次纯文本请求优先用的 provider（如批改判断强制走 deepseek 推理更强）
     userProvider, userKey, userCustomUrl,
   } = body;
@@ -140,7 +141,9 @@ async function runHandler(req, res) {
   // 默认 qwen-vl-plus；前端可按请求覆盖（如框选精修传 qwen-vl-max 求最高精度）。
   const _qvmReq = String(qwenVisionModel || "").trim();
   const QWEN_VISION_MODEL = (/^qwen[\w.-]*$/i.test(_qvmReq) ? _qvmReq : null) || process.env.QWEN_VISION_MODEL || "qwen-vl-plus";
-  const QWEN_TEXT_MODEL   = process.env.QWEN_TEXT_MODEL   || "qwen-plus";
+  // 文本模型：前端可按请求覆盖（如辅导/讲解/出题等传 qwen2.0），否则默认 qwen-plus。
+  const _qtmReq = String(qwenTextModel || "").trim();
+  const QWEN_TEXT_MODEL   = (/^qwen[\w.-]*$/i.test(_qtmReq) ? _qtmReq : null) || process.env.QWEN_TEXT_MODEL || "qwen-plus";
 
   // 平台 Key 速查表：用户在前端选了哪个 provider、但没填自己 Key 时，用这里的 server Key 兜底
   const SERVER_KEY_FOR = {

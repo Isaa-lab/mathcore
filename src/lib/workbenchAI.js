@@ -1,4 +1,4 @@
-import { callGenerate, parseLooseJSON } from "./aiClient";
+import { callGenerate, parseLooseJSON, AUX_TEXT_MODEL } from "./aiClient";
 
 // 兜底：OCR/用户偶尔把数学写成裸 LaTeX 或纯符号（没 $ 包裹），渲染就成原始文本。
 // 这里按"数学片段"分段包裹：把连续的数学 token 包进 $...$，散文 token 原样留下。
@@ -62,7 +62,7 @@ export async function toLatex(text) {
 
 原始内容：
 ${t}`;
-  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "公式转写" });
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "公式转写", textModel: AUX_TEXT_MODEL });
   const out = String(raw || "").replace(/^```[a-z]*\s*/i, "").replace(/```$/i, "").trim();
   return out || t;
 }
@@ -122,7 +122,7 @@ ${layoutHint}
 卷子文字内容：
 ${textContent.slice(0, 8000)}`;
 
-  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "卷子文字提取" });
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "卷子文字提取", textModel: AUX_TEXT_MODEL });
   return (parseLooseJSON(raw)?.items || []).map((it) => ({ ...it, studentAnswer: normalizeNewlineEscapes(it.studentAnswer) }));
 }
 
@@ -146,7 +146,7 @@ export async function extractQuestionsFromText(textContent) {
 试卷文字内容：
 ${textContent.slice(0, 8000)}`;
 
-  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "题目提取" });
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "题目提取", textModel: AUX_TEXT_MODEL });
   return parseLooseJSON(raw)?.items || [];
 }
 
@@ -318,7 +318,7 @@ export async function extractAnswersFromText(text, questionNumbers = []) {
 
 文字内容：
 ${text.slice(0, 6000)}`;
-  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "答案提取" });
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "答案提取", textModel: AUX_TEXT_MODEL });
   return (parseLooseJSON(raw)?.items || []).map((it) => ({ ...it, studentAnswer: normalizeNewlineEscapes(it.studentAnswer) }));
 }
 
@@ -346,7 +346,7 @@ ${aList}
 - 数组里**只能有整数**，禁止任何公式、文字、反斜杠。
 示例：[[0,0],[1,3],[2,1]]`;
 
-  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "答案语义对齐" });
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "答案语义对齐", textModel: AUX_TEXT_MODEL });
   const parsed = parseLooseJSON(raw);
   if (!Array.isArray(parsed)) return null;
   const map = {};
@@ -443,7 +443,7 @@ export async function summarizeWeakness(wrongItems) {
 ${brief}
 
 用 2-3 句话总结这个学生的薄弱点和复习建议，口语化、鼓励性，不要列清单。直接输出文字，不要 JSON。`;
-  return await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "薄弱点总结" });
+  return await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "薄弱点总结", textModel: AUX_TEXT_MODEL });
 }
 
 export async function tutorReply({ item, history, userMessage }) {
@@ -462,7 +462,7 @@ export async function tutorReply({ item, history, userMessage }) {
   const messages = [{ role: "user", content: sys }];
   for (const h of history || []) messages.push(h);
   if (userMessage) messages.push({ role: "user", content: userMessage });
-  return await callGenerate(messages, { json: false, materialTitle: "错题辅导" });
+  return await callGenerate(messages, { json: false, materialTitle: "错题辅导", textModel: AUX_TEXT_MODEL });
 }
 
 // 知识点讲解缓存（localStorage）：同一个知识点不必每次点开都重调 AI，省时省钱。
@@ -505,7 +505,7 @@ ${existingNote ? `\n已有教材资料，优先参考：\n${existingNote}\n` : "
 @@例子@@
 （一个简单具体的例子）`;
 
-  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "知识点详解" });
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "知识点详解", textModel: AUX_TEXT_MODEL });
   if (!raw) return null;
   // 按 @@标记@@ 切段
   const pick = (tag) => {
@@ -545,7 +545,7 @@ export async function generateVariant(item) {
 （最终答案）
 @@解析@@
 （简要解题过程，含 $公式$）`;
-  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "变式练习" });
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "变式练习", textModel: AUX_TEXT_MODEL });
   if (!raw) return null;
   const pick = (tag) => {
     const m = raw.match(new RegExp(`@@${tag}@@\\s*([\\s\\S]*?)(?=@@[^@]+@@|$)`, "i"));

@@ -45,7 +45,7 @@ export function parseLooseJSON(raw) {
   return null;
 }
 
-async function postGenerate(question, { materialTitle = "题库 AI", conversationHistory = [], signal, textProvider } = {}) {
+async function postGenerate(question, { materialTitle = "题库 AI", conversationHistory = [], signal, textProvider, textModel } = {}) {
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -56,6 +56,7 @@ async function postGenerate(question, { materialTitle = "题库 AI", conversatio
       materialTitle,
       stream: false,
       ...(textProvider ? { preferTextProvider: textProvider } : {}),
+      ...(textModel ? { qwenTextModel: textModel } : {}),
       ...getUserAIConfig(),
     }),
     signal,
@@ -72,7 +73,11 @@ async function postGenerate(question, { materialTitle = "题库 AI", conversatio
   return extractText(data).trim();
 }
 
-export async function callGenerate(input, { json = false, materialTitle = "题库 AI", signal, visionModel, textProvider } = {}) {
+// 辅助类文本功能（辅导/讲解/变式/出题/对齐/转写/总结）统一用的轻量 Qwen 文本模型。
+// 改这一个常量即可全局切换；后端 /^qwen[\w.-]*$/ 校验后透传给 DashScope。
+export const AUX_TEXT_MODEL = "qwen2.0";
+
+export async function callGenerate(input, { json = false, materialTitle = "题库 AI", signal, visionModel, textProvider, textModel } = {}) {
   if (Array.isArray(input)) {
     const hasVision = input.some((m) => Array.isArray(m?.content) && m.content.some((p) => p?.type === "image_url"));
     // 视觉请求：用户自己配了 volcengine key 则直接用，否则让后端 fallback 链决定（Gemini → 豆包 → Kimi）
@@ -95,6 +100,7 @@ export async function callGenerate(input, { json = false, materialTitle = "题�
         stream: false,
         ...(hasVision && visionModel ? { qwenVisionModel: visionModel } : {}),
         ...(!hasVision && textProvider ? { preferTextProvider: textProvider } : {}),
+        ...(!hasVision && textModel ? { qwenTextModel: textModel } : {}),
         ...(hasVision ? visionConfig() : getUserAIConfig()),
       }),
       signal,
@@ -108,7 +114,7 @@ export async function callGenerate(input, { json = false, materialTitle = "题�
     const content = extractText(data).trim();
     return json ? parseLooseJSON(content) : content;
   }
-  const content = await postGenerate(String(input || ""), { materialTitle, signal, textProvider });
+  const content = await postGenerate(String(input || ""), { materialTitle, signal, textProvider, textModel });
   return json ? parseLooseJSON(content) : content;
 }
 
@@ -130,7 +136,7 @@ export async function generateQuestions({ chapter, chapterTitle, types, difficul
 JSON 格式：
 {"questions":[{"question":"题干含$公式$","type":"计算","difficulty":"${difficulty}","options":[],"answer":"参考答案","explanation":"解析"}]}`;
 
-  const raw = await postGenerate(prompt, { materialTitle: "AI 出题" });
+  const raw = await postGenerate(prompt, { materialTitle: "AI 出题", textModel: AUX_TEXT_MODEL });
   const data = parseLooseJSON(raw);
   let arr = (Array.isArray(data) ? data : data?.questions || []).filter((q) => q?.question);
 
@@ -138,7 +144,7 @@ JSON 格式：
     const need = count - arr.length;
     const supplementRaw = await postGenerate(
       `${prompt}\n\n刚才只生成了 ${arr.length} 道，请再补 ${need} 道不同题目。只输出 JSON，questions 数组长度必须正好是 ${need}。`,
-      { materialTitle: "AI 出题补题" }
+      { materialTitle: "AI 出题补题", textModel: AUX_TEXT_MODEL }
     );
     const supplement = parseLooseJSON(supplementRaw);
     const more = (Array.isArray(supplement) ? supplement : supplement?.questions || []).filter((q) => q?.question);
