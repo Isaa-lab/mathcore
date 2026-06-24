@@ -63,12 +63,16 @@ export function autoLatex(s) {
   if (!t) return t;
   // 先把 \(...\) / \[...\] 归一化成 $...$ / $$...$$
   t = t.replace(/\\[()]/g, "$").replace(/\\[[\]]/g, () => "$$");
-  // 裸的 \begin{matrix/pmatrix/…}…\end{…}（没被 $ 包裹，常见于 OCR 直接吐 LaTeX）整体包成 $$…$$。
-  // 只处理【$...$ 之外】的，所以能和已有 $ 公式混排（如"B=A^4 …$λ$…"后面跟一段裸 \begin{bmatrix}），
-  // 避免被下面按行拆碎、渲染成原始码（Q2(ii)/Q4 的 \begin{bmatrix} 就是这种）。
+  // 在【$...$ 之外】的散文区做两件事：
+  // (a) 清掉 OCR 给英文散文乱加的 LaTeX 间距转义（\ 空格、\, \; \: \! \quad \qquad）→ 普通空格；
+  //     这类是"because\ A \in...\ is..."里把空格写成 \ 造成的，KaTeX 渲染不出。
+  // (b) 把裸的 \begin{matrix/…}…\end{…} 整体包成 $$…$$（可与已有 $ 公式混排），避免被按行拆碎成原始码。
   t = t.split(/(\$\$[\s\S]*?\$\$|\$[^$]*\$)/)
     .map((seg, i) => (i % 2 === 1 ? seg
-      : seg.replace(/\\begin\{(pmatrix|bmatrix|vmatrix|Vmatrix|matrix|cases|array|aligned|align)\*?\}[\s\S]*?\\end\{\1\*?\}/g, (m) => `$$${m}$$`)))
+      : seg
+        .replace(/\\[ ,;:!]/g, " ")
+        .replace(/\\(?:qquad|quad)\b/g, " ")
+        .replace(/\\begin\{(pmatrix|bmatrix|vmatrix|Vmatrix|matrix|cases|array|aligned|align)\*?\}[\s\S]*?\\end\{\1\*?\}/g, (m) => `$$${m}$$`)))
     .join("");
   if (t.includes("$")) return t; // 已有 LaTeX 包裹就别动
   return t.split("\n").map((line) => {
@@ -106,6 +110,7 @@ ${t}`;
 export async function extractRegion(dataURI) {
   const prompt = `这是一张手写数学的**局部截图**（只是某道题答案的一部分）。请把图中所有手写内容逐行转写出来：
 - 数学一律用 $...$ LaTeX 包裹（分数 \\frac、上下标 ^{}/_{}、希腊字母、矩阵 \\begin{pmatrix}...\\end{pmatrix} 等），普通中英文说明保留、不包；
+- 【散文纯文本，禁止 LaTeX 化】整句英文说明原样写成普通文字（写 "is diagonalizable"，不要写成 "is\\diagonalizable"，也不要把空格写成反斜杠加空格）；只有真数学符号进 $...$；
 - 【矩阵/向量要逐行逐列数清楚】先数清这个矩阵有几行几列，再逐个元素抄写，**行数列数必须和图里完全一致**——常见错误是把 4 行的列向量/矩阵少抄成 3 行、或把两个相邻元素合并。矩阵每一行用 \\\\ 分隔、同行元素用 & 分隔，务必核对行数。
 - 多行用 \\n 分隔，保持从上到下的顺序；字迹潦草也尽力辨认。
 只输出转写后的纯文本，不要 JSON、不要解释、不要代码块。`;
@@ -246,7 +251,7 @@ ${layoutHint}
    - 尽力识别，字迹潦草也要尝试，不要因为模糊就留空
    - 学生未作答才填空字符串 ""
    - 【全部写完，不要中途截断】把该题学生写的全部过程都识别进来；若一道题内部分成 ①②③ / (a)(b)(c) / 多个小证明，必须把每个小部分都识别全，一直到该题最后一行——只写开头一两步就停是常见错误，禁止
-   - 数学公式用 $...$ LaTeX
+   - 数学公式用 $...$ LaTeX；**英文/中文说明句子写成纯文本，禁止在英文单词前加反斜杠、禁止把空格写成反斜杠加空格**（写 "is diagonalizable"，不要 "is\\diagonalizable"），只有真数学符号进 $...$
 4. 识别置信度 answerConfidence：清晰可读 → "high"，潦草但辨认出内容 → "low"，完全未作答 → "low"
 5. 【满分与老师红笔批改 — 没有就省略；只认红色笔迹】maxScore：题目印着分值时填数字。teacherMark：红笔对该题的整体判定——大红叉/划掉="wrong"，打勾="correct"，只圈出部分="partial"。teacherScorePct：仅当红笔写了数字得分/扣分时填（0~100）。teacherComment：红笔文字批注。没有红笔则全省略。
 
@@ -291,6 +296,7 @@ ${rosterBlock}
    - 【反例（禁止这样输出纯文本）】❌ "(X+Y)^2 / (X-Y)^2 ~ F(1,1)"
      【正例】✅ "$\\frac{(X+Y)^2}{(X-Y)^2} \\sim F(1,1)$"
    - 普通中文/英文说明文字不用包 $；只把数学符号/表达式包进 $...$。
+   - 【散文必须是纯文本，禁止 LaTeX 化】整句英文说明（如 "because A is diagonalizable"、"Since D is a diagonal matrix"、"So there exist an invertible matrix"）**原样写成普通文字**：绝不要在英文单词前加反斜杠、也不要把空格写成反斜杠加空格（写 "is diagonalizable"，不要写 "is\\diagonalizable" 或 "So\\there"）。只有真正的数学符号才进 $...$，例如 "because $A\\in\\mathbb{R}^{n\\times n}$ is diagonalizable."。
    - 字迹潦草也要尽力辨认，猜出大意也比空白好；完全没作答才填 ""。
 4. 【绝对禁止】不要凭手写过程反推、编造或补全"题目"——你的任务只有识别学生写了什么，question 字段一律不要输出。
 5. 置信度 answerConfidence：清晰易读 → "high"；潦草但能辨认 → "low"；空白 → "low"。
