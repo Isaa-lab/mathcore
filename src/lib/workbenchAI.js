@@ -133,6 +133,7 @@ export async function extractRegion(dataURI) {
   const pro = await callMathOCR(dataURI);
   if (pro) return pro;
   const prompt = `这是一张手写数学的**局部截图**（只是某道题答案的一部分）。请把图中所有手写内容逐行转写出来：
+- 【按学科用规范符号】概率统计用 $\\sigma^2$、$\\bar{x}$、$\\hat{\\theta}$、$\\chi^2$、$N(\\mu,\\sigma^2)$、$F(m,n)$、$t$、$E[\\cdot]$、$\\mathrm{Var}$、$\\sim$、MLE 等；线代用矩阵/特征值符号；微积分用积分/导数符号；
 - 数学一律用 $...$ LaTeX 包裹（分数 \\frac、上下标 ^{}/_{}、希腊字母、矩阵 \\begin{pmatrix}...\\end{pmatrix} 等），普通中英文说明保留、不包；
 - 【散文纯文本，禁止 LaTeX 化】整句英文说明原样写成普通文字（写 "is diagonalizable"，不要写成 "is\\diagonalizable"，也不要把空格写成反斜杠加空格）；只有真数学符号进 $...$；
 - 【矩阵/向量要逐行逐列数清楚】先数清这个矩阵有几行几列，再逐个元素抄写，**行数列数必须和图里完全一致**——常见错误是把 4 行的列向量/矩阵少抄成 3 行、或把两个相邻元素合并。矩阵每一行用 \\\\ 分隔、同行元素用 & 分隔，务必核对行数。
@@ -301,6 +302,8 @@ export async function extractAnswersFromImage(dataURI, questionNumbers = []) {
     : "";
 
   const prompt = `你是专业的数学卷子 OCR 助手。这张图片是学生的**手写答案页**——整页可能包含多道题的解答，但**没有印刷题目**。
+
+【先判断学科，按该学科规范符号转写】若是概率统计：用 $\\sigma^2$、$\\bar{x}$、$\\hat{\\theta}$、$\\chi^2$、$N(\\mu,\\sigma^2)$、$F(m,n)$、$t$、$E[\\cdot]$、$\\mathrm{Var}$、$\\sim$、$\\sum$、$\\int$、MLE、置信区间等统计符号（别把 $\\hat\\theta$ 读成普通 θ、$\\sigma^2$ 别读成其它）；若线代用矩阵/特征值符号；若微积分用积分/导数符号。
 
 任务：把这一页按题号切分成多条，逐题识别学生写下的完整解答。
 ${rosterBlock}
