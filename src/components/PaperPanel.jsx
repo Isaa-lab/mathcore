@@ -11,6 +11,7 @@ import {
   extractAnswersFromImage,
   extractAnswersFromText,
   alignAnswersToQuestions,
+  repairOcr,
   gradeItem,
   verifyGrade,
   solveQuestion,
@@ -655,6 +656,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const imgMainRef = useRef(null);                    // 图片容器（含居中留白），框选用它的像素坐标
   const [hasRedPen, setHasRedPen] = useState(false);  // 卷面是否有老师红笔批改（默认否）——只有勾选才按红笔判分，避免无红笔时误判
   const [blockRefine, setBlockRefine] = useState(false); // 逐块精识别：默认关——实测一遍后发现 bbox 不紧会把相邻题揉一起、且 qwen-vl-ocr 吐文档级 LaTeX，反而更差；保留开关供实验
+  const [ocrRepair, setOcrRepair] = useState(true);   // OCR 校正：识别后用文本模型保守修正符号/字符误读（不改数学结论），默认开
   const [framing, setFraming] = useState(false);     // 框选识别模式（全屏取景）
   const [frameTool, setFrameTool] = useState("draw"); // 框选时工具：'draw' 画框 / 'pan' 移动图
   const [frameRect, setFrameRect] = useState(null);   // 拖框中的矩形：相对 imgmain 的像素 {x0,y0,x1,y1}
@@ -914,12 +916,18 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
           });
         }
       }
+      // OCR 校正（保守）：只修符号/字符误读，不改学生的数学结论；改善显示 + 对齐质量。
+      let ansArr = answers;
+      if (ocrRepair) {
+        report("OCR 校正中…", 79);
+        try { ansArr = await repairOcr(answers); } catch { ansArr = answers; }
+      }
       report("AI 按内容对齐题目和答案…", 80);
       // 语义对齐：按答案内容判断它解的是哪道题（解决手写编号和官方题号对不上）；失败则回退题号匹配
       let alignMap = null;
-      try { alignMap = await alignAnswersToQuestions(questions, answers); } catch { alignMap = null; }
-      const merged = mergeQuestionsAnswers(questions, answers, alignMap);
-      setReviewAnswers(answers); // 原始 OCR 答案段（带 bbox/_img），供手动指认 + 画框定位
+      try { alignMap = await alignAnswersToQuestions(questions, ansArr); } catch { alignMap = null; }
+      const merged = mergeQuestionsAnswers(questions, ansArr, alignMap);
+      setReviewAnswers(ansArr); // 校正后的答案段（带 bbox/_img），供手动指认 + 画框定位
       // 校对左侧用答案原图（带坐标），让每道题能高亮回原图区域
       setReviewImages(images);
       setReviewItems(merged.map(x => ({ number: x.number, question: x.question || "", studentAnswer: x.studentAnswer || "", answerConfidence: x.answerConfidence || "low", bbox: x.bbox || null, _img: x._img ?? -1, maxScore: x.maxScore ?? null, teacherScorePct: x.teacherScorePct ?? null, teacherComment: x.teacherComment || "", teacherMark: x.teacherMark || null })));
@@ -929,7 +937,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       report(`识别完成 ${merged.length} 道题，请校对后确认`, 100);
       setTimeout(() => setProgress(null), 600);
     } catch (err) { report("出错：" + (err.message || err)); setProgress(null); }
-  }, [userId, wb, qFiles, aFiles, report, progress, onReviewModeChange, blockRefine]);
+  }, [userId, wb, qFiles, aFiles, report, progress, onReviewModeChange, blockRefine, ocrRepair]);
 
   const confirmReview = async () => {
     try {
@@ -1320,7 +1328,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
           )}
           {qFiles.length > 0 && aFiles.length > 0 && (
             <>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--mut)", justifyContent: "center", padding: "4px 0", cursor: "pointer", userSelect: "none" }} title="实验功能：整页识别后按 bbox 逐块重识别。实测当 bbox 不紧时会把相邻题揉到一起、反而更差，故默认关闭。">
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--mut)", justifyContent: "center", padding: "2px 0", cursor: "pointer", userSelect: "none" }} title="识别后用文本模型保守修正符号/字符误读（μ被读成M、χ²读成x²、z值读乱等），不改学生的数字/结论/对错。推荐开。">
+                <input type="checkbox" checked={ocrRepair} onChange={(e) => setOcrRepair(e.target.checked)} />
+                OCR 校正（修符号误读，不改对错，推荐开）
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--mut)", justifyContent: "center", padding: "2px 0", cursor: "pointer", userSelect: "none" }} title="实验功能：整页识别后按 bbox 逐块重识别。实测当 bbox 不紧时会把相邻题揉到一起、反而更差，故默认关闭。">
                 <input type="checkbox" checked={blockRefine} onChange={(e) => setBlockRefine(e.target.checked)} />
                 逐块精识别（实验，默认关；bbox 不准时反而更差）
               </label>

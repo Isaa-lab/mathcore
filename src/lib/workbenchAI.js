@@ -436,6 +436,7 @@ export async function alignAnswersToQuestions(questions, answers) {
    - 算某具体矩阵 A 的特征值/特征空间、以及 "B=A^4""C=A^6−A+3I" 的特征值 → **都属于同一道"求 A、B=A^4、C 的特征值"题**（B、C 是该题的子部分，不要配给"对角化求 A^7"那道）；
    - "求 X、Λ 使 A=XΛX^{-1} 并算 A^7"（出现 X、Λ、X^{-1}、A^7）→ 配那道对角化题。
 3. **一道题可配多段**（被拆成多段/跨页续写时全配给它）；**每段最多配一道题**。
+4. **阅读顺序先验**：学生基本按题号顺序作答，答案段（A0,A1,A2…按其出现先后排列）的顺序≈题目顺序。**当内容不足以区分时，倾向于保持单调顺序、相邻段配相邻题，不要无故跳跃或把相邻两题互换**（这能修掉 (c)/(d) 这种相邻错位）。
 
 【官方题目】
 ${qList}
@@ -465,6 +466,45 @@ ${aList}
   // 每题内部按答案出现顺序排，保证 ①②③ 拼接顺序正确
   for (const k of Object.keys(map)) map[k].sort((a, b) => a - b);
   return Object.keys(map).length ? map : null;
+}
+
+// OCR 校正（保守）：不看图、只用文本模型把每段答案"顺一遍"，**只修字符/符号的系统性误读**
+// （μ 读成 M、χ² 读成 x²、γ↔λ、a↔9、z_{0.975} 读成 8.0975、7σ/15 读成 70/15 …），
+// **绝不改学生的数字/结论/逻辑**——这是批改系统，必须保留学生真实写的（哪怕他算错了）。
+// 一次批处理所有段（不走 JSON，用 ===A{i}=== 分隔，避免 LaTeX 反斜杠破坏 JSON）。
+export async function repairOcr(answers) {
+  const arr = Array.isArray(answers) ? answers : [];
+  if (!arr.some((a) => String(a?.studentAnswer || "").trim())) return arr;
+  const segs = arr.map((a, i) => `===A${i}===\n${String(a?.studentAnswer || "")}`).join("\n\n");
+  const prompt = `下面是 OCR 自动转写的多段手写数学答案，可能有"识别错误"（不是学生写错）。请逐段只修正明显的**转写/符号误读**，其余原样保留。
+
+【只修这类 OCR 误读】
+- 希腊字母/记号被读错：μ 读成 M、σ 读成 s/o、χ² 读成 x²、θ̂ 读成普通 θ、γ↔λ、π 读错等；
+- 字符混淆：a↔9、i↔1、l↔1、O↔0、S↔5、B↔8；
+- 明显被读乱的标准量：如 z_{0.975}/z_{0.95} 被读成 8.0975、80.95、70.975 这类怪数；7σ/15 被读成 70/15、10/5 等；
+- 多余的反斜杠/把英文散文 LaTeX 化。
+
+【绝对不要做】
+- 不要改学生写的**数字、最终答案、推导结论、对错**——**哪怕你认为学生算错了，也必须原样保留**（这是批改系统，要看到学生真实写了什么）；
+- 不确定某处是不是 OCR 误读，就**保持原样**，宁可不改；
+- 不要补全学生没写的步骤，不要重排。
+
+【输出格式】每段仍以 ===A{编号}=== 开头（原样保留这些分隔标记和编号），其后是该段修正后的内容；数学用 $...$；只输出各段，不要任何解释。
+
+${segs}`;
+  let raw = "";
+  try { raw = String(await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "OCR 校正", textProvider: "deepseek" }) || ""); }
+  catch { raw = ""; }
+  if (!raw.trim()) return arr;
+  // 按 ===A{i}=== 切回各段
+  const parts = raw.split(/===\s*A\s*(\d+)\s*===/);
+  const fixed = {};
+  for (let k = 1; k + 1 < parts.length; k += 2) {
+    const idx = Number(parts[k]);
+    const content = String(parts[k + 1] || "").trim();
+    if (Number.isInteger(idx) && content) fixed[idx] = content;
+  }
+  return arr.map((a, i) => (fixed[i] ? { ...a, studentAnswer: fixed[i] } : a));
 }
 
 export async function gradeItem({ question, studentAnswer }) {
