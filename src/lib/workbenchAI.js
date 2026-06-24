@@ -1,5 +1,10 @@
 import { callGenerate, parseLooseJSON, AUX_TEXT_MODEL, SOLVE_TEXT_MODEL } from "./aiClient";
 
+// 图片识别用的 Qwen 视觉模型，按优先级回退：最强的 qwen3-vl-235b-a22b-thinking 先上，
+// 它（在 Hobby 60s 内）跑不完/出错就退到 qwen-vl-max，再退 qwen-vl-plus，保证有结果不 500。
+// 想换模型只改这一处（必须是百炼里真实可用的视觉模型 ID）。
+const VISION_MODELS = ["qwen3-vl-235b-a22b-thinking", "qwen-vl-max", "qwen-vl-plus"];
+
 // 把 dataURI 等比缩到长边 <= maxPx（已更小则原样返回）。只用于"送整页 OCR 的副本"，
 // 让 qwen-vl-max 满页也能在 55~60s 预算内返回；校对展示/框选裁剪仍用原始高清图。
 function shrinkDataUri(uri, maxPx = 2000) {
@@ -111,10 +116,12 @@ export async function extractRegion(dataURI) {
       { type: "image_url", image_url: { url: dataURI } },
     ],
   }], { json: false, materialTitle: "区域识别", visionModel: model });
-  // 笔记检测统一用 qwen-vl-max；若不通再退到 qwen3-vl-plus 兜底。
+  // 框选是单张小图、不怕慢，优先用最强模型；按 VISION_MODELS 顺序回退。
   let raw = "";
-  try { raw = String(await call("qwen-vl-max") || "").trim(); } catch { raw = ""; }
-  if (!raw) { try { raw = String(await call("qwen3-vl-plus") || "").trim(); } catch { raw = ""; } }
+  for (const model of VISION_MODELS) {
+    try { raw = String(await call(model) || "").trim(); } catch { raw = ""; }
+    if (raw) break;
+  }
   return normalizeNewlineEscapes(raw);
 }
 
@@ -126,11 +133,12 @@ async function callVision(dataURI, promptText, { json = true } = {}) {
       { type: "image_url", image_url: { url: dataURI } },
     ],
   }], { json: false, materialTitle: "卷子视觉提取", visionModel: model });
-  // Vercel Hobby 60s 上限：整页优先 qwen-vl-max（更准，配合 shrinkDataUri 压到 2000px）；
-  // 若满页太慢超时/出错，自动用 qwen-vl-plus 重试一次（快、稳），保证至少能识别出来、不丢结果。
+  // 整页优先最强模型，超时/出错按 VISION_MODELS 顺序回退（Hobby 60s 下最强模型可能退到 max/plus）。
   let content = "";
-  try { content = String(await call("qwen-vl-max") || "").trim(); } catch { content = ""; }
-  if (!content) { try { content = String(await call("qwen-vl-plus") || "").trim(); } catch { content = ""; } }
+  for (const model of VISION_MODELS) {
+    try { content = String(await call(model) || "").trim(); } catch { content = ""; }
+    if (content) break;
+  }
   return json ? parseLooseJSON(content) : content;
 }
 
