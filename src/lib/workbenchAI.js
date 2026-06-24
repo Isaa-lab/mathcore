@@ -61,8 +61,22 @@ export function normalizeNewlineEscapes(s) {
     .join("");
 }
 
+// 清掉 OCR（尤其 qwen-vl-ocr）吐的"文档级 LaTeX"包装：markdown 代码围栏、enumerate/itemize/
+// equation 等环境——这些 KaTeX 渲染不了，会显示成原始码。把它们去壳/转成我们能渲染的形式。
+export function stripOcrWrappers(s) {
+  let t = String(s || "");
+  if (!t) return t;
+  t = t.replace(/```[a-zA-Z]*\s*/g, "").replace(/```/g, "");                 // 去 markdown 代码围栏
+  t = t.replace(/\\begin\{(?:equation|displaymath|align|gather|multline|math)\*?\}/g, "$$")
+       .replace(/\\end\{(?:equation|displaymath|align|gather|multline|math)\*?\}/g, "$$"); // 公式环境 → $$
+  t = t.replace(/\\begin\{(?:enumerate|itemize)\}/g, "").replace(/\\end\{(?:enumerate|itemize)\}/g, ""); // 列表去壳
+  t = t.replace(/\\item\s*/g, "\n");                                          // \item → 换行
+  t = t.replace(/\$\$\s*\$\$/g, "").replace(/\n{3,}/g, "\n\n");               // 清空壳/多余空行
+  return t.trim();
+}
+
 export function autoLatex(s) {
-  let t = normalizeNewlineEscapes(String(s || ""));
+  let t = normalizeNewlineEscapes(stripOcrWrappers(String(s || "")));
   if (!t) return t;
   // 先把 \(...\) / \[...\] 归一化成 $...$ / $$...$$
   t = t.replace(/\\[()]/g, "$").replace(/\\[[\]]/g, () => "$$");
@@ -153,7 +167,8 @@ export async function extractRegion(dataURI, models = REGION_VISION_MODELS) {
     try { raw = String(await call(model) || "").trim(); } catch { raw = ""; }
     if (raw) break;
   }
-  return normalizeNewlineEscapes(raw);
+  // qwen-vl-ocr 常吐 ```latex 围栏和 enumerate/equation 文档环境，先清洗再归一化
+  return normalizeNewlineEscapes(stripOcrWrappers(raw));
 }
 
 async function callVision(dataURI, promptText, { json = true } = {}) {
