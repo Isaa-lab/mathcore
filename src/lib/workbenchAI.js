@@ -47,14 +47,17 @@ function _isMathTok(tk) {
 }
 // OCR 常把"换行"写成字面量反斜杠-n：JSON 路径里模型按提示写 \\n，JSON.parse 后变成两字符 \n（不是真换行）；
 // 纯文本路径模型直接写字面量 \n。这些会漏进渲染显示成乱码（\nso、\n⇒…）。
-// 这里把【数学 $...$ 之外】的字面量 \n / \r\n 还原成真换行；数学片段内保持原样，
-// 以保护 \nabla、\neq、\ni、矩阵换行 \\ 等真正的 LaTeX 命令。
+// 但 \right、\neq、\nabla、\rho、\rangle… 这些是真 LaTeX 命令，开头也是 \r/\n，绝不能当换行删
+// （之前的 bug：参考答案里 \right 被删成 "ight)"、\neq 删成 "eq"）。
+// 做法：只在【数学 $...$ 之外】处理；命中白名单命令就保留，否则把 \r/\n 当换行、保留其后字母。
+const _KEEP_NR_CMD = /^(?:n(?:eq|e|i|u|ot|otin|abla|atural|leq|geq|leqslant|geqslant|less|gtr|mid|parallel|sim|cong|equiv|exists|subseteq|supseteq|subset|supset|rightarrow|leftarrow|leftrightarrow|vdash|vDash|Vdash)|r(?:ight|ightarrow|ightleftharpoons|ightharpoonup|ightharpoondown|angle|ceil|floor|ho|times|moustache|estriction))$/;
 export function normalizeNewlineEscapes(s) {
   const t = String(s || "");
   if (!t || (!t.includes("\\n") && !t.includes("\\r"))) return t;
-  // 按 $$...$$ / $...$ 切成 [文本, 数学, 文本, 数学, …]，只在文本段还原换行
   return t.split(/(\$\$[\s\S]*?\$\$|\$[^$]*\$)/)
-    .map((seg, i) => (i % 2 === 1 ? seg : seg.replace(/\\r\\n|\\r|\\n/g, "\n")))
+    .map((seg, i) => (i % 2 === 1 ? seg
+      : seg.replace(/\\([rn])([a-zA-Z]*)/g, (m, c, rest) =>
+          (_KEEP_NR_CMD.test(c + rest) ? m : "\n" + rest))))
     .join("");
 }
 
@@ -430,10 +433,15 @@ export async function gradeItem({ question, studentAnswer }) {
 【题目】${question}
 【学生答案】${studentAnswer || "(空白)"}
 
-【重要：学生答案是 OCR 转写的，可能有噪声，判分前先"读懂学生真正写了什么"】
-- 矩阵维度/元素、上下标、分隔符可能被 OCR 读乱（例如把 4×2 设计矩阵读成 2 维向量、逗号当成换行、多余符号）。**遇到看起来"维度不对/写法奇怪"的中间式，先假设是 OCR 噪声，结合上下文还原学生本意，不要据此判错。**
-- 判分以**最终答案/最终结论**为主：只要学生的最终结果正确、推导主线合理，即使某些中间步骤被 OCR 弄乱，也判 correct。
-- 拼写错误（如 define↔definite、漏字母）、英文术语不标准、记号差异、笔误，**一律不作为判错依据**——这是硬性规定，违反即误判。
+【最重要：学生答案是 OCR 自动转写的，先分清"识别错误"还是"学生写错"，按学生真实手写意图判分，而不是按 OCR 字面判】
+- 你的目标是**尽量还原学生真正写在纸上的内容**再判分。学生没耐心逐条核对识别结果，所以你要主动纠正明显的 OCR 失误。
+- 常见 OCR 失误（这些都不是学生的错，要按本意还原，**绝不能据此判错或扣分**）：
+  · 数字/字母混淆：9↔a、i↔1、l↔1、O↔0、S↔5、z↔2、B↔8；
+  · 占位/重复向量：特征向量被读成 [i,i,i]、[2,i,3] 这种带 i 或几个分量一模一样的，几乎一定是把数字 1 等读成了 i 或漏读——按"这是某个合理实向量"理解，别当学生写错；
+  · 矩阵维度/元素读乱、行列塌缩、矩阵被读小一维、逗号当换行、多余符号、奇异矩阵其实是元素读错；
+  · 散文里多余的反斜杠/LaTeX 化。
+- **判定方法**：看学生的**解题方法、结构、最终结论**是否数学正确。只要方法对、主线通、最终结果（还原 OCR 噪声后）正确，就判 correct/minor；**只有当确实是学生本人的数学错误（方法错、概念错、算错、漏解、没做完）才判 wrong**。判 wrong 前先自问：这个"错"是 OCR 读出来的，还是学生真的写错了？拿不准就当 OCR 噪声、从宽。
+- 拼写错误（如 define↔definite、漏字母）、英文术语不标准、记号差异、笔误，**一律不作为判错依据**。
 
 判分档位（三选一，写进 verdict）：
 - "correct"（判对）：最终结果/结论正确，核心步骤合理。**解法不同、记号差异、排版不同、明显的笔误或拼写错（如 define↔definite）、把变量名标反但实际计算正确、OCR 把中间式读乱——都仍判 correct**。证明题只要逻辑主线成立即 correct。
@@ -442,8 +450,8 @@ export async function gradeItem({ question, studentAnswer }) {
 重要：**不要因为"写法不够规范""不是你的解法""有笔误/拼写错""OCR 看着乱"就判 wrong**——只看数学对不对。判 wrong 前先确认：学生的最终答案是不是真的和正确答案不一致？
 
 输出格式（分两部分）：
-1. 先写「参考解答」：完整步骤，公式用 $...$ 包裹——不要放进 JSON。
-2. 最后**单独一行**输出元数据 JSON（放回复最末尾，之后不要再有任何字符）。JSON 里**禁止 LaTeX/反斜杠/美元符号/公式**，note 与 errorDetail 用纯中文口语：
+1. 先写「参考解答」：完整步骤。**每一处数学都必须用 $...$（行内）或 $$...$$（独立公式）包裹，包括 \\left\\right、\\frac、矩阵 \\begin{pmatrix}...\\end{pmatrix} 等——禁止输出任何没被 $ 包裹的裸 LaTeX**（否则前端渲染成原始码）。不要放进 JSON。
+2. 最后**单独一行**输出元数据 JSON（放回复最末尾，之后不要再有任何字符）。JSON 里**禁止 LaTeX/反斜杠/美元符号/公式**，note 与 errorDetail 用纯中文口语（要点用文字描述，如"特征值零"而不是 "λ=0"）：
 {"verdict": "correct", "scorePct": 100, "note": "", "errorType": "", "errorDetail": "", "knowledgePoints": ["最小二乘法","正规方程"], "chapter": "Ch.3"}
 - verdict 取 "correct"/"minor"/"wrong"；
 - scorePct：0~100 的整数，这道题的**得分百分比**（按数学正确性与完成度给，像阅卷老师那样）。correct 一般 90~100；minor 78~92；wrong 按完成度与错误严重程度给 0~65（做对了一半给一半分，完全空白/没做给 0）。务必和 verdict 自洽。
@@ -507,17 +515,18 @@ ${brief}
 }
 
 export async function tutorReply({ item, history, userMessage }) {
-  const sys = `你是耐心的线性代数私教，正在辅导学生订正一道错题。
+  const sys = `你是严格、直接、负责的线性代数私教，正在辅导学生订正一道错题。
 【题目】${item.question}
 【学生的错误答案】${item.student_answer}
 【正确答案】${item.correct_answer}
 【错因】${item.error_detail || ""}
 
-辅导原则：
-- 不要一上来就报正确答案，用引导式提问帮学生自己发现错在哪
-- 一次只讲一个点，简短，像对话不像讲义
-- 公式用 $...$ 包裹
-- 学生答对/想通了就肯定他，并可以追问加深理解`;
+辅导风格（坚定、不啰嗦、不过度温柔）：
+- **第一句就明确、直接地指出错在哪**（一句话点破核心错误，例如"你漏了 λ=0 这个特征值"），不要用"我们一点点来""先从你做对的入手"这类铺垫绕弯子。
+- 指出错误后，再用一个**有针对性的问题**引导学生想清楚为什么错、怎么改；一次只问一个点。
+- 语气像认真的老师：肯定对的地方一句带过即可，重点放在纠错；少用语气词和表情（最多偶尔一个），不要堆"好呀～""加油😊"。
+- 不要一上来就把完整正确答案抄给他；但学生卡住或问了两次还不懂，就直接讲清楚那一步，别继续兜圈子。
+- 公式用 $...$ 包裹。学生想通了简短肯定并可追问加深。`;
 
   const messages = [{ role: "user", content: sys }];
   for (const h of history || []) messages.push(h);
