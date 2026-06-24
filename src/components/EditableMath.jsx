@@ -80,12 +80,24 @@ function ensureEmStyle() {
     .em-palette button{font-size:13px;border:1px solid #e7e8ef;background:#fff;border-radius:6px;padding:2px 7px;cursor:pointer;font-family:ui-monospace,monospace;color:#3a3f55;line-height:1.5}
     .em-palette button:hover{border-color:#4338ca;color:#4338ca}
     .em-palette .lab{font-size:10px;color:#9aa0b4;align-self:center;margin:0 2px}
+    .em-grid{display:inline-flex;flex-direction:column;gap:6px;margin:6px 0;padding:8px;border:1px solid #e7e8ef;border-radius:8px;background:#fafaff;vertical-align:middle}
+    .em-grid-bar{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+    .em-grid-bar .lab{font-size:10px;color:#9aa0b4}
+    .em-grid-bar button{border:1px solid #e7e8ef;background:#fff;border-radius:6px;padding:2px 8px;cursor:pointer;font-size:13px;color:#3a3f55;line-height:1.4}
+    .em-grid-bar button:hover{border-color:#4338ca;color:#4338ca}
+    .em-grid-bar button.ok{background:#4338ca;border-color:#4338ca;color:#fff;font-weight:600}
+    .em-grid-bar b{font-variant-numeric:tabular-nums;min-width:14px;text-align:center}
+    .em-grid-cells{display:grid;gap:4px}
+    .em-grid-cells input{width:48px;padding:4px 5px;border:1px solid #d7ddff;border-radius:5px;font-size:14px;text-align:center;font-family:ui-monospace,monospace}
+    .em-grid-cells input:focus{outline:none;border-color:#4338ca}
   `;
   document.head.appendChild(s);
 }
 
 function MathFieldInline({ latex, hints, onCommit, onCancel }) {
   const ref = useRef(null);
+  const [grid, setGrid] = useState(null);   // 矩阵网格录入：{ rows, cols, cells:string[][] }
+  const gridOpenRef = useRef(false);          // 网格打开时，点输入框失焦不要提交/卸载编辑器
   useEffect(() => {
     ensureMathLive();
     ensureEmStyle();
@@ -113,7 +125,8 @@ function MathFieldInline({ latex, hints, onCommit, onCancel }) {
       else if (e.key === "Escape") { e.preventDefault(); finish(false); }
     };
     // 点面板按钮会让 math-field 失焦 → 别立刻提交：palette 用 onMouseDown preventDefault 防失焦
-    const onBlur = () => finish(true);
+    // 矩阵网格录入打开时，点网格输入框会失焦，但不能提交/卸载，否则网格消失
+    const onBlur = () => { if (gridOpenRef.current) return; finish(true); };
     el.addEventListener("keydown", onKey);
     el.addEventListener("focusout", onBlur);
     setTimeout(apply, 100);
@@ -126,6 +139,24 @@ function MathFieldInline({ latex, hints, onCommit, onCancel }) {
   const exec = (cmd) => { try { ref.current?.executeCommand(cmd); ref.current?.focus(); } catch {} };
   const { common, subject } = symbolsFor(hints);
 
+  // ── 矩阵网格录入：选行列、逐格填，生成 \begin{bmatrix}… ──
+  const openGrid = () => { gridOpenRef.current = true; setGrid({ rows: 2, cols: 2, cells: [["", ""], ["", ""]] }); };
+  const closeGrid = () => { gridOpenRef.current = false; setGrid(null); };
+  const resizeGrid = (rows, cols) => setGrid((g) => ({
+    rows, cols,
+    cells: Array.from({ length: rows }, (_, i) => Array.from({ length: cols }, (_, j) => g?.cells?.[i]?.[j] ?? "")),
+  }));
+  const setCell = (i, j, v) => setGrid((g) => {
+    const cells = g.cells.map((r) => r.slice()); cells[i][j] = v; return { ...g, cells };
+  });
+  const insertMatrix = () => {
+    if (!grid) return;
+    const body = grid.cells.map((r) => r.map((c) => (String(c).trim() || "0")).join(" & ")).join(" \\\\ ");
+    gridOpenRef.current = false;
+    setGrid(null);
+    insert(`\\begin{bmatrix}${body}\\end{bmatrix}`);
+  };
+
   return (
     <span style={{ display: "inline-flex", flexDirection: "column", verticalAlign: "middle", gap: 2 }}>
       <math-field
@@ -135,6 +166,7 @@ function MathFieldInline({ latex, hints, onCommit, onCancel }) {
       />
       <span className="em-palette" onMouseDown={(e) => e.preventDefault()}>
         <span className="lab">矩阵</span>
+        <button type="button" title="按行列填数字生成矩阵（识别不准时用这个，100%准）" onClick={openGrid}>▦ 矩阵录入</button>
         <button type="button" title="在光标所在矩阵下方加一行（也可按 Shift+Enter）" onClick={() => exec("addRowAfter")}>＋行</button>
         <button type="button" title="在光标所在矩阵右侧加一列" onClick={() => exec("addColumnAfter")}>＋列</button>
         <button type="button" title="删除光标所在的矩阵行" onClick={() => exec("removeRow")}>－行</button>
@@ -144,6 +176,36 @@ function MathFieldInline({ latex, hints, onCommit, onCancel }) {
         {subject && <span className="lab">· {subject.name}</span>}
         {subject && subject.syms.map((s) => <button key={s.l} type="button" onClick={() => insert(s.ins)}>{s.l}</button>)}
       </span>
+      {grid && (
+        <span className="em-grid" onMouseDown={(e) => e.stopPropagation()}>
+          <span className="em-grid-bar">
+            <span className="lab">行</span>
+            <button type="button" onClick={() => resizeGrid(Math.max(1, grid.rows - 1), grid.cols)}>－</button>
+            <b>{grid.rows}</b>
+            <button type="button" onClick={() => resizeGrid(Math.min(8, grid.rows + 1), grid.cols)}>＋</button>
+            <span className="lab" style={{ marginLeft: 8 }}>列</span>
+            <button type="button" onClick={() => resizeGrid(grid.rows, Math.max(1, grid.cols - 1))}>－</button>
+            <b>{grid.cols}</b>
+            <button type="button" onClick={() => resizeGrid(grid.rows, Math.min(8, grid.cols + 1))}>＋</button>
+          </span>
+          <span className="em-grid-cells" style={{ gridTemplateColumns: `repeat(${grid.cols}, 1fr)` }}>
+            {grid.cells.map((row, i) => row.map((c, j) => (
+              <input
+                key={`${i}-${j}`}
+                value={c}
+                placeholder="0"
+                onChange={(e) => setCell(i, j, e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); insertMatrix(); } }}
+              />
+            )))}
+          </span>
+          <span className="em-grid-bar">
+            <button type="button" className="ok" onClick={insertMatrix}>插入矩阵</button>
+            <button type="button" onClick={closeGrid}>取消</button>
+            <span className="lab">支持分数等，如 1/2 或 \frac{`{1}{2}`}</span>
+          </span>
+        </span>
+      )}
     </span>
   );
 }

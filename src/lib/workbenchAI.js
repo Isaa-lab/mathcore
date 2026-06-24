@@ -109,8 +109,25 @@ ${t}`;
   return out || t;
 }
 
+// 专业手写数学 OCR（Mathpix/SimpleTex，后端 /api/mathocr）。配了 key 才有返回，否则空串。
+// 对矩阵/上下标远比通用视觉模型准，所以框选精修时优先用它。
+async function callMathOCR(dataURI) {
+  try {
+    const res = await fetch("/api/mathocr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: dataURI }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return normalizeNewlineEscapes(String(data?.latex || "").trim());
+  } catch { return ""; }
+}
+
 // 识别一张"局部截图"（用户在原图上框选出来的一块）：逐行转写其中手写内容。
 export async function extractRegion(dataURI) {
+  // 先试专业数学 OCR（手写矩阵/公式最准）；没配 key 或失败再走 qwen 视觉链。
+  const pro = await callMathOCR(dataURI);
+  if (pro) return pro;
   const prompt = `这是一张手写数学的**局部截图**（只是某道题答案的一部分）。请把图中所有手写内容逐行转写出来：
 - 数学一律用 $...$ LaTeX 包裹（分数 \\frac、上下标 ^{}/_{}、希腊字母、矩阵 \\begin{pmatrix}...\\end{pmatrix} 等），普通中英文说明保留、不包；
 - 【散文纯文本，禁止 LaTeX 化】整句英文说明原样写成普通文字（写 "is diagonalizable"，不要写成 "is\\diagonalizable"，也不要把空格写成反斜杠加空格）；只有真数学符号进 $...$；
