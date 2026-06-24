@@ -123,9 +123,13 @@ async function callMathOCR(dataURI) {
   } catch { return ""; }
 }
 
+// 框选精修的视觉模型链：先用 DashScope 专用 OCR 模型 qwen-vl-ocr（忠实转写、对矩阵更稳，
+// 同一个 QWEN_KEY 就能用，无需第三方账号），再退旗舰/max/plus。
+const REGION_VISION_MODELS = ["qwen-vl-ocr", ...VISION_MODELS];
+
 // 识别一张"局部截图"（用户在原图上框选出来的一块）：逐行转写其中手写内容。
 export async function extractRegion(dataURI) {
-  // 先试专业数学 OCR（手写矩阵/公式最准）；没配 key 或失败再走 qwen 视觉链。
+  // 先试专业数学 OCR（Mathpix/SimpleTex，配了 key 才有）；没有就走下面的 qwen 链（含专用 OCR 模型）。
   const pro = await callMathOCR(dataURI);
   if (pro) return pro;
   const prompt = `这是一张手写数学的**局部截图**（只是某道题答案的一部分）。请把图中所有手写内容逐行转写出来：
@@ -141,9 +145,9 @@ export async function extractRegion(dataURI) {
       { type: "image_url", image_url: { url: dataURI } },
     ],
   }], { json: false, materialTitle: "区域识别", visionModel: model });
-  // 框选是单张小图、不怕慢，优先用最强模型；按 VISION_MODELS 顺序回退。
+  // 框选是单张小图、不怕慢，优先用专用 OCR 模型；按 REGION_VISION_MODELS 顺序回退。
   let raw = "";
-  for (const model of VISION_MODELS) {
+  for (const model of REGION_VISION_MODELS) {
     try { raw = String(await call(model) || "").trim(); } catch { raw = ""; }
     if (raw) break;
   }
