@@ -654,6 +654,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const imgElRef = useRef(null);
   const imgMainRef = useRef(null);                    // 图片容器（含居中留白），框选用它的像素坐标
   const [hasRedPen, setHasRedPen] = useState(false);  // 卷面是否有老师红笔批改（默认否）——只有勾选才按红笔判分，避免无红笔时误判
+  const [blockRefine, setBlockRefine] = useState(true); // 逐块精识别：整页识别后按每块 bbox 裁原图、用 qwen-vl-ocr 逐块重识别（更准、更慢）
   const [framing, setFraming] = useState(false);     // 框选识别模式（全屏取景）
   const [frameTool, setFrameTool] = useState("draw"); // 框选时工具：'draw' 画框 / 'pan' 移动图
   const [frameRect, setFrameRect] = useState(null);   // 拖框中的矩形：相对 imgmain 的像素 {x0,y0,x1,y1}
@@ -889,6 +890,30 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       report(`提取到 ${questions.length} 道题，识别学生答案…`, 40);
       const questionNumbers = questions.map((q) => q.number).filter(Boolean);
       const { answers, images } = await extractAnswersFromFiles(aFiles, (msg) => report(msg, Math.min(75, (progress || 40) + 3)), wb, userId, questionNumbers);
+      // 逐块精识别（"自动二次框选"）：对每个有 bbox 的答案块，按位置裁原图、放大、用 qwen-vl-ocr 重识别，
+      // 比整页一次性识别准很多；轻链(只 qwen-vl-ocr)求快，失败则保留整页识别结果。
+      if (blockRefine) {
+        const refinable = answers.filter((a) => a._img >= 0 && Array.isArray(a.bbox) && a.bbox.length === 4 && images[a._img]);
+        if (refinable.length) {
+          let done = 0;
+          await mapLimit(refinable, 2, async (a) => {
+            try {
+              const [x0, y0, x1, y1] = a.bbox.map(Number);
+              const pad = 0.02;
+              const rx = Math.max(0, x0 - pad), ry = Math.max(0, y0 - pad);
+              const rect = { x: rx, y: ry, w: Math.min(1, x1 + pad) - rx, h: Math.min(1, y1 + pad) - ry };
+              if (rect.w > 0.03 && rect.h > 0.02) {
+                const crop = await cropFractionDataUri(images[a._img], rect);
+                if (crop) {
+                  const refined = await extractRegion(crop, ["qwen-vl-ocr"]); // 轻链：只用专用 OCR，快
+                  if (refined && refined.trim()) a.studentAnswer = refined;
+                }
+              }
+            } catch {}
+            finally { done += 1; report(`逐块精识别 ${done}/${refinable.length}…`, Math.min(79, 76 + Math.round((done / refinable.length) * 3))); }
+          });
+        }
+      }
       report("AI 按内容对齐题目和答案…", 80);
       // 语义对齐：按答案内容判断它解的是哪道题（解决手写编号和官方题号对不上）；失败则回退题号匹配
       let alignMap = null;
@@ -904,7 +929,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       report(`识别完成 ${merged.length} 道题，请校对后确认`, 100);
       setTimeout(() => setProgress(null), 600);
     } catch (err) { report("出错：" + (err.message || err)); setProgress(null); }
-  }, [userId, wb, qFiles, aFiles, report, progress, onReviewModeChange]);
+  }, [userId, wb, qFiles, aFiles, report, progress, onReviewModeChange, blockRefine]);
 
   const confirmReview = async () => {
     try {
@@ -1294,9 +1319,15 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
             </div>
           )}
           {qFiles.length > 0 && aFiles.length > 0 && (
-            <button className="pp-btn primary" onClick={processSeparate}>
-              识别并匹配 ({qFiles.length} 题目文件 + {aFiles.length} 答案文件)
-            </button>
+            <>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--mut)", justifyContent: "center", padding: "4px 0", cursor: "pointer", userSelect: "none" }} title="整页识别后，对每个答案块自动裁剪、放大、用专用 OCR 逐块重识别，明显更准；代价是更慢、更耗额度。">
+                <input type="checkbox" checked={blockRefine} onChange={(e) => setBlockRefine(e.target.checked)} />
+                逐块精识别（自动二次框选，更准但更慢）
+              </label>
+              <button className="pp-btn primary" onClick={processSeparate}>
+                识别并匹配 ({qFiles.length} 题目文件 + {aFiles.length} 答案文件)
+              </button>
+            </>
           )}
           {(qFiles.length === 0 || aFiles.length === 0) && (
             <div style={{ fontSize: 12, color: "var(--faint)", textAlign: "center", padding: "6px 0" }}>

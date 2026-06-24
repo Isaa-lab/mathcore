@@ -128,7 +128,8 @@ async function callMathOCR(dataURI) {
 const REGION_VISION_MODELS = ["qwen-vl-ocr", ...VISION_MODELS];
 
 // 识别一张"局部截图"（用户在原图上框选出来的一块）：逐行转写其中手写内容。
-export async function extractRegion(dataURI) {
+// models 可指定模型链：手动框选用全链（含旗舰兜底）；自动逐块精识别传轻链（只 qwen-vl-ocr）求快。
+export async function extractRegion(dataURI, models = REGION_VISION_MODELS) {
   // 先试专业数学 OCR（Mathpix/SimpleTex，配了 key 才有）；没有就走下面的 qwen 链（含专用 OCR 模型）。
   const pro = await callMathOCR(dataURI);
   if (pro) return pro;
@@ -146,9 +147,9 @@ export async function extractRegion(dataURI) {
       { type: "image_url", image_url: { url: dataURI } },
     ],
   }], { json: false, materialTitle: "区域识别", visionModel: model });
-  // 框选是单张小图、不怕慢，优先用专用 OCR 模型；按 REGION_VISION_MODELS 顺序回退。
+  // 优先用专用 OCR 模型；按传入的 models 顺序回退。
   let raw = "";
-  for (const model of REGION_VISION_MODELS) {
+  for (const model of models) {
     try { raw = String(await call(model) || "").trim(); } catch { raw = ""; }
     if (raw) break;
   }
