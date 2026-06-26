@@ -12,6 +12,7 @@ import {
   extractAnswersFromText,
   alignAnswersToQuestions,
   repairOcr,
+  parseScoreSheet,
   gradeItem,
   verifyGrade,
   solveQuestion,
@@ -666,6 +667,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const [blockRefine, setBlockRefine] = useState(false); // 逐块精识别：默认关——实测一遍后发现 bbox 不紧会把相邻题揉一起、且 qwen-vl-ocr 吐文档级 LaTeX，反而更差；保留开关供实验
   const [ocrRepair, setOcrRepair] = useState(true);   // OCR 校正：识别后用文本模型保守修正符号/字符误读（不改数学结论），默认开
   const [busy, setBusy] = useState(false);            // 确认识别/批改进行中——给按钮即时反馈、防重复点击
+  const scoreSheetRef = useRef(null);                 // 老师改分单上传 input
   const [framing, setFraming] = useState(false);     // 框选识别模式（全屏取景）
   const [frameTool, setFrameTool] = useState("draw"); // 框选时工具：'draw' 画框 / 'pan' 移动图
   const [frameRect, setFrameRect] = useState(null);   // 拖框中的矩形：相对 imgmain 的像素 {x0,y0,x1,y1}
@@ -1095,6 +1097,33 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     try { await safeUpdateItem(item.id, patch); } catch {}
   };
 
+  // 上传老师改分单 → 按真分校准：每道大题的得分/满分摊给它的各小问（同一百分比），score_source='teacher_sheet'
+  const applyScoreSheet = async (file) => {
+    if (!file || busy) return;
+    setBusy(true);
+    try {
+      report("识别老师改分单…", 40);
+      const uri = await fileToDataURI(file, { maxPx: 1600, quality: 0.85 });
+      const sheet = await parseScoreSheet(uri);
+      if (!sheet?.items?.length) { report("没识别出改分单上的分数，换张更清楚的图试试"); setTimeout(() => setProgress(null), 1500); return; }
+      // 顶层题号 → {awarded,max}（改分单是按大题给分，小问共享该大题百分比）
+      const byTop = {};
+      for (const s of sheet.items) { const k = canonicalNumber(s.number).split("-")[0]; if (k) byTop[k] = s; }
+      report("按老师真分更新…", 80);
+      const updated = await Promise.all(items.map(async (it) => {
+        const s = byTop[canonicalNumber(it.number).split("-")[0]];
+        if (!s) return it;
+        const pct = Math.max(0, Math.min(100, Math.round((s.awarded / s.max) * 100)));
+        const patch = { score_pct: pct, max_score: s.max, score_source: "teacher_sheet", is_correct: pct >= 60 };
+        try { const u = await safeUpdateItem(it.id, patch); return u || { ...it, ...patch }; } catch { return { ...it, ...patch }; }
+      }));
+      setItems(updated);
+      report(`已按老师改分单校准${sheet.total != null ? `（总分 ${sheet.total}）` : ""}`, 100);
+      setTimeout(() => setProgress(null), 1500);
+    } catch (e) { report("改分单识别失败：" + (e?.message || e)); setTimeout(() => setProgress(null), 1500); }
+    finally { setBusy(false); }
+  };
+
   // 收藏到错题本（错题已自动收录；这里主要让"对的题"也能进错题本）
   const toggleStar = async (item) => {
     const next = !item.starred;
@@ -1397,6 +1426,19 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
           </>
         );
       })()}
+
+      {items.some((x) => x.is_correct !== null) && (
+        <div style={{ marginTop: 6, textAlign: "center" }}>
+          <input
+            type="file" accept="image/*" style={{ display: "none" }}
+            ref={scoreSheetRef}
+            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) applyScoreSheet(f); }}
+          />
+          <button className="pp-btn" disabled={busy} title="上传老师的改分单/成绩单照片，按老师每题真实得分校准分数" onClick={() => scoreSheetRef.current?.click()}>
+            📋 上传老师改分单（按真分校准）
+          </button>
+        </div>
+      )}
 
       <div className="pp-list">
         {items.length === 0

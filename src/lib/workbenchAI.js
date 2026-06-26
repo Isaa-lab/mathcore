@@ -172,6 +172,24 @@ export async function extractRegion(dataURI, models = REGION_VISION_MODELS) {
   return normalizeNewlineEscapes(stripOcrWrappers(raw));
 }
 
+// 识别老师"改分单/成绩单"（如 Answer Book：题号 + 手写得分 + 印刷满分 + 总分）。
+// 返回 { items:[{number, awarded, max}], total }。用于按老师真分校准 AI 判分。
+export async function parseScoreSheet(dataURI) {
+  const prompt = `这是一张老师批改的**成绩单/改分单**图片：通常左边是题号（1,2,3… 或 Q1,Q2），右边是"得分 / 满分"（手写的红色得分写在印刷的 "/15 pts"、"/10 pts" 之类前面），底部可能有 Total（总分）。
+请提取每道题的得分和满分。
+只输出 JSON，不要任何解释：
+{"items":[{"number":"1","awarded":15,"max":15},{"number":"2","awarded":4,"max":10}],"total":69}
+- number：原样保留题号（"1"、"2"…）；
+- awarded：老师给的得分（手写，常是红色）；max：满分（印刷的 /N pts 里的 N）；
+- 读不清的项就省略；total：总分（没有就省略该字段）。`;
+  const data = await callVision(dataURI, prompt); // json
+  const items = (data?.items || [])
+    .map((it) => ({ number: String(it.number ?? "").trim(), awarded: Number(it.awarded), max: Number(it.max) }))
+    .filter((it) => it.number && Number.isFinite(it.awarded) && Number.isFinite(it.max) && it.max > 0);
+  const total = Number(data?.total);
+  return { items, total: Number.isFinite(total) ? total : null };
+}
+
 async function callVision(dataURI, promptText, { json = true } = {}) {
   const call = (model) => callGenerate([{
     role: "user",
