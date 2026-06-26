@@ -13,6 +13,8 @@ import {
   alignAnswersToQuestions,
   repairOcr,
   parseScoreSheet,
+  learnTeacherStyle,
+  generateMockExam,
   gradeItem,
   verifyGrade,
   solveQuestion,
@@ -465,6 +467,34 @@ function answerSnippet(s) {
   return t ? t.slice(0, 36) + (t.length > 36 ? "…" : "") : "（空白）";
 }
 
+// Stage 3：按老师风格生成的模拟题弹窗（题目 + 可展开答案/解析）
+function MockExamModal({ questions, teacherName, onClose }) {
+  const [open, setOpen] = useState({});
+  return (
+    <div className="pp-lightbox" style={{ alignItems: "flex-start", overflow: "auto", padding: "4vh 0", cursor: "default" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, maxWidth: "min(760px,92vw)", width: "92vw", padding: 18, color: "var(--ink,#0f1220)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <b>🎯 {teacherName ? `${teacherName} ` : ""}风格模拟题（{questions.length} 道）</b>
+          <button className="pp-btn" onClick={onClose}>关闭</button>
+        </div>
+        {questions.map((q, i) => (
+          <div key={i} style={{ borderTop: "1px solid var(--line,#e7e8ef)", padding: "10px 0" }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>第 {i + 1} 题</div>
+            <div style={{ lineHeight: 1.7 }}><MathText text={autoLatex(q.question)} /></div>
+            <button className="pp-btn mini" style={{ marginTop: 6 }} onClick={() => setOpen((o) => ({ ...o, [i]: !o[i] }))}>{open[i] ? "收起答案" : "看答案/解析"}</button>
+            {open[i] && (
+              <div style={{ marginTop: 6, background: "var(--soft,#f0f1f6)", borderRadius: 8, padding: "8px 10px", lineHeight: 1.7 }}>
+                {q.answer && <div><b>答案：</b><MathText text={autoLatex(q.answer)} /></div>}
+                {q.explanation && <div style={{ marginTop: 4 }}><b>解析：</b><MathText text={autoLatex(q.explanation)} /></div>}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // 数学输入助手：在光标处插入 LaTeX 片段。片段里用 ‸ 标记插入后光标落点（包裹选中文本）。
 const MATH_BTNS = [
   { label: "$ $", snip: "$‸$", title: "公式包裹" },
@@ -668,6 +698,9 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const [ocrRepair, setOcrRepair] = useState(true);   // OCR 校正：识别后用文本模型保守修正符号/字符误读（不改数学结论），默认开
   const [busy, setBusy] = useState(false);            // 确认识别/批改进行中——给按钮即时反馈、防重复点击
   const scoreSheetRef = useRef(null);                 // 老师改分单上传 input
+  const [subject, setSubject] = useState("");         // 科目（老师档案用）
+  const [teacherName, setTeacherName] = useState(""); // 命题老师（老师档案用）
+  const [mockQs, setMockQs] = useState(null);         // 按老师风格生成的模拟题
   const [framing, setFraming] = useState(false);     // 框选识别模式（全屏取景）
   const [frameTool, setFrameTool] = useState("draw"); // 框选时工具：'draw' 画框 / 'pan' 移动图
   const [frameRect, setFrameRect] = useState(null);   // 拖框中的矩形：相对 imgmain 的像素 {x0,y0,x1,y1}
@@ -1022,11 +1055,19 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     setBusy(true);
     report("AI 批改中…（并发处理）", 5);
     let done = 0;
+    // 若填了科目+老师且有档案，按这位老师的评分风格判分
+    let teacherStyle = "";
+    try {
+      if (subject.trim() && teacherName.trim()) {
+        const prof = await wb.getTeacherProfile(userId, subject.trim(), teacherName.trim());
+        teacherStyle = prof?.grading_style || "";
+      }
+    } catch {}
     try {
     // 限并发 3 路批改：N 题不再逐题串行等待
     const graded = await mapLimit(items, 3, async (item) => {
       try {
-        const result = await gradeItem({ question: item.question, studentAnswer: item.student_answer });
+        const result = await gradeItem({ question: item.question, studentAnswer: item.student_answer, teacherStyle });
         // 红笔已给分的题：判定和分数以老师为准，AI 只补参考答案/错因/知识点
         const hasTeacherScore = item.score_source === "teacher" && item.score_pct != null;
         const teacherCorrect = hasTeacherScore ? Number(item.score_pct) >= 60 : null;
@@ -1118,9 +1159,46 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
         try { const u = await safeUpdateItem(it.id, patch); return u || { ...it, ...patch }; } catch { return { ...it, ...patch }; }
       }));
       setItems(updated);
-      report(`已按老师改分单校准${sheet.total != null ? `（总分 ${sheet.total}）` : ""}`, 100);
+      // Stage 2：填了科目+老师，就据"AI 分 vs 老师真分 + 红笔批注"学这位老师的评分/出题风格，存进档案
+      if (subject.trim() && teacherName.trim()) {
+        try {
+          report("学习这位老师的评分风格…", 100);
+          const prev = await wb.getTeacherProfile(userId, subject.trim(), teacherName.trim());
+          const rows = updated.filter((it) => byTop[canonicalNumber(it.number).split("-")[0]]).map((it) => {
+            const s = byTop[canonicalNumber(it.number).split("-")[0]];
+            return { number: it.number, question: it.question, studentAnswer: it.student_answer,
+              aiPct: null, teacherPct: Math.round((s.awarded / s.max) * 100), teacherComment: it.teacher_comment || "" };
+          });
+          const learned = await learnTeacherStyle({
+            subject: subject.trim(), teacherName: teacherName.trim(),
+            prevGradingStyle: prev?.grading_style, prevQuestionStyle: prev?.question_style, rows,
+          });
+          await wb.upsertTeacherProfile(userId, {
+            subject: subject.trim(), teacherName: teacherName.trim(),
+            gradingStyle: learned.gradingStyle, questionStyle: learned.questionStyle,
+            sampleCount: (prev?.sample_count || 0) + 1,
+          });
+          report(`已校准并更新「${teacherName.trim()}」老师档案`, 100);
+        } catch (e) { /* 档案失败不影响分数已更新 */ }
+      }
       setTimeout(() => setProgress(null), 1500);
     } catch (e) { report("改分单识别失败：" + (e?.message || e)); setTimeout(() => setProgress(null), 1500); }
+    finally { setBusy(false); }
+  };
+
+  // Stage 3：按某老师的出题风格生成模拟题
+  const genMock = async () => {
+    if (busy) return;
+    if (!subject.trim() || !teacherName.trim()) { alert("先填科目和命题老师，并先用「改分单」学过该老师的风格效果更好"); return; }
+    setBusy(true);
+    try {
+      report("按老师风格生成模拟题…", 50);
+      const prof = await wb.getTeacherProfile(userId, subject.trim(), teacherName.trim());
+      const qs = await generateMockExam({ subject: subject.trim(), teacherName: teacherName.trim(), questionStyle: prof?.question_style || "", count: 5 });
+      if (qs.length) { setMockQs(qs); report(`生成 ${qs.length} 道「${teacherName.trim()}」风格模拟题`, 100); }
+      else report("没生成出模拟题，重试一下");
+      setTimeout(() => setProgress(null), 1200);
+    } catch (e) { report("生成失败：" + (e?.message || e)); setTimeout(() => setProgress(null), 1200); }
     finally { setBusy(false); }
   };
 
@@ -1428,16 +1506,22 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       })()}
 
       {items.some((x) => x.is_correct !== null) && (
-        <div style={{ marginTop: 6, textAlign: "center" }}>
-          <input
-            type="file" accept="image/*" style={{ display: "none" }}
-            ref={scoreSheetRef}
-            onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) applyScoreSheet(f); }}
-          />
-          <button className="pp-btn" disabled={busy} title="上传老师的改分单/成绩单照片，按老师每题真实得分校准分数" onClick={() => scoreSheetRef.current?.click()}>
-            📋 上传老师改分单（按真分校准）
-          </button>
+        <div style={{ marginTop: 8, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 10, background: "var(--card)" }}>
+          <div style={{ fontSize: 11, color: "var(--mut)", marginBottom: 6 }}>命题老师个性化（按这位老师的标准校准 + 出同风格模拟题）</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="科目，如 应用统计"
+              style={{ width: 120, padding: "4px 7px", border: "1px solid var(--line)", borderRadius: 6, fontSize: 12 }} />
+            <input value={teacherName} onChange={(e) => setTeacherName(e.target.value)} placeholder="命题老师"
+              style={{ width: 100, padding: "4px 7px", border: "1px solid var(--line)", borderRadius: 6, fontSize: 12 }} />
+            <input type="file" accept="image/*" style={{ display: "none" }} ref={scoreSheetRef}
+              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) applyScoreSheet(f); }} />
+            <button className="pp-btn" disabled={busy} title="上传老师改分单照片：按真分校准本卷，并学习这位老师的评分/出题风格" onClick={() => scoreSheetRef.current?.click()}>📋 上传改分单（校准+学风格）</button>
+            <button className="pp-btn" disabled={busy} title="按这位老师的出题风格生成模拟题" onClick={genMock}>🎯 出这位老师风格的模拟题</button>
+          </div>
         </div>
+      )}
+      {mockQs && (
+        <MockExamModal questions={mockQs} teacherName={teacherName} onClose={() => setMockQs(null)} />
       )}
 
       <div className="pp-list">

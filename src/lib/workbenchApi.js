@@ -121,6 +121,31 @@ export function makeWorkbenchApi(supabase) {
     await supabase.from("paper_items").delete().eq("id", itemId);
   }
 
+  // ── 老师个性化档案（teacher_profiles，缺表则全部安静降级）──
+  async function listTeacherProfiles(userId) {
+    const { data, error } = await supabase.from("teacher_profiles")
+      .select("*").eq("user_id", userId).order("updated_at", { ascending: false });
+    if (error) { console.warn("[workbench] teacher_profiles 不可用（可能未建表）:", error.message); return []; }
+    return data || [];
+  }
+  async function getTeacherProfile(userId, subject, teacherName) {
+    const { data, error } = await supabase.from("teacher_profiles")
+      .select("*").eq("user_id", userId).eq("subject", subject).eq("teacher_name", teacherName).maybeSingle();
+    if (error) return null;
+    return data || null;
+  }
+  async function upsertTeacherProfile(userId, { subject, teacherName, gradingStyle, questionStyle, sampleCount }) {
+    const row = {
+      user_id: userId, subject, teacher_name: teacherName,
+      grading_style: gradingStyle || "", question_style: questionStyle || "",
+      sample_count: sampleCount ?? 0, updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase.from("teacher_profiles")
+      .upsert(row, { onConflict: "user_id,subject,teacher_name" }).select().single();
+    if (error) { console.warn("[workbench] 存老师档案失败:", error.message); return null; }
+    return data;
+  }
+
   // ── 以往记录：列出用户上传过的卷子 + 取原文件下载链接 ──
   async function listPapers(userId) {
     const { data } = await supabase.from("papers")
@@ -187,6 +212,9 @@ export function makeWorkbenchApi(supabase) {
     setStar,
     saveSolvedItem,
     deleteItem,
+    listTeacherProfiles,
+    getTeacherProfile,
+    upsertTeacherProfile,
     listPapers,
     signUrls,
     deletePaper,

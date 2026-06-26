@@ -529,11 +529,11 @@ ${segs}`;
   return arr.map((a, i) => (fixed[i] ? { ...a, studentAnswer: fixed[i] } : a));
 }
 
-export async function gradeItem({ question, studentAnswer }) {
+export async function gradeItem({ question, studentAnswer, teacherStyle = "" }) {
   // 关键：不把含 LaTeX 的"正确答案"塞进 JSON（反斜杠会破坏 JSON 解析，导致解析失败→默认判错）。
   // 仿 solveQuestion：正文输出参考解答（带公式），最后一行只输出"不含公式/反斜杠"的小 JSON。
   const prompt = `你是公正的线性代数老师，给学生的"订正答案"批改。先自己把题目完整解出最终结果，再对照学生答案，**按数学正确性公正判分，既不放水也不吹毛求疵**。
-
+${teacherStyle ? `\n【按这位命题老师的评分风格判分（重要，尽量贴合）】${teacherStyle}\n` : ""}
 【题目】${question}
 【学生答案】${studentAnswer || "(空白)"}
 
@@ -616,6 +616,51 @@ ${brief}
 
 用 2-3 句话总结这个学生的薄弱点和复习建议，口语化、鼓励性，不要列清单。直接输出文字，不要 JSON。`;
   return await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "薄弱点总结", textModel: AUX_TEXT_MODEL });
+}
+
+// Stage 2：从"AI 判分 vs 老师真实分 + 红笔批注"学这位老师的评分风格 + 出题风格，并入已有档案。
+// rows: [{ number, question, studentAnswer, aiPct, teacherPct, teacherComment }]。返回 { gradingStyle, questionStyle }。
+export async function learnTeacherStyle({ subject, teacherName, prevGradingStyle = "", prevQuestionStyle = "", rows = [] }) {
+  const clip = (s, n = 200) => String(s || "").replace(/\s+/g, " ").trim().slice(0, n);
+  const list = rows.map((r) =>
+    `【${r.number}】题:${clip(r.question)} | 学生:${clip(r.studentAnswer)} | AI给:${r.aiPct ?? "?"}% 老师给:${r.teacherPct ?? "?"}%${r.teacherComment ? " | 批注:" + clip(r.teacherComment, 80) : ""}`
+  ).join("\n");
+  const prompt = `你在为"${subject} · ${teacherName}老师"建立个性化档案。下面每行是一道题的：题目、学生答案、AI 给的分%、老师真实给的分%、老师批注。
+通过对比 AI 与老师的分差，总结这位老师的**评分风格**（严/松、爱在哪扣分、步骤分/最终答案/书写规范各占多重、对漏步/术语/笔误的态度等），以及从题目能看出的**出题风格**（题型、难度、常考点、风格偏好）。
+
+${prevGradingStyle ? `已有评分风格档案（在此基础上更新、别推翻）：${prevGradingStyle}\n` : ""}${prevQuestionStyle ? `已有出题风格档案：${prevQuestionStyle}\n` : ""}
+本次数据：
+${list}
+
+只输出 JSON（中文、纯文字、禁止公式/反斜杠/美元符号）：
+{"gradingStyle":"这位老师评分风格：…（3-5 句，具体可执行，便于以后照此判分）","questionStyle":"这位老师出题风格：…（2-4 句，便于据此出同风格模拟题）"}`;
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "学习老师风格", textProvider: "deepseek" });
+  const meta = parseLooseJSON(raw) || {};
+  return {
+    gradingStyle: String(meta.gradingStyle || prevGradingStyle || "").trim(),
+    questionStyle: String(meta.questionStyle || prevQuestionStyle || "").trim(),
+  };
+}
+
+// Stage 3：按某老师的出题风格生成模拟题。返回 [{question, answer, explanation}]。
+export async function generateMockExam({ subject, teacherName, questionStyle = "", count = 5, topics = "" }) {
+  const prompt = `你是${subject}老师"${teacherName}"，请按**你一贯的出题风格**出 ${count} 道模拟练习题，供学生考前训练。
+${questionStyle ? `你的出题风格（务必贴合）：${questionStyle}\n` : ""}${topics ? `侧重知识点：${topics}\n` : ""}
+要求：题型、难度、风格贴近该老师；公式用 $...$；每题给完整参考答案和简要解析。
+严格按分段输出（不要 JSON、不要代码块围栏），每道题用如下三段、题与题之间空一行：
+@@题目@@
+（题干，含 $公式$）
+@@答案@@
+（最终答案，含 $公式$）
+@@解析@@
+（简要步骤，含 $公式$）`;
+  const raw = await callGenerate([{ role: "user", content: prompt }], { json: false, materialTitle: "老师风格模拟题", textProvider: "deepseek" });
+  if (!raw) return [];
+  // 按"@@题目@@"切成多道
+  const blocks = String(raw).split(/(?=@@题目@@)/).map((b) => b.trim()).filter(Boolean);
+  const pick = (b, tag) => { const m = b.match(new RegExp(`@@${tag}@@\\s*([\\s\\S]*?)(?=@@[^@]+@@|$)`, "i")); return m ? m[1].trim() : ""; };
+  return blocks.map((b) => ({ question: pick(b, "题目"), answer: pick(b, "答案"), explanation: pick(b, "解析") }))
+    .filter((q) => q.question);
 }
 
 export async function tutorReply({ item, history, userMessage }) {
