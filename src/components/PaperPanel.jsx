@@ -947,6 +947,13 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       let archived = [];
       try { if (pendingFiles.length) archived = await wb.uploadImages(pendingFiles, userId); } catch {}
       const paper = await wb.createPaper({ userId, imageUrls: archived });
+      // 红笔幻觉防护：OCR 常把红笔幻觉到每道题上、且全标"判错/0 分"。真老师不会给整卷判 0，
+      // 所以若"检测到红笔"的题占了多数(≥60%)且全是低分(<60)，判定为幻觉 → 整卷忽略红笔、改回纯 AI 判分。
+      const _tScores = reviewItems.map((it) => teacherScoreFromMarks(it)).filter((s) => s != null);
+      const redPenHallucinated = _tScores.length >= Math.max(3, Math.ceil(reviewItems.length * 0.6))
+        && _tScores.every((s) => s < 60);
+      const useRedPen = hasRedPen && !redPenHallucinated;
+      if (hasRedPen && redPenHallucinated) report("红笔识别异常(疑似整卷误判)，本次按 AI 判分", 92);
       const rows = reviewItems.map((item) => ({
         paper_id: paper.id,
         user_id: userId,
@@ -957,10 +964,9 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
         reviewed: true,
         is_correct: null, // 仍交给「全部批改」生成参考答案/知识点；红笔分数下面单独存
         max_score: item.maxScore ?? null,
-        // 红笔批改（数字得分或打勾/打叉符号）→ 存为老师分，批改时不被 AI 覆盖。
-        // 仅在用户勾选「卷面有红笔」时才采纳，否则一律按 AI 判分（默认），避免无红笔时被幻觉判分污染。
-        ...(hasRedPen && teacherScoreFromMarks(item) != null ? { score_pct: teacherScoreFromMarks(item), score_source: "teacher" } : {}),
-        ...(hasRedPen && item.teacherComment ? { teacher_comment: item.teacherComment } : {}),
+        // 红笔批改 → 存为老师分，批改时不被 AI 覆盖。仅在勾选「有红笔」且未触发幻觉防护时采纳。
+        ...(useRedPen && teacherScoreFromMarks(item) != null ? { score_pct: teacherScoreFromMarks(item), score_source: "teacher" } : {}),
+        ...(useRedPen && item.teacherComment ? { teacher_comment: item.teacherComment } : {}),
       }));
       let saved;
       try { saved = await wb.insertItems(rows); }
