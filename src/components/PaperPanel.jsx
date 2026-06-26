@@ -370,6 +370,7 @@ const CSS = `
 .pp-actions{display:flex;gap:6px;margin-top:9px}
 .pp-btn{font-size:12px;border:1px solid var(--line);background:#fff;color:#3a3f55;border-radius:7px;padding:5px 10px;cursor:pointer;font-family:inherit}
 .pp-btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}.pp-btn.mini{padding:3px 8px;font-size:11px}
+.pp-btn:disabled{opacity:.55;cursor:wait}
 .pp-empty{text-align:center;color:var(--faint);padding:30px 14px;font-size:13px;line-height:1.7}
 .pp-flip{margin-left:auto;font-family:ui-monospace,monospace;font-size:11px;color:var(--brand);cursor:pointer;background:none;border:none}
 .pp-starbtn{background:none;border:none;cursor:pointer;font-size:16px;line-height:1;color:var(--amber);margin-left:6px;padding:0}
@@ -657,6 +658,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   const [hasRedPen, setHasRedPen] = useState(false);  // 卷面是否有老师红笔批改（默认否）——只有勾选才按红笔判分，避免无红笔时误判
   const [blockRefine, setBlockRefine] = useState(false); // 逐块精识别：默认关——实测一遍后发现 bbox 不紧会把相邻题揉一起、且 qwen-vl-ocr 吐文档级 LaTeX，反而更差；保留开关供实验
   const [ocrRepair, setOcrRepair] = useState(true);   // OCR 校正：识别后用文本模型保守修正符号/字符误读（不改数学结论），默认开
+  const [busy, setBusy] = useState(false);            // 确认识别/批改进行中——给按钮即时反馈、防重复点击
   const [framing, setFraming] = useState(false);     // 框选识别模式（全屏取景）
   const [frameTool, setFrameTool] = useState("draw"); // 框选时工具：'draw' 画框 / 'pan' 移动图
   const [frameRect, setFrameRect] = useState(null);   // 拖框中的矩形：相对 imgmain 的像素 {x0,y0,x1,y1}
@@ -940,6 +942,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   }, [userId, wb, qFiles, aFiles, report, progress, onReviewModeChange, blockRefine, ocrRepair]);
 
   const confirmReview = async () => {
+    if (busy) return;
+    setBusy(true);
     try {
       report("保存中…", 92);
       setProgress(92);
@@ -986,6 +990,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       report(`保存完成，共 ${saved.length} 道题，点「全部批改」开始。`, 100);
       setTimeout(() => setProgress(null), 800);
     } catch (err) { report("保存失败：" + (err.message || err)); setProgress(null); }
+    finally { setBusy(false); }
   };
 
   const saveAnswer = async (item) => {
@@ -1004,8 +1009,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   };
 
   const gradeAll = async () => {
+    if (busy) return;
+    setBusy(true);
     report("AI 批改中…（并发处理）", 5);
     let done = 0;
+    try {
     // 限并发 3 路批改：N 题不再逐题串行等待
     const graded = await mapLimit(items, 3, async (item) => {
       try {
@@ -1062,6 +1070,8 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     report(`批改完成：错 ${graded.filter((x) => x.is_correct === false).length} 题。点错题开始辅导。`, 100);
     setTimeout(() => setProgress(null), 800);
     onItemsGraded?.([...graded]);
+    } catch (err) { report("批改出错：" + (err?.message || err)); setProgress(null); }
+    finally { setBusy(false); }
   };
 
   const flipCorrect = async (item) => {
@@ -1073,8 +1083,9 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       score_pct: next ? Math.max(Number.isFinite(cur) ? cur : 0, 90) : Math.min(Number.isFinite(cur) ? cur : 45, 45),
       score_source: "manual",
     };
-    const updated = await safeUpdateItem(item.id, patch);
-    setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, ...updated } : x)));
+    // 乐观更新：先即时变界面，再后台写库（避免点了"翻转"半天没反应）
+    setItems((prev) => prev.map((x) => (x.id === item.id ? { ...x, ...patch } : x)));
+    try { await safeUpdateItem(item.id, patch); } catch {}
   };
 
   // 收藏到错题本（错题已自动收录；这里主要让"对的题"也能进错题本）
@@ -1231,7 +1242,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
             <input type="checkbox" checked={hasRedPen} onChange={(e) => setHasRedPen(e.target.checked)} />
             卷面有老师红笔批改（按红笔判分）
           </label>
-          <button className="pp-btn primary" onClick={confirmReview}>确认识别，开始批改 →</button>
+          <button className="pp-btn primary" onClick={confirmReview} disabled={busy}>{busy ? "处理中…" : "确认识别，开始批改 →"}</button>
         </div>
         {/* 图片灯箱 */}
         {lightbox && (
@@ -1375,7 +1386,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
             {unconfirmed > 0 && (
               <div className="pp-grade-warn">⚠ {unconfirmed} 道题答案待确认，建议先核对再批改</div>
             )}
-            <button className="pp-btn primary" style={{ marginTop: 6 }} onClick={gradeAll}>全部批改（判对错 + 分析）</button>
+            <button className="pp-btn primary" style={{ marginTop: 6 }} onClick={gradeAll} disabled={busy}>{busy ? "批改中…" : "全部批改（判对错 + 分析）"}</button>
           </>
         );
       })()}
