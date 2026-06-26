@@ -336,6 +336,12 @@ const CSS = `
 .pp-fitem .fname:hover{color:var(--brand);text-decoration:underline}
 .pp-fitem .rm{cursor:pointer;color:var(--rose);font-size:13px;line-height:1;margin-left:8px}
 .pp-zones{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px}
+.pp-byq-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.pp-byq-num{width:54px;flex-shrink:0;padding:6px 7px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;text-align:center;outline:none}
+.pp-byq-num:focus{border-color:var(--brand)}
+.pp-byq-cells{flex:1;display:grid;grid-template-columns:1.6fr 1fr;gap:6px;min-width:0}
+.pp-drop.has{border-style:solid;border-color:var(--emerald);background:var(--emerald-soft);color:var(--emerald)}
+.pp-byq-rm{cursor:pointer;color:var(--rose);font-size:18px;line-height:1;flex-shrink:0;padding:0 4px}
 .pp-zone-hd{font-size:11px;font-family:ui-monospace,monospace;color:var(--mut);margin-bottom:5px}
 .pp-status{font-family:ui-monospace,monospace;font-size:12px;color:var(--brand);padding:5px 0 3px;text-align:center}
 .pp-prog-wrap{height:4px;border-radius:3px;background:#e7e8ef;margin:4px 0 6px;overflow:hidden}
@@ -681,6 +687,11 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
   // 分开模式：暂存题目/答案文件
   const [qFiles, setQFiles] = useState([]);
   const [aFiles, setAFiles] = useState([]);
+  // 逐题上传模式：每行 = 一道大题 { number, qFiles(题目图,选填), aFiles(答案图) }
+  const [byqRows, setByqRows] = useState(() => [1, 2, 3, 4, 5].map((n) => ({ number: String(n), qFiles: [], aFiles: [] })));
+  const addByqRow = () => setByqRows((rs) => [...rs, { number: String(rs.length + 1), qFiles: [], aFiles: [] }]);
+  const setByqRow = (i, patch) => setByqRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const removeByqRow = (i) => setByqRows((rs) => rs.filter((_, j) => j !== i));
   // 校对阶段
   const [reviewPhase, setReviewPhase] = useState(false);
   const [reviewItems, setReviewItems] = useState([]);
@@ -983,6 +994,51 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
     } catch (err) { report("出错：" + (err.message || err)); setProgress(null); }
   }, [userId, wb, qFiles, aFiles, report, progress, onReviewModeChange, blockRefine, ocrRepair]);
 
+  // ── 逐题上传模式：每行的答案图各自识别 → 直接作为该题号答案（无对齐，最准）──
+  const processByQuestion = useCallback(async () => {
+    if (!userId) { alert("请先登录"); return; }
+    const rows = byqRows.filter((r) => r.aFiles.length || r.qFiles.length);
+    if (!rows.length) { alert("请至少给一道题上传答案图"); return; }
+    setPendingFiles(rows.flatMap((r) => [...r.qFiles, ...r.aFiles]));
+    try {
+      const images = []; // 校对左侧展示图（答案图）
+      const items = [];
+      let done = 0;
+      for (const r of rows) {
+        report(`识别第 ${r.number} 题…`, Math.round(5 + (done / rows.length) * 90));
+        // 答案：每张图各自转写后拼接（走 extractRegion → qwen-vl-ocr）
+        let studentAnswer = "";
+        let imgIdx = -1;
+        for (const f of r.aFiles) {
+          const uri = await getAnswerImageForAI(f, wb, userId);
+          if (!uri) continue;
+          if (imgIdx < 0) { const disp = await fileToDataURI(f, { maxPx: 1100, quality: 0.85 }) || uri; imgIdx = images.push(disp) - 1; }
+          const t = await extractRegion(uri);
+          if (t && t.trim()) studentAnswer += (studentAnswer ? "\n" : "") + t;
+        }
+        // 题目（选填）：传了题目图就转写，否则留空
+        let question = "";
+        for (const f of r.qFiles) {
+          const uri = await getImageForAI(f, wb, userId);
+          if (!uri) continue;
+          const t = await extractRegion(uri);
+          if (t && t.trim()) question += (question ? "\n" : "") + t;
+        }
+        items.push({ number: r.number, question, studentAnswer, answerConfidence: studentAnswer ? "high" : "low", bbox: null, _img: imgIdx });
+        done += 1;
+      }
+      if (!items.length) { report("没识别出内容，检查图片"); setProgress(null); return; }
+      setReviewAnswers([]);          // 逐题模式无需"指认识别段"
+      setReviewImages(images);
+      setReviewItems(items.map((x) => ({ ...x, maxScore: null, teacherScorePct: null, teacherComment: "", teacherMark: null })));
+      setReviewImgIdx(0);
+      setReviewPhase(true);
+      onReviewModeChange?.(true);
+      report(`识别完成 ${items.length} 道题，请校对后确认`, 100);
+      setTimeout(() => setProgress(null), 600);
+    } catch (err) { report("出错：" + (err.message || err)); setProgress(null); }
+  }, [userId, wb, byqRows, report, onReviewModeChange]);
+
   const confirmReview = async () => {
     if (busy) return;
     setBusy(true);
@@ -1223,6 +1279,7 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
 
   const needGrade = items.length > 0 && items.some((x) => x.is_correct === null);
   const isSep = paperLayout === "separate";
+  const isByq = paperLayout === "byq";
 
   const dragHandlers = (setH, onDrop) => ({
     onDragOver: (e) => { e.preventDefault(); e.stopPropagation(); setH(true); },
@@ -1379,12 +1436,43 @@ function GradePanel({ supabase, userId, activeItemId, onSelectItem, onItemsGrade
       <>
       <div className="pp-layout-pick">
         <span className="pp-lp-label">卷子格式：</span>
-        {[{ key: "together", label: "题目+答案在一起" }, { key: "separate", label: "题目和答案分开" }].map((opt) => (
+        {[{ key: "together", label: "题目+答案在一起" }, { key: "separate", label: "题目和答案分开" }, { key: "byq", label: "逐题上传（最准）" }].map((opt) => (
           <span key={opt.key} className={"pp-lp-opt" + (paperLayout === opt.key ? " on" : "")} onClick={() => setPaperLayout(opt.key)}>{opt.label}</span>
         ))}
       </div>
 
-      {!isSep ? (
+      {isByq ? (
+        /* ── 逐题上传模式：每行一道大题，答案拍进对应题号，绝不错配 ── */
+        <>
+          <div style={{ fontSize: 11, color: "var(--mut)", marginBottom: 6 }}>每道大题一行：填题号、把这道题的答案拍照拖进/点选（小题都算这道大题内，可多张）；题目图选填。这样答案严格对应题号，不会配错。</div>
+          {byqRows.map((r, i) => (
+            <div key={i} className="pp-byq-row">
+              <input className="pp-byq-num" value={r.number} onChange={(e) => setByqRow(i, { number: e.target.value })} placeholder="题号" />
+              <div className="pp-byq-cells">
+                <div className={"pp-drop pp-drop-sm" + (r.aFiles.length ? " has" : "")}
+                  {...dragHandlers(() => {}, (fs) => setByqRow(i, { aFiles: [...r.aFiles, ...[...fs]] }))}
+                  onClick={(e) => { const inp = e.currentTarget.querySelector("input"); inp?.click(); }} role="button" tabIndex={0}>
+                  {r.aFiles.length ? `答案 ✓ ${r.aFiles.length} 张（再拖/点加）` : "拖入/点选 答案图"}
+                  <input type="file" accept="image/*" multiple hidden onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => { setByqRow(i, { aFiles: [...r.aFiles, ...[...e.target.files]] }); e.target.value = ""; }} />
+                </div>
+                <div className={"pp-drop pp-drop-sm" + (r.qFiles.length ? " has" : "")}
+                  {...dragHandlers(() => {}, (fs) => setByqRow(i, { qFiles: [...r.qFiles, ...[...fs]] }))}
+                  onClick={(e) => { const inp = e.currentTarget.querySelector("input"); inp?.click(); }} role="button" tabIndex={0}>
+                  {r.qFiles.length ? `题目 ✓ ${r.qFiles.length}` : "题目图（选填）"}
+                  <input type="file" accept="image/*" multiple hidden onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => { setByqRow(i, { qFiles: [...r.qFiles, ...[...e.target.files]] }); e.target.value = ""; }} />
+                </div>
+              </div>
+              {byqRows.length > 1 && <span className="pp-byq-rm" title="删除此题" onClick={() => removeByqRow(i)}>×</span>}
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, marginTop: 8, justifyContent: "center" }}>
+            <button className="pp-btn" onClick={addByqRow}>＋ 加一题</button>
+            <button className="pp-btn primary" disabled={busy} onClick={processByQuestion}>识别（{byqRows.filter((r) => r.aFiles.length).length} 题有答案）</button>
+          </div>
+        </>
+      ) : !isSep ? (
         /* ── 在一起模式：单区 ── */
         <>
           <div
