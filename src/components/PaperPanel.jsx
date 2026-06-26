@@ -571,6 +571,7 @@ function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer, onFrame
   const dropdown = answers.length > 0 ? (
     <select
       className="pp-rvi-pick"
+      style={{ flex: 1, minWidth: 0 }}
       value={matchedIdx}
       onChange={(e) => {
         const idx = Number(e.target.value);
@@ -601,9 +602,15 @@ function ReviewItemEditor({ item, answers = [], onChange, onFocusAnswer, onFrame
         onChange={(v) => onChange({ ...item, studentAnswer: v })}
         onFocus={() => onFocusAnswer?.(item)}
         onFrame={onFrame}
-        editExtra={dropdown}
         emptyHint="（未识别，点修改补充）"
       />
+      {/* 始终可见的"指认识别段"：配错题时一键换成正确的识别段，不用先进编辑 */}
+      {answers.length > 0 && (
+        <div className="pp-rvi-assign" style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 11, color: "var(--faint,#9aa0b4)", whiteSpace: "nowrap" }}>配错了？换一段 →</span>
+          {dropdown}
+        </div>
+      )}
       <div className="pp-rvi-score" style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, fontSize: 12, color: "var(--mut,#6b7184)" }}>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
           本题满分
