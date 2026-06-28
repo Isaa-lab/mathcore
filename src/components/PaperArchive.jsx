@@ -39,11 +39,12 @@ function useCSS() {
 
 const isImg = (name = "") => /\.(png|jpe?g|webp|gif|bmp|heic)$/i.test(name);
 
-function PaperRow({ paper, wb, userId, onDelete, onMock }) {
+function PaperRow({ paper, wb, userId, profiles = [], onDelete, onMock }) {
   const [files, setFiles] = useState(null); // null=未加载, []=无文件
   const [loading, setLoading] = useState(false);
   const [subject, setSubject] = useState(paper.subject || "");
   const [teacher, setTeacher] = useState("");
+  const [pick, setPick] = useState("");
   const [genBusy, setGenBusy] = useState(false);
 
   const loadFiles = useCallback(async () => {
@@ -84,8 +85,21 @@ function PaperRow({ paper, wb, userId, onDelete, onMock }) {
       )}
       <div className="pa-mockbar">
         <span className="pa-meta">按命题老师风格出模拟题：</span>
-        <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="科目" style={{ width: 100 }} />
-        <input value={teacher} onChange={(e) => setTeacher(e.target.value)} placeholder="命题老师" style={{ width: 90 }} />
+        <select value={pick} onChange={(e) => {
+          const v = e.target.value; setPick(v);
+          if (v === "__new__" || v === "") { setSubject(paper.subject || ""); setTeacher(""); }
+          else { const p = profiles.find((x) => x.id === v); if (p) { setSubject(p.subject); setTeacher(p.teacher_name); } }
+        }}>
+          <option value="">选老师档案…</option>
+          {profiles.map((p) => <option key={p.id} value={p.id}>{p.subject} · {p.teacher_name}（{p.sample_count || 0} 份）</option>)}
+          <option value="__new__">➕ 新建</option>
+        </select>
+        {(pick === "" || pick === "__new__") && (
+          <>
+            <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="科目" style={{ width: 90 }} />
+            <input value={teacher} onChange={(e) => setTeacher(e.target.value)} placeholder="命题老师" style={{ width: 80 }} />
+          </>
+        )}
         <button className="pa-mbtn" disabled={genBusy}
           onClick={async () => {
             if (!subject.trim() || !teacher.trim()) { alert("填一下科目和命题老师（用过改分单学过这位老师风格更准）"); return; }
@@ -138,6 +152,7 @@ export default function PaperArchive({ supabase, userId }) {
   const [papers, setPapers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [mock, setMock] = useState(null); // { questions, teacher }
+  const [profiles, setProfiles] = useState([]); // 已有老师档案
 
   const load = useCallback(async () => {
     if (!userId) { setPapers([]); setLoading(false); return; }
@@ -148,6 +163,7 @@ export default function PaperArchive({ supabase, userId }) {
   }, [wb, userId]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { (async () => { if (userId) { try { setProfiles(await wb.listTeacherProfiles(userId)); } catch { setProfiles([]); } } })(); }, [userId, wb]);
 
   const onDelete = async (paper) => {
     if (!window.confirm("删除这条上传记录？（仅删记录，不影响已批改的错题）")) return;
@@ -167,7 +183,7 @@ export default function PaperArchive({ supabase, userId }) {
       ) : shown.length === 0 ? (
         <div className="pa-empty">还没有上传记录。<br />在「错题工作台」上传卷子或用 AI 解题后，原文件会保存在这里供随时下载。</div>
       ) : (
-        shown.map((p) => <PaperRow key={p.id} paper={p} wb={wb} userId={userId} onDelete={onDelete} onMock={setMock} />)
+        shown.map((p) => <PaperRow key={p.id} paper={p} wb={wb} userId={userId} profiles={profiles} onDelete={onDelete} onMock={setMock} />)
       )}
       {mock && <MockModal data={mock} onClose={() => setMock(null)} />}
     </div>
